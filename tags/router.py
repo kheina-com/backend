@@ -1,0 +1,116 @@
+from typing import List
+
+from fastapi import APIRouter
+from fuzzly.models.post import PostId
+from fuzzly.models.tag import Tag, TagGroups
+
+from shared.auth import Scope
+from shared.exceptions.http_error import Forbidden
+from shared.server import Request
+
+from .models import InheritRequest, LookupRequest, RemoveInheritance, TagsRequest, UpdateRequest
+from .tagger import Tagger
+
+
+app = APIRouter(
+	prefix='/v1/tags',
+	tags=['tags'],
+)
+tagger = Tagger()
+
+
+@app.on_event('shutdown')
+async def shutdown() :
+	tagger.close()
+
+################################################## INTERNAL ##################################################
+@app.get('/i1/tags/{post_id}', response_model=TagGroups)
+async def i1tags(req: Request, post_id: PostId) -> TagGroups :
+	await req.user.verify_scope(Scope.internal)
+	return await tagger._fetch_tags_by_post(PostId(post_id))
+
+
+##################################################  PUBLIC  ##################################################
+@app.post('/add_tags', status_code=204)
+async def v1AddTags(req: Request, body: TagsRequest) :
+	await req.user.authenticated()
+	await tagger.addTags(
+		req.user,
+		body.post_id,
+		tuple(body.tags),
+	)
+
+
+@app.post('/remove_tags', status_code=204)
+async def v1RemoveTags(req: Request, body: TagsRequest) :
+	await req.user.authenticated()
+	await tagger.removeTags(
+		req.user,
+		body.post_id,
+		tuple(body.tags),
+	)
+
+
+@app.post('/inherit_tag', status_code=204)
+async def v1InheritTag(req: Request, body: InheritRequest) :
+	await tagger.inheritTag(
+		req.user,
+		body.parent_tag,
+		body.child_tag,
+		body.deprecate,
+	)
+
+
+@app.post('/remove_inheritance', status_code=204)
+async def v1RemoveInheritance(req: Request, body: RemoveInheritance) :
+	await tagger.removeInheritance(
+		req.user,
+		body.parent_tag,
+		body.child_tag,
+	)
+
+
+@app.patch('/tag/{tag}', status_code=204)
+async def v1UpdateTag(req: Request, tag: str, body: UpdateRequest) :
+	await req.user.authenticated()
+
+	if Scope.mod not in req.user.scope and body.deprecated is not None :
+		raise Forbidden('only mods can edit the deprecated status of a tag.')
+
+	await tagger.updateTag(
+		req.user,
+		tag,
+		body.name,
+		body.group,
+		body.owner,
+		body.description,
+		body.deprecated,
+	)
+
+
+@app.get('/fetch_tags/{post_id}', response_model=TagGroups)
+@app.get('/{post_id}', response_model=TagGroups)
+async def v1FetchTags(req: Request, post_id: PostId) :
+	# fastapi does not ensure that postids are in the correct form, so do it manually
+	return await tagger.fetchTagsByPost(req.user, PostId(post_id))
+
+
+@app.post('/lookup_tags', response_model=List[Tag])
+async def v1LookUpTags(req: Request, body: LookupRequest) :
+	return await tagger.tagLookup(req.user, body.tag)
+
+
+@app.get('/tag/{tag}', response_model=Tag)
+async def v1FetchTag(req: Request, tag: str) :
+	return await tagger.fetchTag(req.user, tag)
+
+
+@app.get('/user/{handle}', response_model=List[Tag])
+async def v1FetchUserTags(req: Request, handle: str) :
+	return await tagger.fetchTagsByUser(req.user, handle)
+
+
+@app.get('/frequently_used', response_model=TagGroups)
+async def v1FrequentlyUsed(req: Request) :
+	await req.user.authenticated()
+	return await tagger.frequentlyUsed(req.user)

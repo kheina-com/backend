@@ -1,0 +1,18 @@
+# kh-common[aerospike,auth,logging,sql]>=0.7.1
+# git+https://github.com/kheina-com/fuzzly.git@0.0.5
+aiofiles>=0.5.0
+ujson>=3.0.0
+aiohttp>=3.6.2
+uvicorn>=0.11.6
+fastapi>=0.111.0
+argon2-cffi>=20.1.0
+cryptography>=3.0
+gunicorn>=20.1.0
+patreon>=0.5.0
+# avrofastapi>=0.0.1
+python-multipart~=0.0.5
+PyExifTool~=0.4.11
+Wand~=0.6.7
+# pillow~=7.2.0
+async-cache~=1.1.1
+argon2-cffi~=23.1.0
