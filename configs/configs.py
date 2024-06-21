@@ -47,10 +47,10 @@ class Configs(SqlInterface) :
 
 	async def startup(self) :
 		self.Serializers = {
-			ConfigType.banner: (AvroSerializer(BannerStore), b64decode(await repo.addSchema(convert_schema(BannerStore)))),
-			ConfigType.costs: (AvroSerializer(CostsStore), b64decode((await repo.addSchema(convert_schema(CostsStore))))),
+			ConfigType.banner: (AvroSerializer(BannerStore), await repo.addSchema(convert_schema(BannerStore))),
+			ConfigType.costs: (AvroSerializer(CostsStore), await repo.addSchema(convert_schema(CostsStore))),
 		}
-		self.UserConfigFingerprint = b64decode((await repo.addSchema(convert_schema(UserConfig))))
+		self.UserConfigFingerprint = await repo.addSchema(convert_schema(UserConfig))
 		assert self.Serializers.keys() == set(ConfigType.__members__.values()), 'Did you forget to add serializers for a config?'
 		assert self.SerializerTypeMap.keys() == set(ConfigType.__members__.values()), 'Did you forget to add serializers for a config?'
 
@@ -219,7 +219,7 @@ class Configs(SqlInterface) :
 			blocked_tags=user_config.blocked_tags,
 			# TODO: internal tokens need to be added so that we can convert user ids to handles
 			blocked_users=None,
-			wallpaper=user_config.wallpaper.decode(),
+			wallpaper=user_config.wallpaper.decode() if user_config.wallpaper else None,
 		)
 
 

@@ -1,23 +1,21 @@
 from asyncio import Task, ensure_future, wait
 from collections import defaultdict
 from enum import Enum
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Self, Tuple, Union
 
-from fuzzly.internal import InternalClient
-from fuzzly.models.internal import InternalPost, InternalPosts, InternalSet, SetKVS
-from fuzzly.models.post import MediaType, Post, PostId, PostSize, Privacy, Rating
-from fuzzly.models.set import PostSet, Set, SetId, SetNeighbors
-from fuzzly.models.user import UserPrivacy
-
+from posts.models import InternalPost, MediaType, Post, PostId, PostSize, Privacy, Rating
+from posts.repository import Posts
 from shared.auth import KhUser, Scope
 from shared.caching import AerospikeCache, ArgsCache
-from shared.config.credentials import fuzzly_client_token
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
 from shared.hashing import Hashable
+from shared.models.user import UserPrivacy
 from shared.sql import SqlInterface
+from users.repository import Users
 
-from .models import UpdateSetRequest
+from .models import InternalSet, PostSet, Set, SetId, SetNeighbors, UpdateSetRequest
+from .repository import SetKVS, SetNotFound, Sets
 
 
 """
@@ -41,31 +39,19 @@ CREATE TABLE kheina.public.set_post (
 );
 """
 
-set_not_found_err: str = 'no data was found for the provided set id: {set_id}.'
 
-client: InternalClient = InternalClient(fuzzly_client_token)
+posts = Posts()
+users = Users()
 
 
-class Sets(SqlInterface, Hashable) :
-
-	def __init__(self: 'Sets') -> None :
-		SqlInterface.__init__(
-			self,
-			conversions={
-				Enum: lambda x: x.name,
-				PostId: int,
-				SetId: int,
-			},
-		)
-		Hashable.__init__(self)
-
+class Sets(Sets) :
 
 	async def _verify_authorized(user: KhUser, iset: InternalSet) -> bool :
 		return user.user_id == iset.set_id or await user.verify_scope(Scope.mod, raise_error=False)
 
 
 	@ArgsCache(float('inf'))
-	async def _id_to_privacy(self: 'Sets', privacy_id: int) -> Privacy :
+	async def _id_to_privacy(self: Self, privacy_id: int) -> Privacy :
 		data: Tuple[str] = await self.query_async("""
 			SELECT
 				type
@@ -80,7 +66,7 @@ class Sets(SqlInterface, Hashable) :
 
 
 	@ArgsCache(float('inf'))
-	async def _id_to_rating(self: 'Sets', rating_id: int) -> Rating :
+	async def _id_to_rating(self: Self, rating_id: int) -> Rating :
 		data: Tuple[str] = await self.query_async("""
 			SELECT
 				rating
@@ -95,7 +81,7 @@ class Sets(SqlInterface, Hashable) :
 
 
 	@ArgsCache(float('inf'))
-	async def _id_to_media_type(self: 'Sets', media_type_id: int) -> MediaType :
+	async def _id_to_media_type(self: Self, media_type_id: int) -> MediaType :
 		if media_type_id is None :
 			return None
 
@@ -117,7 +103,7 @@ class Sets(SqlInterface, Hashable) :
 
 
 	@ArgsCache(float('inf'))
-	async def _id_to_set_privacy(self: 'Sets', privacy_id: int) -> UserPrivacy :
+	async def _id_to_set_privacy(self: Self, privacy_id: int) -> UserPrivacy :
 		data: Tuple[str] = await self.query_async("""
 			SELECT
 				type
@@ -132,7 +118,7 @@ class Sets(SqlInterface, Hashable) :
 
 
 	@HttpErrorHandler('creating a set')
-	async def create_set(self: 'Sets', user: KhUser, title: str, privacy: UserPrivacy, description: Optional[str]) -> Set :
+	async def create_set(self: Self, user: KhUser, title: str, privacy: UserPrivacy, description: Optional[str]) -> Set :
 		set_id: SetId
 
 		while True :
@@ -173,79 +159,25 @@ class Sets(SqlInterface, Hashable) :
 		)
 
 		ensure_future(SetKVS.put_async(set_id, iset))
-		return await iset.set(client, user)
-
-
-	@AerospikeCache('kheina', 'sets', '{set_id}', _kvs=SetKVS)
-	async def _get_set(self: 'Sets', set_id: SetId) -> InternalSet :
-		data: Tuple[int, Optional[str], Optional[str], int, datetime, datetime] = await self.query_async("""
-			WITH f AS (
-				SELECT post_id AS first, index
-				FROM kheina.public.set_post
-				WHERE set_id = %s
-				ORDER BY set_post.index ASC
-				LIMIT 1
-			), l AS (
-				SELECT post_id AS last, index
-				FROM kheina.public.set_post
-				WHERE set_id = %s
-				ORDER BY set_post.index DESC
-				LIMIT 1
-			)
-			SELECT
-				owner,
-				title,
-				description,
-				privacy,
-				created,
-				updated,
-				f.first,
-				l.last,
-				l.index
-			FROM kheina.public.sets
-				INNER JOIN f
-					ON true
-				INNER JOIN l
-					ON true
-			WHERE sets.set_id = %s;
-			""",
-			(set_id.int(), set_id.int(), set_id.int()),
-			fetch_one=True,
-		)
-
-		if not data: 
-			raise NotFound(set_not_found_err.format(set_id=set_id))
-
-		return InternalSet(
-			set_id=set_id,
-			owner=data[0],
-			title=data[1],
-			description=data[2],
-			privacy=await self._id_to_set_privacy(data[3]),
-			created=data[4],
-			updated=data[5],
-			first=data[6],
-			last=data[7],
-			count=data[8] + 1,  # set indices are 0-indexed, so add one
-		)
+		return await self(iset, user)
 
 
 	@HttpErrorHandler('retrieving set')
-	async def get_set(self: 'Sets', user: KhUser, set_id: SetId) -> Set :
+	async def get_set(self: Self, user: KhUser, set_id: SetId) -> Set :
 		iset: InternalSet = await self._get_set(set_id)
 
-		if await iset.authorized(client, user) :
-			return await iset.set(client, user)
+		if await self.authorized(iset, user) :
+			return await self.set(iset, user)
 
-		raise NotFound(set_not_found_err.format(set_id=set_id))
+		raise NotFound(SetNotFound.format(set_id=set_id))
 
 
 	@HttpErrorHandler('updating a set')
-	async def update_set(self: 'Sets', user: KhUser, set_id: SetId, req: UpdateSetRequest) :
+	async def update_set(self: Self, user: KhUser, set_id: SetId, req: UpdateSetRequest) :
 		iset: InternalSet = await self._get_set(set_id)
 
 		if not Sets._verify_authorized(user, iset) :
-			raise NotFound(set_not_found_err.format(set_id=set_id))
+			raise NotFound(SetNotFound.format(set_id=set_id))
 
 		params: List[Union[str, UserPrivacy, None]] = []
 		bad_mask: List[str] = []
@@ -254,7 +186,7 @@ class Sets(SqlInterface, Hashable) :
 		for m in req.mask :
 
 			if m == 'owner' :
-				owner: int = await client.user_handle_to_id(req.owner)
+				owner: int = await users._handle_to_user_id(req.owner)
 				params.append(owner)
 				iset.owner = owner
 				query.append(m + ' = %s')
@@ -303,11 +235,11 @@ class Sets(SqlInterface, Hashable) :
 
 
 	@HttpErrorHandler('deleting a set')
-	async def delete_set(self: 'Sets', user: KhUser, set_id: SetId) -> None :
+	async def delete_set(self: Self, user: KhUser, set_id: SetId) -> None :
 		iset: InternalSet = await self._get_set(set_id)
 
 		if not Sets._verify_authorized(user, iset) :
-			raise NotFound(set_not_found_err.format(set_id=set_id))
+			raise NotFound(SetNotFound.format(set_id=set_id))
 
 		await self.query_async("""
 			DELETE FROM kheina.public.set_post
@@ -322,17 +254,17 @@ class Sets(SqlInterface, Hashable) :
 		await SetKVS.remove_async(set_id)
 
 
-	async def add_post_to_set(self: 'Sets', user: KhUser, post_id: PostId, set_id: SetId, index: int) -> None :
+	async def add_post_to_set(self: Self, user: KhUser, post_id: PostId, set_id: SetId, index: int) -> None :
 		iset_task: Task[InternalSet] = ensure_future(self._get_set(set_id))
-		ipost: InternalPost = await client.post(post_id)
+		ipost: InternalPost = await posts._get_post(post_id)
 
-		if not await ipost.authorized(client, user) :
+		if not await posts.authorized(ipost, user) :
 			raise NotFound(f'no data was found for the provided post id: {post_id}.')
 
 		iset: InternalSet = await iset_task
 
-		if not await iset.authorized(client, user) :
-			raise NotFound(set_not_found_err.format(set_id=set_id))
+		if not await self.authorized(iset, user) :
+			raise NotFound(SetNotFound.format(set_id=set_id))
 
 		await self.query_async("""
 			WITH i AS (
@@ -365,17 +297,17 @@ class Sets(SqlInterface, Hashable) :
 		ensure_future(SetKVS.put_async(set_id, iset))
 
 
-	async def remove_post_from_set(self: 'Sets', user: KhUser, post_id: PostId, set_id: SetId) -> None :
+	async def remove_post_from_set(self: Self, user: KhUser, post_id: PostId, set_id: SetId) -> None :
 		iset_task: Task[InternalSet] = ensure_future(self._get_set(set_id))
-		ipost: InternalPost = await client.post(post_id)
+		ipost: InternalPost = await posts._get_post(post_id)
 
-		if not await ipost.authorized(client, user) :
+		if not await posts.authorized(ipost, user) :
 			raise NotFound(f'no data was found for the provided post id: {post_id}.')
 
 		iset: InternalSet = await iset_task
 
-		if not await iset.authorized(client, user) :
-			raise NotFound(set_not_found_err.format(set_id=set_id))
+		if not await self.authorized(iset, user) :
+			raise NotFound(SetNotFound.format(set_id=set_id))
 
 		await self.query_async("""
 			WITH deleted AS (
@@ -401,7 +333,7 @@ class Sets(SqlInterface, Hashable) :
 		ensure_future(SetKVS.put_async(set_id, iset))
 
 
-	async def get_post_sets(self: 'Sets', user: KhUser, post_id: PostId) -> List[PostSet] :
+	async def get_post_sets(self: Self, user: KhUser, post_id: PostId) -> List[PostSet] :
 		neighbor_range: int = 3  # const
 		data: List[Tuple[
 			int, int, Optional[str], Optional[str], int, datetime, datetime,  # set
@@ -484,7 +416,7 @@ class Sets(SqlInterface, Hashable) :
 
 		# both tuples are formatted: index, object. set is the index of the parent post. posts is index of the neighbors
 		isets: List[Tuple[int, InternalSet]] = []
-		posts: Dict[int, List[Tuple[int, InternalPost]]] = defaultdict(lambda : [])
+		iposts: Dict[int, List[Tuple[int, InternalPost]]] = defaultdict(lambda : [])
 
 		sets_made: set = set()
 		for row in data :
@@ -506,7 +438,7 @@ class Sets(SqlInterface, Hashable) :
 					),
 				))
 
-			posts[row[0]].append((
+			iposts[row[0]].append((
 				row[8],
 				InternalPost(
 					post_id=row[9],
@@ -529,15 +461,15 @@ class Sets(SqlInterface, Hashable) :
 
 		# again, this is index, set task
 		allowed: List[Tuple[int, Task[Set]]] = [
-			(index, ensure_future(iset.set(client, user))) for index, iset in isets if await iset.authorized(client, user)
+			(index, ensure_future(self.set(iset, user))) for index, iset in isets if await self.authorized(iset, user)
 		]
 
 		sets: List[PostSet] = []
 
 		for index, set_task in allowed :
 			s: Set = await set_task
-			before: Task[List[Post]] = ensure_future(InternalPosts(post_list=list(map(lambda x : x[1], sorted(filter(lambda x : x[0] < index, posts[s.set_id.int()]), key=lambda x : x[0], reverse=True)))).posts(client, user))
-			after: Task[List[Post]] = ensure_future(InternalPosts(post_list=list(map(lambda x : x[1], sorted(filter(lambda x : x[0] > index, posts[s.set_id.int()]), key=lambda x : x[0], reverse=False)))).posts(client, user))
+			before: Task[List[Post]] = ensure_future(posts.posts(list(map(lambda x : x[1], sorted(filter(lambda x : x[0] < index, iposts[s.set_id.int()]), key=lambda x : x[0], reverse=True))), user))
+			after: Task[List[Post]] = ensure_future(posts.posts(list(map(lambda x : x[1], sorted(filter(lambda x : x[0] > index, iposts[s.set_id.int()]), key=lambda x : x[0], reverse=False))), user))
 			sets.append(
 				PostSet(
 					set_id=s.set_id,
@@ -561,8 +493,8 @@ class Sets(SqlInterface, Hashable) :
 		return sets
 
 
-	async def get_user_sets(self: 'Sets', user: KhUser, handle: str) -> List[Set] :
-		owner: int = await client.user_handle_to_id(handle)
+	async def get_user_sets(self: Self, user: KhUser, handle: str) -> List[Set] :
+		owner: int = await users._handle_to_user_id(handle)
 		# TODO: MISSING FINAL SELECT
 		data: List[Tuple[int, int, Optional[str], Optional[str], int, datetime, datetime]] = await self.query_async("""
 			WITH user_sets AS (
@@ -611,7 +543,7 @@ class Sets(SqlInterface, Hashable) :
 		]
 
 		sets: List[Task[Set]] = [
-			ensure_future(iset.set(client, user)) for iset in isets if await iset.authorized(client, user)
+			ensure_future(self.set(iset, user)) for iset in isets if await self.authorized(iset, user)
 		]
 
 		if sets :

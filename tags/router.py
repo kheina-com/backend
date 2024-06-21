@@ -1,14 +1,13 @@
 from typing import List
 
 from fastapi import APIRouter
-from fuzzly.models.post import PostId
-from fuzzly.models.tag import Tag, TagGroups
 
+from posts.models import PostId
 from shared.auth import Scope
 from shared.exceptions.http_error import Forbidden
 from shared.server import Request
 
-from .models import InheritRequest, LookupRequest, RemoveInheritance, TagsRequest, UpdateRequest
+from .models import InheritRequest, InternalTag, LookupRequest, RemoveInheritance, Tag, TagGroupPortable, TagGroups, TagsRequest, UpdateRequest
 from .tagger import Tagger
 
 

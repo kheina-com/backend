@@ -8,6 +8,7 @@ from google.api_core.exceptions import RetryError
 from google.auth import compute_engine
 from google.cloud import logging as google_logging
 
+from .config.constants import environment
 from .config.repo import name as repo_name
 from .config.repo import short_hash
 from .utilities import getFullyQualifiedClassName
@@ -31,7 +32,7 @@ class TerminalAgent :
 
 class LogHandler(logging.Handler) :
 
-	logging_available = True
+	logging_available = not environment.is_local()
 
 	def __init__(self, name: str, *args: Tuple[Any], structs:Tuple[type]=(dict, list, tuple), **kwargs:Dict[str, Any]) -> None :
 		logging.Handler.__init__(self, *args, **kwargs)

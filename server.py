@@ -2,19 +2,19 @@ from fastapi import FastAPI
 from starlette.middleware.exceptions import ExceptionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-import account
-import configs
-import posts
-import sets
-import tags
-import uploader
-import users
+from account.router import app as account
+from configs.router import app as configs
+from posts.router import app as posts
+from sets.router import app as sets
 from shared.config.constants import environment
 from shared.exceptions.base_error import BaseError
 from shared.exceptions.handler import jsonErrorHandler
 from shared.server.middleware import CustomHeaderMiddleware, HeadersToSet
 from shared.server.middleware.auth import KhAuthMiddleware
 from shared.server.middleware.cors import KhCorsMiddleware
+from tags.router import app as tags
+from uploader.router import app as uploader
+from users.router import app as users
 
 
 app = FastAPI()
@@ -76,14 +76,15 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts={
 })
 app.add_middleware(KhAuthMiddleware, required=False)
 
-app.include_router(account.router.app)
-app.include_router(configs.router.app)
-app.include_router(posts.router.app)
-app.include_router(sets.router.app)
-app.include_router(tags.router.app)
-app.include_router(uploader.router.app)
-app.include_router(users.router.app)
+app.include_router(account)
+app.include_router(configs)
+app.include_router(posts)
+app.include_router(sets)
+app.include_router(tags)
+app.include_router(uploader)
+app.include_router(users)
 
 if __name__ == '__main__' :
 	from uvicorn.main import run
+	print("==> environment:", environment)
 	run(app, host='0.0.0.0', port=5000)

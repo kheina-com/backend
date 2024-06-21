@@ -6,10 +6,10 @@ from functools import partial, wraps
 from time import time
 from typing import Any, Dict, Iterable, List, Set, Tuple
 
-from kh_common.config.constants import environment
-from kh_common.utilities import __clear_cache__
-
 import aerospike
+
+from ..config.constants import environment
+from ..utilities import __clear_cache__
 
 
 class KeyValueStore :

@@ -2,12 +2,13 @@ from fastapi import APIRouter
 from fastapi.responses import Response
 
 from shared.auth import Scope
+from shared.config.constants import environment
 from shared.datetime import datetime
 from shared.server import Request
 
 from .account import Account, auth
 from .models import BotCreateResponse, BotLoginRequest, BotType, ChangeHandle, ChangePasswordRequest, CreateAccountRequest, FinalizeAccountRequest, LoginRequest, LoginResponse
-from shared.config.constants import environment
+
 
 app = APIRouter(
 	prefix='/v1/account',

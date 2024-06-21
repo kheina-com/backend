@@ -4,25 +4,22 @@ from datetime import timedelta
 from math import ceil
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from kh_common.auth import KhUser
-from kh_common.caching import AerospikeCache, ArgsCache, SimpleCache
-from kh_common.config.credentials import fuzzly_client_token
-from kh_common.datetime import datetime
-from kh_common.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
-from kh_common.sql.query import Field, Join, JoinType, Operator, Order, Query, Table, Value, Where
-from models import SearchResults
-from scoring import Scoring
+from sets.models import InternalSet, SetId
+from sets.repository import Sets
+from shared.auth import KhUser
+from shared.caching import AerospikeCache, ArgsCache, SimpleCache
+from shared.datetime import datetime
+from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
+from shared.sql.query import Field, Join, JoinType, Operator, Order, Query, Table, Value, Where
 
-from fuzzly.internal import InternalClient
-from fuzzly.models.internal import InternalPost, InternalPosts, InternalSet, PostKVS
-from fuzzly.models.post import MediaType, Post, PostId, PostSize, PostSort, Privacy, Rating, Score
-from fuzzly.models.set import SetId
+from .models import InternalPost, MediaType, Post, PostId, PostSize, PostSort, Privacy, Rating, Score, SearchResults
+from .repository import Posts, users
 
 
-client: InternalClient = InternalClient(fuzzly_client_token)
+sets = Sets()
 
 
-class Posts(Scoring) :
+class Posts(Posts) :
 
 	def _normalize_tag(tag: str) :
 		if tag.startswith('set:') :
@@ -114,7 +111,7 @@ class Posts(Scoring) :
 		"""
 		returns an estimate on the total number of results available for a given query
 		"""
-		total: int = await self.post_count('_')
+		total: int = await self.post_count('_') or 1
 		
 		# since this is just an estimate, after all, we're going to count the tags with the fewest posts higher
 		# TODO: this value may need to be revisited, or removed altogether, or a more intelligent estimation system
@@ -135,13 +132,13 @@ class Posts(Scoring) :
 
 			if tag.startswith('set:') :
 				# sets track their own counts
-				iset: InternalSet = await client.set(tag[4:])
+				iset: InternalSet = await sets._get_set(tag[4:])
 				counts.append((iset.count, invert))
 				continue
 
 			if tag.startswith('@') :
 				handle: str = tag[1:]
-				user_id: int = await client.user_handle_to_id(handle)
+				user_id: int = await users._handle_to_user_id(handle)
 				tag = f'@{user_id}'
 
 			counts.append((await self.post_count(tag), invert))
@@ -162,54 +159,8 @@ class Posts(Scoring) :
 		return ceil(count)
 
 
-	def parse_response(self, data: List[List[Any]]) -> List[InternalPost] :
-			posts: List[InternalPost] = []
-
-			for row in data :
-				post = InternalPost(
-					post_id=row[0],
-					title=row[1],
-					description=row[2],
-					rating=self._get_rating_map()[row[3]],
-					parent=row[4],
-					created=row[5],
-					updated=row[6],
-					filename=row[7],
-					media_type=self._get_media_type_map()[row[8]],
-					size=PostSize(width=row[9], height=row[10]) if row[9] and row[10] else None,
-					user_id=row[11],
-					privacy=self._get_privacy_map()[row[12]],
-					thumbhash=row[13],
-				)
-				posts.append(post)
-				ensure_future(PostKVS.put_async(post.post_id, post))
-
-			return posts
-
-
-	def internal_select(self, query: Query) -> Callable[[List[List[Any]]], List[InternalPost]] :
-		query.select(
-			Field('posts', 'post_id'),
-			Field('posts', 'title'),
-			Field('posts', 'description'),
-			Field('posts', 'rating'),
-			Field('posts', 'parent'),
-			Field('posts', 'created_on'),
-			Field('posts', 'updated_on'),
-			Field('posts', 'filename'),
-			Field('posts', 'media_type_id'),
-			Field('posts', 'width'),
-			Field('posts', 'height'),
-			Field('posts', 'uploader'),
-			Field('posts', 'privacy_id'),
-			Field('posts', 'thumbhash'),
-		)
-
-		return self.parse_response
-
-
 	@ArgsCache(60)
-	async def _fetch_posts(self, sort: PostSort, tags: Tuple[str], count: int, page: int) -> InternalPosts :
+	async def _fetch_posts(self, sort: PostSort, tags: Tuple[str], count: int, page: int) -> List[InternalPost] :
 		idk = { }
 
 		if tags :
@@ -560,7 +511,7 @@ class Posts(Scoring) :
 			**idk,
 		})
 
-		return InternalPosts(post_list=parser(await self.query_async(query, fetch_all=True)))
+		return parser(await self.query_async(query, fetch_all=True))
 
 
 	@HttpErrorHandler('fetching posts')
@@ -578,8 +529,8 @@ class Posts(Scoring) :
 			tags = None
 			total = ensure_future(self.post_count('_'))
 
-		iposts: InternalPosts = await self._fetch_posts(sort, tags, count, page)
-		posts: List[Post] = await iposts.posts(client, user)
+		iposts: List[InternalPost] = await self._fetch_posts(sort, tags, count, page)
+		posts: List[Post] = await self.posts(iposts, user)
 
 		return SearchResults(
 			posts = posts,
@@ -638,49 +589,18 @@ class Posts(Scoring) :
 		})
 
 
-	@AerospikeCache('kheina', 'posts', '{post_id}', _kvs=PostKVS)
-	async def _get_post(self, post_id: PostId) -> InternalPost :
-		data = await self.query_async("""
-			SELECT
-				posts.post_id,
-				posts.title,
-				posts.description,
-				posts.rating,
-				posts.parent,
-				posts.created_on,
-				posts.updated_on,
-				posts.filename,
-				posts.media_type_id,
-				posts.width,
-				posts.height,
-				posts.uploader,
-				posts.privacy_id,
-				posts.thumbhash
-			FROM kheina.public.posts
-			WHERE posts.post_id = %s;
-			""",
-			(post_id.int(),),
-			fetch_one=True,
-		)
-
-		if not data :
-			raise NotFound(f'no data was found for the provided post id: {post_id}.')
-
-		return self.parse_response([data])[0]
-
-
 	@HttpErrorHandler('retrieving post')
 	async def getPost(self, user: KhUser, post_id: PostId) -> Post :
 		post: InternalPost = await self._get_post(post_id)
 
-		if await post.authorized(client, user) :
-			return await post.post(client, user)
+		if await self.authorized(post, user) :
+			return await self.post(post, user)
 
 		raise NotFound(f'no data was found for the provided post id: {post_id}.')
 
 
 	@ArgsCache(5)
-	async def _getComments(self, post_id: PostId, sort: PostSort, count: int, page: int) -> InternalPosts :
+	async def _getComments(self, post_id: PostId, sort: PostSort, count: int, page: int) -> List[InternalPost] :
 		# TODO: fix new and old sorts
 		data = await self.query_async(f"""
 			SELECT
@@ -715,7 +635,7 @@ class Posts(Scoring) :
 			fetch_all=True,
 		)
 
-		return InternalPosts(post_list=self.parse_response(data))
+		return self.parse_response(data)
 
 
 	@HttpErrorHandler('retrieving comments')
@@ -724,8 +644,8 @@ class Posts(Scoring) :
 		self._validateCount(count)
 
 		# TODO: if there ever comes a time when there are thousands of comments on posts, this may need to be revisited.
-		posts: InternalPosts = await self._getComments(post_id, sort, count, page)
-		return await posts.posts(client, user)
+		posts: List[InternalPost] = await self._getComments(post_id, sort, count, page)
+		return await self.posts(posts, user)
 
 
 	@ArgsCache(10)
@@ -768,9 +688,9 @@ class Posts(Scoring) :
 		)
 
 		parser = self.internal_select(query)
-		posts: InternalPosts = InternalPosts(post_list=parser(await self.query_async(query, fetch_all=True)))
+		posts: List[InternalPost] = parser(await self.query_async(query, fetch_all=True))
 
-		return await posts.posts(client, user)
+		return await self.posts(posts, user)
 
 
 	@ArgsCache(10)
@@ -811,9 +731,9 @@ class Posts(Scoring) :
 		)
 
 		parser = self.internal_select(query)
-		posts: InternalPosts = InternalPosts(post_list=parser(await self.query_async(query, fetch_all=True)))
+		posts: List[InternalPost] = parser(await self.query_async(query, fetch_all=True))
 
-		return now, await posts.posts(client, user)
+		return now, await self.posts(posts, user)
 
 
 	@HttpErrorHandler('retrieving user posts')
@@ -824,8 +744,8 @@ class Posts(Scoring) :
 
 		tags: Tuple[str] = (f'@{handle}',)
 		total: Task[int] = ensure_future(self.total_results(tags))
-		iposts: InternalPosts = await self._fetch_posts(PostSort.new, tags, count, page)
-		posts: List[Post] = await iposts.posts(client, user)
+		iposts: List[InternalPost] = await self._fetch_posts(PostSort.new, tags, count, page)
+		posts: List[Post] = await self.posts(iposts, user)
 
 		return SearchResults(
 			posts=posts,
@@ -835,7 +755,7 @@ class Posts(Scoring) :
 		)
 
 
-	async def _fetch_own_posts(self, user_id: int, sort: PostSort, count: int, page: int) -> InternalPosts :
+	async def _fetch_own_posts(self, user_id: int, sort: PostSort, count: int, page: int) -> List[InternalPost] :
 		query = Query(
 			Table('kheina.public.posts')
 		).join(
@@ -887,7 +807,7 @@ class Posts(Scoring) :
 			)
 
 		parser = self.internal_select(query)
-		return InternalPosts(post_list=parser(await self.query_async(query, fetch_all=True)))
+		return parser(await self.query_async(query, fetch_all=True))
 
 
 	@HttpErrorHandler("retrieving user's own posts")
@@ -896,8 +816,8 @@ class Posts(Scoring) :
 		self._validatePageNumber(page)
 		self._validateCount(count)
 
-		posts: InternalPosts = await self._fetch_own_posts(user.user_id, sort, count, page)
-		return await posts.posts(client, user)
+		posts: List[InternalPost] = await self._fetch_own_posts(user.user_id, sort, count, page)
+		return await self.posts(posts, user)
 
 
 	@HttpErrorHandler("retrieving user's drafts")
@@ -933,6 +853,6 @@ class Posts(Scoring) :
 		)
 
 		parser = self.internal_select(query)
-		posts: InternalPosts = InternalPosts(post_list=parser(await self.query_async(query, fetch_all=True)))
+		posts: List[InternalPost] = parser(await self.query_async(query, fetch_all=True))
 
-		return await posts.posts(client, user)
+		return await self.posts(posts, user)

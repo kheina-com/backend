@@ -2,14 +2,9 @@ from asyncio import ensure_future
 from math import log10, sqrt
 from typing import Optional, Union
 
-from fuzzly.models._database import DBI, ScoreCache, VoteCache
-from fuzzly.models.internal import InternalScore
-from fuzzly.models.post import PostId, Score
 from scipy.stats import norm
 
-from .auth import KhUser
 from .config.constants import epoch
-from .exceptions.http_error import BadRequest
 
 
 """
@@ -56,91 +51,3 @@ def best(up: int, total: int) -> float :
 		return 0
 	s: float = up / total
 	return s - (s - 0.5) * 2**(-log10(total + 1))
-
-
-class Scoring(DBI) :
-
-	def _validateVote(self, vote: Optional[bool]) -> None :
-		if not isinstance(vote, (bool, type(None))) :
-			raise BadRequest('the given vote is invalid (vote value must be integer. 1 = up, -1 = down, 0 or null to remove vote)')
-
-
-	async def _vote(self, user: KhUser, post_id: PostId, upvote: Optional[bool]) -> Score :
-		self._validateVote(upvote)
-		with self.transaction() as transaction :
-			data = await transaction.query_async("""
-				INSERT INTO kheina.public.post_votes
-				(user_id, post_id, upvote)
-				VALUES
-				(%s, %s, %s)
-				ON CONFLICT ON CONSTRAINT post_votes_pkey DO 
-					UPDATE SET
-						upvote = %s
-					WHERE post_votes.user_id = %s
-						AND post_votes.post_id = %s;
-
-				SELECT COUNT(post_votes.upvote), SUM(post_votes.upvote::int), posts.created_on
-				FROM kheina.public.posts
-					LEFT JOIN kheina.public.post_votes
-						ON post_votes.post_id = posts.post_id
-							AND post_votes.upvote IS NOT NULL
-				WHERE posts.post_id = %s
-				GROUP BY posts.post_id;
-				""",
-				(
-					user.user_id, post_id.int(), upvote,
-					upvote, user.user_id, post_id.int(),
-					post_id.int(),
-				),
-				fetch_one=True,
-			)
-
-			up: int = data[1] or 0
-			total: int = data[0] or 0
-			down: int = total - up
-			created: float = data[2].timestamp()
-
-			top: int = up - down
-			h: float = hot(up, down, created)
-			best: float = confidence(up, total)
-			cont: float = controversial(up, down)
-
-			await transaction.query_async("""
-				INSERT INTO kheina.public.post_scores
-				(post_id, upvotes, downvotes, top, hot, best, controversial)
-				VALUES
-				(%s, %s, %s, %s, %s, %s, %s)
-				ON CONFLICT ON CONSTRAINT post_scores_pkey DO
-					UPDATE SET
-						upvotes = %s,
-						downvotes = %s,
-						top = %s,
-						hot = %s,
-						best = %s,
-						controversial = %s
-					WHERE post_scores.post_id = %s;
-				""",
-				(
-					post_id.int(), up, down, top, h, best, cont,
-					up, down, top, h, best, cont, post_id.int(),
-				),
-			)
-
-			transaction.commit()
-
-		score: InternalScore = InternalScore(
-			up = up,
-			down = down,
-			total = total,
-		)
-		ensure_future(ScoreCache.put_async(post_id, score))
-
-		user_vote = 0 if upvote is None else (1 if upvote else -1)
-		ensure_future(VoteCache.put_async(f'{user.user_id}|{post_id}', user_vote))
-
-		return Score(
-			up = score.up,
-			down = score.down,
-			total = score.total,
-			user_vote = user_vote,
-		)

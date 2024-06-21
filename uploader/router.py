@@ -2,7 +2,8 @@ from typing import Dict, List, Optional, Union
 
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import UJSONResponse
-from fuzzly.models.post import PostId
+
+from posts.models import PostId
 from shared.server import NoContentResponse, Request, ServerApp
 
 from .models import CreateRequest, IconRequest, PrivacyRequest, UpdateRequest

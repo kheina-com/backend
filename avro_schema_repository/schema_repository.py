@@ -27,8 +27,11 @@ class SchemaRepository(SqlInterface) :
 
 	@HttpErrorHandler('retrieving schema')
 	@AerospikeCache('kheina', 'avro_schemas', '{fingerprint}', _kvs=KVS)
-	async def getSchema(self, fingerprint: str) -> AvroSchema :
-		fp: int = int_from_bytes(b64decode(fingerprint))
+	async def getSchema(self, fingerprint: bytes) -> bytes :
+		"""
+		returns the avro schema as a json encoded string
+		"""
+		fp: int = int_from_bytes(fingerprint)
 
 		data: List[bytes] = await self.query_async("""
 			SELECT schema
@@ -43,11 +46,11 @@ class SchemaRepository(SqlInterface) :
 		if not data :
 			raise NotFound('no data was found for the provided schema fingerprint.')
 
-		return ujson.loads(data[0].tobytes())
+		return data[0].tobytes()
 
 
 	@HttpErrorHandler('saving schema')
-	async def addSchema(self, schema: AvroSchema) -> str :
+	async def addSchema(self, schema: AvroSchema) -> bytes :
 		data: bytes = ujson.dumps(schema).encode()
 		fingerprint: int = crc(data)
 
@@ -65,7 +68,7 @@ class SchemaRepository(SqlInterface) :
 			commit=True,
 		)
 
-		fp: str = b64encode(int_to_bytes(fingerprint)).decode()
-		KVS.put(fp, schema)
+		fp: bytes = int_to_bytes(fingerprint)
+		KVS.put(b64encode(fp).decode(), schema)
 
 		return fp

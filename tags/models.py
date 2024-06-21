@@ -1,9 +1,41 @@
+from enum import Enum, unique
 from typing import Dict, List, Optional
 
-from fuzzly.models.post import PostId, PostIdValidator
-from fuzzly.models.tag import TagGroupPortable
-from fuzzly.models.user import UserPortable
 from pydantic import BaseModel
+
+from posts.models import PostId, PostIdValidator
+from shared.models.user import UserPortable
+
+
+@unique
+class TagGroupPortable(Enum) :
+	artist: str = 'artist'
+	subject: str = 'subject'
+	sponsor: str = 'sponsor'
+	species: str = 'species'
+	gender: str = 'gender'
+	misc: str = 'misc'
+
+
+class TagGroups(Dict[TagGroupPortable, List[str]]) :
+	# TODO: write a better docstr for this
+	"""
+```python
+class TagGroups(Dict[TagGroupPortable, List[str]]) :
+	pass
+```
+"""
+	pass
+
+
+class Tag(BaseModel) :
+	tag: str
+	owner: Optional[UserPortable]
+	group: TagGroupPortable
+	deprecated: bool
+	inherited_tags: List[str]
+	description: Optional[str]
+	count: int
 
 
 class LookupRequest(BaseModel) :
@@ -38,24 +70,10 @@ class TagPortable(str) :
 	pass
 
 
-class TagGroups(Dict[TagGroupPortable, List[TagPortable]]) :
-	pass
-
-
-class Tag(BaseModel) :
-	tag: str
-	owner: Optional[UserPortable]
-	group: TagGroupPortable
-	deprecated: bool
-	inherited_tags: List[TagPortable]
-	description: Optional[str]
-	count: int
-
-
 class InternalTag(BaseModel) :
-	tag: str
+	name: str
 	owner: Optional[int]
-	group: str
+	group: TagGroupPortable
 	deprecated: bool
 	inherited_tags: List[str]
 	description: Optional[str]

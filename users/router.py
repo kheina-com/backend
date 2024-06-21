@@ -1,10 +1,9 @@
 from typing import List
 
 from fastapi import APIRouter
-from fuzzly.models.internal import InternalUser
-from fuzzly.models.user import Badge, Follow, SetMod, SetVerified, UpdateSelf, User
 
 from shared.models.auth import Scope
+from shared.models.user import Badge, Follow, InternalUser, SetMod, SetVerified, UpdateSelf, User
 from shared.server import Request
 
 from .users import Users
@@ -33,7 +32,6 @@ async def i1User(req: Request, user_id: int) :
 ##################################################  PUBLIC  ##################################################
 @app.get('/self', response_model=User)
 async def v1FetchSelf(req: Request) -> User :
-	print('==> req.user:', req.user)
 	await req.user.authenticated()
 	return await users.getSelf(req.user)
 

@@ -3,22 +3,20 @@ from html import escape
 from typing import List
 from urllib.parse import quote
 
-from shared.backblaze import B2Interface
-from shared.config.constants import environment, users_host
-from shared.gateway import Gateway
-from shared.models.auth import Scope
-from shared.models.user import User
-from shared.server import Request, Response, ServerApp
-from models import BaseFetchRequest, FetchCommentsRequest, FetchPostsRequest, GetUserPostsRequest, RssDateFormat, RssDescription, RssFeed, RssItem, RssMedia, RssTitle, SearchResults, TimelineRequest, VoteRequest
-
-from fuzzly.models.internal import InternalPost
-from fuzzly.models.post import Post, PostId, Score
-from posts.posts import Posts
 from fastapi import APIRouter
+
+from shared.backblaze import B2Interface
+from shared.config.constants import environment
+from shared.models.auth import Scope
+from shared.server import Request, Response, ServerApp
 from users.users import Users
 
+from .models import BaseFetchRequest, FetchCommentsRequest, FetchPostsRequest, GetUserPostsRequest, InternalPost, Post, PostId, RssDateFormat, RssDescription, RssFeed, RssItem, RssMedia, RssTitle, Score, SearchResults, TimelineRequest, VoteRequest
+from .posts import Posts
+
+
 app = APIRouter(
-	prefix='/posts',
+	prefix='/v1/posts',
 	tags=['posts'],
 )
 b2 = B2Interface()
@@ -59,12 +57,6 @@ async def i1Vote(req: Request, post_id: PostId, user_id: int) -> InternalPost :
 
 
 ##################################################  PUBLIC  ##################################################
-@app.get('/post/{post_id}', responses={ 200: { 'model': Post } })
-async def v1Post(req: Request, post_id: PostId) -> Post :
-	# fastapi doesn't parse to PostId automatically, only str
-	return await posts.getPost(req.user, PostId(post_id))
-
-
 @app.post('/vote', responses={ 200: { 'model': Score } })
 async def v1Vote(req: Request, body: VoteRequest) -> Score :
 	await req.user.authenticated(Scope.user)
@@ -72,7 +64,7 @@ async def v1Vote(req: Request, body: VoteRequest) -> Score :
 	return await posts.vote(req.user, body.post_id, vote)
 
 
-@app.post('/posts', responses={ 200: { 'model': SearchResults } })
+@app.post('/', responses={ 200: { 'model': SearchResults } })
 async def v1FetchPosts(req: Request, body: FetchPostsRequest) -> SearchResults :
 	return await posts.fetchPosts(req.user, body.sort, body.tags, body.count, body.page)
 
@@ -153,3 +145,8 @@ async def v1Rss(req: Request) -> Response :
 			]),
 		),
 	)
+
+@app.get('/{post_id}', responses={ 200: { 'model': Post } })
+async def v1Post(req: Request, post_id: PostId) -> Post :
+	# fastapi doesn't parse to PostId automatically, only str
+	return await posts.getPost(req.user, PostId(post_id))

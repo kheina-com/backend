@@ -1,13 +1,14 @@
-from typing import List, Optional, Union
+from datetime import datetime
+from enum import Enum, unique
+from typing import Any, Dict, List, Optional, Union
 
-from shared.config.constants import Environment, environment
-from shared.config.repo import short_hash
+from kh_common.base64 import b64encode
 from pydantic import BaseModel, validator
 
-from fuzzly.models.post import Post, PostId, PostSort
-
-
-PostIdValidator = validator('post_id', pre=True, always=True, allow_reuse=True)(PostId)
+from shared.auth import KhUser, Scope
+from shared.config.constants import environment
+from shared.config.repo import short_hash
+from shared.models._shared import PostId, PostIdValidator, PostSize, PostSort, Privacy, Rating, Score, UserPortable, _post_id_converter
 
 
 class VoteRequest(BaseModel) :
@@ -42,6 +43,54 @@ class GetUserPostsRequest(BaseModel) :
 	page: Optional[int] = 1
 
 
+class MediaType(BaseModel) :
+	file_type: str
+	mime_type: str
+
+
+@unique
+class TagGroupPortable(Enum) :
+	artist: str = 'artist'
+	subject: str = 'subject'
+	sponsor: str = 'sponsor'
+	species: str = 'species'
+	gender: str = 'gender'
+	misc: str = 'misc'
+
+
+class TagGroups(Dict[TagGroupPortable, List[str]]) :
+	pass
+
+
+def _thumbhash_converter(value: Any) -> Any :
+	if value and not isinstance(value, str) :
+		return b64encode(value)
+
+	return value
+
+
+class Post(BaseModel) :
+	_post_id_validator = PostIdValidator
+	_post_id_converter = validator('parent', pre=True, always=True, allow_reuse=True)(_post_id_converter)
+	_thumbhash_converter = validator('thumbhash', pre=True, always=True, allow_reuse=True)(_thumbhash_converter)
+
+	post_id: PostId
+	title: Optional[str]
+	description: Optional[str]
+	user: UserPortable
+	score: Optional[Score]
+	rating: Rating
+	parent: Optional[PostId]
+	privacy: Privacy
+	created: Optional[datetime]
+	updated: Optional[datetime]
+	filename: Optional[str]
+	media_type: Optional[MediaType]
+	size: Optional[PostSize]
+	blocked: bool
+	thumbhash: Optional[str]
+
+
 class SearchResults(BaseModel) :
 	posts: List[Post]
 	count: int
@@ -49,10 +98,39 @@ class SearchResults(BaseModel) :
 	total: int
 
 
+class InternalPost(BaseModel) :
+	_thumbhash_converter = validator('thumbhash', pre=True, always=True, allow_reuse=True)(_thumbhash_converter)
+
+	class Config:
+		json_encoders = {
+			bytes: lambda x: b64encode(x).decode(),
+		}
+
+	post_id: int
+	title: Optional[str]
+	description: Optional[str]
+	user_id: int
+	rating: Rating
+	parent: Optional[int]
+	privacy: Privacy
+	created: Optional[datetime]
+	updated: Optional[datetime]
+	filename: Optional[str]
+	media_type: Optional[MediaType]
+	size: Optional[PostSize]
+	thumbhash: Optional[str]
+
+
+class InternalScore(BaseModel) :
+	up: int
+	down: int
+	total: int
+
+
 RssFeed = f"""<rss version="2.0">
 <channel>
 <title>Timeline | fuzz.ly</title>
-<link>{'https://dev.fuzz.ly/timeline' if environment != Environment.prod else 'https://fuzz.ly/timeline'}</link>
+<link>{'https://dev.fuzz.ly/timeline' if environment.is_prod() else 'https://fuzz.ly/timeline'}</link>
 <description>{{description}}</description>
 <language>en-us</language>
 <pubDate>{{pub_date}}</pubDate>
@@ -62,7 +140,7 @@ RssFeed = f"""<rss version="2.0">
 <image>
 <url>https://cdn.fuzz.ly/favicon.png</url>
 <title>Timeline | fuzz.ly</title>
-<link>{'https://dev.fuzz.ly/timeline' if environment != Environment.prod else 'https://fuzz.ly/timeline'}</link>
+<link>{'https://dev.fuzz.ly/timeline' if environment.is_prod() else 'https://fuzz.ly/timeline'}</link>
 </image>
 <ttl>1440</ttl>
 {{items}}

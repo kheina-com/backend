@@ -1,6 +1,7 @@
 from asyncio import sleep as sleep_async
 from base64 import b64encode
 from hashlib import sha1 as hashlib_sha1
+from io import BytesIO
 from time import sleep
 from typing import Any, Dict, Union
 from urllib.parse import quote, unquote
@@ -8,13 +9,15 @@ from urllib.parse import quote, unquote
 import ujson as json
 from aiohttp import ClientTimeout
 from aiohttp import request as async_request
+from minio import Minio
 from requests import Response
 from requests import get as requests_get
 from requests import post as requests_post
 
-from shared.config.credentials import b2
-from shared.exceptions.base_error import BaseError
-from shared.logging import Logger, getLogger
+from .config.constants import environment
+from .config.credentials import b2
+from .exceptions.base_error import BaseError
+from .logging import Logger, getLogger
 
 
 class B2AuthorizationError(BaseError) :
@@ -49,40 +52,12 @@ class B2Interface :
 			'mov': 'video/quicktime',
 			**mime_types,
 		}
-		self._b2_authorize()
-
-
-	def _b2_authorize(self: 'B2Interface') -> bool :
-		basic_auth_string: bytes = b'Basic ' + b64encode((b2['key_id'] + ':' + b2['key']).encode())
-		b2_headers: Dict[str, bytes] = { 'authorization': basic_auth_string }
-		response: Union[Response, None] = None
-
-		for _ in range(self.b2_max_retries) :
-			try :
-				response = requests_get(
-					b2['api_url'] + '/v2/b2_authorize_account',
-					headers=b2_headers,
-					timeout=self.b2_timeout,
-				)
-
-			except :
-				pass
-
-			else :
-				if response.ok :
-					content = json.loads(response.content)
-					self.b2_api_url = content['apiUrl']
-					self.b2_auth_token = content['authorizationToken']
-					self.b2_bucket_id = content['allowed']['bucketId']
-					self.b2_download_url = content['downloadUrl']
-					return True
-
-		else :
-			raise B2AuthorizationError(
-				'b2 authorization handshake failed.',
-				response=json.loads(response.content) if response else None,
-				status=response.status_code if response else None,
-			)
+		self.client = Minio(
+			b2['api_url'],
+			access_key=b2['key_id'],
+			secret_key=b2['key'],
+			secure=not environment.is_local(),
+		)
 
 
 	def _get_mime_from_filename(self: 'B2Interface', filename: str) -> str :
@@ -167,43 +142,29 @@ class B2Interface :
 		)
 
 
-	def b2_upload(self: 'B2Interface', file_data: bytes, filename: str, content_type:Union[str, None]=None, sha1:Union[str, None]=None) -> Dict[str, Any] :
-		# obtain upload url
-		upload_url: str = self._obtain_upload_url()
-
-		sha1: str = sha1 or hashlib_sha1(file_data).hexdigest()
+	def b2_upload(self: 'B2Interface', file_data: bytes, filename: str, content_type:Union[str, None]=None, sha1:Union[str, None]=None) -> None :
+		sha1: str = sha1 or b64encode(hashlib_sha1(file_data).digest()).decode()
 		content_type: str = content_type or self._get_mime_from_filename(filename)
 
-		headers: Dict[str, str] = {
-			'authorization': upload_url['authorizationToken'],
-			'X-Bz-File-Name': quote(filename),
-			'Content-Type': content_type,
-			'Content-Length': str(len(file_data)),
-			'X-Bz-Content-Sha1': sha1,
-		}
-
 		backoff: float = 1
-		content: Union[str, None] = None
-		status: Union[int, None] = None
+		result = None
 
 		for _ in range(self.b2_max_retries) :
 			try :
-				response = requests_post(
-					upload_url['uploadUrl'],
-					headers=headers,
-					data=file_data,
-					timeout=self.b2_timeout,
+				result = self.client.put_object(
+					b2['bucket_name'],
+					filename,
+					BytesIO(file_data),
+					len(file_data),
+					content_type=content_type,
+					metadata={
+						'x-amz-checksum-algorithm': 'SHA1',
+						'x-amz-checksum-sha1': sha1,
+					},
 				)
-				status = response.status_code
-				if response.ok :
-					content: Dict[str, Any] = json.loads(response.content)
-					assert content_type == content['contentType']
-					assert sha1 == content['contentSha1']
-					assert filename == unquote(content['fileName'])
-					return content
 
-				else :
-					content = response.content
+				assert sha1 == result.http_headers['x-amz-checksum-sha1']
+				return
 
 			except AssertionError :
 				raise
@@ -216,66 +177,23 @@ class B2Interface :
 
 		raise B2UploadError(
 			f'Upload to b2 failed, max retries exceeded: {self.b2_max_retries}.',
-			response=json.loads(content) if content else None,
-			status=status,
-			upload_url=upload_url,
-			headers=headers,
-			filesize=len(file_data),
+			result=result,
 		)
 
 
-	async def b2_delete_file_async(self: 'B2Interface', filename: str) -> bool :
+	async def b2_delete_file_async(self: 'B2Interface', filename: str) -> None :
 		files = None
 
 		for _ in range(self.b2_max_retries) :
 			try :
-				async with async_request(
-					'POST',
-					self.b2_api_url + '/b2api/v2/b2_list_file_versions',
-					json={
-						'bucketId': self.b2_bucket_id,
-						'startFileName': filename,
-						'maxFileCount': 5,
-					},
-					headers={ 'authorization': self.b2_auth_token },
-				) as response :
-					if response.status == 401 :
-						self._b2_authorize()
-						continue
-
-					files = (await response.json())['files']
-					break
+				self.client.remove_object(
+					b2['bucket_name'],
+					filename,
+				)
+				return
 
 			except Exception as e :
 				self.logger.error('error encountered during b2 delete.', exc_info=e)
-
-		assert files
-
-		deletes = 0
-
-		for file in files :
-			if file['fileName'] != filename :
-				continue
-
-			for _ in range(self.b2_max_retries) :
-				try :
-					async with async_request(
-						'POST',
-						self.b2_api_url + '/b2api/v2/b2_delete_file_version',
-						json={
-							'fileId': file['fileId'],
-							'fileName': file['fileName'],
-						},
-						headers={ 'authorization': self.b2_auth_token },
-						raise_for_status=True,
-					) as response :
-						deletes += 1
-						break
-
-				except Exception as e :
-					self.logger.error('error encountered during b2 delete.', exc_info=e)
-
-		return bool(deletes)
 
 
 	async def b2_upload_async(self: 'B2Interface', file_data: bytes, filename: str, content_type:Union[str, None]=None, sha1:Union[str, None]=None) -> Dict[str, Any] :

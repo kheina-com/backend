@@ -1,14 +1,12 @@
 from typing import List
 
 from fastapi import APIRouter
-from fuzzly.models.internal import InternalSet
-from fuzzly.models.post import PostId
-from fuzzly.models.set import PostSet, Set, SetId
 
 from shared.auth import Scope
+from shared.models._shared import PostId
 from shared.server import Request
 
-from .models import AddPostToSetRequest, CreateSetRequest, UpdateSetRequest
+from .models import AddPostToSetRequest, CreateSetRequest, InternalSet, PostSet, Set, SetId, UpdateSetRequest
 from .sets import Sets
 
 

@@ -6,6 +6,7 @@ from account.models import LoginRequest
 from authenticator.authenticator import Authenticator
 from shared.base64 import b64encode
 from shared.sql import SqlInterface
+from shared.backblaze import B2Interface
 
 
 def startup() -> None :
@@ -20,6 +21,7 @@ def startup() -> None :
 	sqllock = None
 	if isfile('sql.lock') :
 		sqllock = open('sql.lock').read()
+		print('==> sql.lock:', sqllock)
 
 	dirs = sorted(i for i in listdir('db') if not isfile(i))
 	for dir in dirs :
@@ -35,12 +37,23 @@ def startup() -> None :
 				continue
 
 			with open(file) as f :
+				print('==> exec:', file)
 				cur.execute(f.read())
 
 	sql._conn.commit()
 
 	with open('sql.lock', 'w') as f :
 		f.write(dir)
+
+
+def uploadDefaultIcon() -> None :
+	b2 = B2Interface()
+	file_data: bytes
+
+	with open('images/default-icon.png', 'rb') as file :
+		file_data = file.read()
+
+	b2.b2_upload(file_data, 'default-icon.png', 'image/png')
 
 
 def createAdmin() -> LoginRequest :

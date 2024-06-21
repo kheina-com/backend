@@ -1,150 +1,27 @@
 from asyncio import Task, ensure_future
 from typing import Dict, List, Optional
 
-from fuzzly.models.internal import FollowKVS, InternalUser, UserKVS
-from fuzzly.models.user import Badge, User, UserPrivacy, Verified
-
 from shared.auth import KhUser
 from shared.caching import AerospikeCache, SimpleCache
+from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
+from shared.models.user import Badge, InternalUser, User, UserPrivacy, Verified
 from shared.sql import SqlInterface
 
-
-class Users(SqlInterface) :
-
-	def _cleanText(self: 'Users', text: str) -> str :
-		text = text.strip()
-		return text if text else None
+from .repository import FollowKVS, UserKVS, Users
 
 
-	def _validateDescription(self: 'Users', description: str) :
-		if len(description) > 10000 :
-			raise BadRequest('the given description is over the 10,000 character limit.', description=description)
-		return self._cleanText(description)
-
-
-	def _validateText(self: 'Users', text: str) :
-		if len(text) > 100 :
-			raise BadRequest('the given value is over the 100 character limit.', text=text)
-		return self._cleanText(text)
-
-
-	@SimpleCache(600)
-	def _get_privacy_map(self: 'Users') -> Dict[str, UserPrivacy] :
-		data = self.query("""
-			SELECT privacy_id, type
-			FROM kheina.public.privacy;
-			""",
-			fetch_all=True,
-		)
-		return { x[0]: UserPrivacy[x[1]] for x in data if x[1] in UserPrivacy.__members__ }
-
-
-	@SimpleCache(600)
-	def _get_badge_map(self: 'Users') -> Dict[int, Badge] :
-		data = self.query("""
-			SELECT badge_id, emoji, label
-			FROM kheina.public.badges;
-			""",
-			fetch_all=True,
-		)
-		return { x[0]: Badge(emoji=x[1], label=x[2]) for x in data }
-
-
-	@SimpleCache(600)
-	def _get_reverse_badge_map(self: 'Users') -> Dict[Badge, int] :
-		return { badge: id for id, badge in self._get_badge_map().items() }
-
-
-	@AerospikeCache('kheina', 'users', '{user_id}', _kvs=UserKVS)
-	async def _get_user(self, user_id: int) -> InternalUser :
-		data = await self.query_async("""
-			SELECT
-				users.user_id,
-				users.display_name,
-				users.handle,
-				users.privacy_id,
-				users.icon,
-				users.website,
-				users.created_on,
-				users.description,
-				users.banner,
-				users.admin,
-				users.mod,
-				users.verified,
-				array_agg(user_badge.badge_id)
-			FROM kheina.public.users
-				LEFT JOIN kheina.public.user_badge
-					ON user_badge.user_id = users.user_id
-			WHERE users.user_id = %s
-			GROUP BY
-				users.user_id;
-			""",
-			(user_id,),
-			fetch_one=True,
-		)
-
-		if not data :
-			raise NotFound('no data was found for the provided user.')
-
-		verified: Optional[Verified] = None
-
-		if data[9] :
-			verified = Verified.admin
-
-		elif data[10] :
-			verified = Verified.mod
-
-		elif data[11] :
-			verified = Verified.artist
-
-		return InternalUser(
-			user_id = data[0],
-			name = data[1],
-			handle = data[2],
-			privacy = self._get_privacy_map()[data[3]],
-			icon = data[4],
-			website = data[5],
-			created = data[6],
-			description = data[7],
-			banner = data[8],
-			verified = verified,
-			badges = list(filter(None, map(self._get_badge_map().get, data[12]))),
-		)
-
-
-	@AerospikeCache('kheina', 'user_handle_map', '{handle}', local_TTL=60)
-	async def _handle_to_user_id(self: 'Users', handle: str) -> int :
-		data = await self.query_async("""
-			SELECT
-				users.user_id
-			FROM kheina.public.users
-			WHERE lower(users.handle) = lower(%s);
-			""",
-			(handle.lower(),),
-			fetch_one=True,
-		)
-
-		if not data :
-			raise NotFound('no data was found for the provided user.')
-
-		return data[0]
-
-
-	async def _get_user_by_handle(self: 'Users', handle: str) -> InternalUser :
-		user_id: int = await self._handle_to_user_id(handle.lower())
-		return await self._get_user(user_id)
-
+class Users(Users) :
 
 	@HttpErrorHandler('retrieving user')
 	async def getUser(self: 'Users', user: KhUser, handle: str) -> User :
 		iuser: InternalUser = await self._get_user_by_handle(handle)
-		return await iuser.user(user)
+		return await self.user(user, iuser)
 
 
 	async def followUser(self: 'Users', user: KhUser, handle: str) -> None :
 		user_id: int = await self._handle_to_user_id(handle.lower())
-		following: bool = await FollowKVS.get_async(f'{user.user_id}|{user_id}')
+		following: bool = await self.following(user.user_id, user_id)
 
 		if following :
 			raise BadRequest('you are already following this user.')
@@ -164,7 +41,7 @@ class Users(SqlInterface) :
 
 	async def unfollowUser(self: 'Users', user: KhUser, handle: str) -> None :
 		user_id: int = await self._handle_to_user_id(handle.lower())
-		following: bool = await FollowKVS.get_async(f'{user.user_id}|{user_id}')
+		following: bool = await self.following(user.user_id, user_id)
 
 		if following == False :
 			raise BadRequest('you are already not following this user.')
@@ -184,7 +61,7 @@ class Users(SqlInterface) :
 	@HttpErrorHandler("retrieving user's own profile")
 	async def getSelf(self: 'Users', user: KhUser) -> User :
 		iuser: InternalUser = await self._get_user(user.user_id)
-		return await iuser.user(user)
+		return await self.user(user, iuser)
 
 
 	@HttpErrorHandler('updating user profile')

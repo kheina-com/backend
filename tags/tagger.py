@@ -1,21 +1,21 @@
 from asyncio import Task, ensure_future, wait
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Self, Tuple
 
-from fuzzly.internal import InternalClient
-from fuzzly.models.internal import InternalPost, InternalTag, TagKVS
-from fuzzly.models.post import PostId, Privacy
-from fuzzly.models.tag import Tag, TagGroupPortable, TagGroups
 from psycopg2.errors import NotNullViolation, UniqueViolation
 
+from posts.models import InternalPost, PostId, Privacy
+from posts.repository import Posts
 from shared.auth import KhUser, Scope
 from shared.caching import AerospikeCache, SimpleCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadRequest, Conflict, Forbidden, HttpErrorHandler, NotFound
-from shared.sql import SqlInterface
+from shared.models.user import InternalUser, UserPortable
 from shared.utilities import flatten
-from users.users import Users
-from posts.posts import Posts
+from users.repository import Users
+
+from .models import InternalTag, Tag, TagGroupPortable, TagGroups
+from .repository import TagKVS, Tags
 
 
 users = Users()
@@ -25,7 +25,7 @@ Misc: TagGroupPortable = TagGroupPortable('misc')
 CountKVS: KeyValueStore = KeyValueStore('kheina', 'tag_count')
 
 
-class Tagger(SqlInterface) :
+class Tagger(Tags) :
 
 	def _validateDescription(self, description: str) :
 		if len(description) > 1000 :
@@ -83,6 +83,28 @@ class Tagger(SqlInterface) :
 			policy={
 				'max_retries': 3,
 			},
+		)
+
+
+	async def _tag_owner(self: Self, user: KhUser, itag: InternalTag) -> Optional[UserPortable] :
+		if itag.owner :
+			return await users.portable(user, await users._get_user(itag.owner))
+
+		return None
+
+
+	async def tag(self: Self, user: KhUser, itag: InternalTag) -> Tag :
+		owner: Task[Optional[UserPortable]] = ensure_future(self._tag_owner(user, itag))
+		tag_count: Task[int] = ensure_future(self.tagCount(itag.name))
+		print("==> itag:", itag)
+		return Tag(
+			tag=itag.name,
+			owner=await owner,
+			group=itag.group,
+			deprecated=itag.deprecated,
+			inherited_tags=itag.inherited_tags,
+			description=itag.description,
+			count=await tag_count,
 		)
 
 
@@ -268,43 +290,15 @@ class Tagger(SqlInterface) :
 		if not data :
 			raise NotFound('the provided user does not exist or the user does not own any tags.', handle=handle)
 
-		tags: List[Task[Tag]] = list(map(lambda t : ensure_future(t.tag(iclient, user)), data))
+		tags: List[Task[Tag]] = list(map(lambda t : ensure_future(self.tag(user, t)), data))
 		await wait(tags)
 
 		return list(map(Task.result, tags))
 
 
-	# TODO: figure out a way that we can increase this TTL (updating inheritance won't be reflected in cache)
-	@AerospikeCache('kheina', 'tags', 'post.{post_id}', TTL_minutes=1, _kvs=TagKVS)
-	async def _fetch_tags_by_post(self, post_id: PostId) -> TagGroups :
-		data = await self.query_async("""
-			SELECT tag_classes.class, array_agg(tags.tag)
-			FROM kheina.public.tag_post
-				LEFT JOIN kheina.public.tags
-					ON tags.tag_id = tag_post.tag_id
-						AND tags.deprecated = false
-				LEFT JOIN kheina.public.tag_classes
-					ON tag_classes.class_id = tags.class_id
-			WHERE tag_post.post_id = %s
-			GROUP BY tag_classes.class_id;
-			""",
-			(post_id.int(),),
-			fetch_all=True,
-		)
-
-		if not data :
-			return TagGroups()
-
-		return TagGroups({
-			TagGroupPortable(i[0]): sorted(filter(None, i[1]))
-			for i in data
-			if i[0]
-		})
-
-
 	@HttpErrorHandler('fetching tags by post')
 	async def fetchTagsByPost(self, user: KhUser, post_id: PostId) -> TagGroups :
-		post: Task[InternalPost] = ensure_future(InternalClient.error_handler(InternalClient.post)(iclient, post_id))
+		post: Task[InternalPost] = ensure_future(posts._get_post(post_id))
 		tags: Task[TagGroups] = ensure_future(self._fetch_tags_by_post(post_id))
 
 		try :
@@ -313,7 +307,7 @@ class Tagger(SqlInterface) :
 		except NotFound :
 			raise NotFound("the provided post does not exist or you don't have access to it.", post_id=post_id)
 
-		if not await post.authorized(iclient, user) :
+		if not await posts.authorized(post, user) :
 			# the post was found and returned, but the user shouldn't have access to it or isn't authenticated
 			raise NotFound("the provided post does not exist or you don't have access to it.", post_id=post_id)
 
@@ -368,7 +362,7 @@ class Tagger(SqlInterface) :
 			if not name.startswith(tag) :
 				continue
 
-			tags.append(ensure_future(itag.tag(iclient, user)))
+			tags.append(ensure_future(self.tag(user, itag)))
 
 		await wait(tags)
 
@@ -415,7 +409,7 @@ class Tagger(SqlInterface) :
 	@HttpErrorHandler('fetching tag')
 	async def fetchTag(self, user: KhUser, tag: str) -> Tag :
 		itag = await self._fetch_tag(tag)
-		return await itag.tag(iclient, user)
+		return await self.tag(user, itag)
 
 
 	@AerospikeCache('kheina', 'tags', 'freq.{user_id}', TTL_days=1, _kvs=TagKVS)

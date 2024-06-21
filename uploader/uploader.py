@@ -12,22 +12,25 @@ from uuid import UUID, uuid4
 
 import aerospike
 from aiohttp import ClientResponseError, request
-from exiftool import ExifTool
-from fuzzly.internal import InternalClient
-from fuzzly.models.internal import InternalPost, InternalUser, UserKVS
-from fuzzly.models.post import MediaType, Post, PostId, PostSize, Privacy, Rating
-from fuzzly.models.tag import TagGroups
+from exiftool import ExifToolAlpha as ExifTool
+from wand.image import Image
+
+from posts.models import InternalPost, MediaType, Post, PostId, PostSize, Privacy, Rating
+from posts.repository import Posts, VoteKVS
+from posts.scoring import confidence
+from posts.scoring import controversial as calc_cont
+from posts.scoring import hot as calc_hot
 from shared.auth import KhUser
 from shared.backblaze import B2Interface
+from shared.base64 import b64decode, b64encode
 from shared.caching.key_value_store import KeyValueStore
-from shared.config.credentials import fuzzly_client_token
 from shared.exceptions.http_error import BadGateway, BadRequest, Forbidden, HttpErrorHandler, InternalServerError, NotFound
-from shared.scoring import confidence
-from shared.scoring import controversial as calc_cont
-from shared.scoring import hot as calc_hot
+from shared.models.user import InternalUser
 from shared.sql import SqlInterface, Transaction
 from shared.utilities import flatten, int_from_bytes
-from wand.image import Image
+from tags.models import TagGroups
+from tags.repository import Tags
+from users.repository import UserKVS, Users
 
 from .models import Coordinates
 
@@ -35,7 +38,9 @@ from .models import Coordinates
 KVS: KeyValueStore = KeyValueStore('kheina', 'posts')
 CountKVS: KeyValueStore = KeyValueStore('kheina', 'tag_count')
 UnpublishedPrivacies: Set[Privacy] = { Privacy.unpublished, Privacy.draft }
-client: InternalClient = InternalClient(fuzzly_client_token)
+posts = Posts()
+users = Users()
+tagger = Tags()
 
 
 if not path.isdir('images') :
@@ -260,7 +265,7 @@ class Uploader(SqlInterface, B2Interface) :
 		columns: List[str] = ['post_id', 'uploader']
 		values: List[str] = ['%s', '%s']
 		params: List[Any] = [user.user_id]
-		uploader: Task[InternalUser] = ensure_future(client.user(user.user_id))
+		uploader: Task[InternalUser] = ensure_future(users._get_user(user.user_id))
 
 		post: InternalPost = InternalPost(
 			post_id=reply_to,
@@ -396,7 +401,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 		try :
 			with ExifTool() as et :
-				content_type = et.get_tag('File:MIMEType', file_on_disk)
+				content_type = et.get_tag(file_on_disk.decode(), 'File:MIMEType')
 				et.execute(b'-overwrite_original_in_place', b'-ALL=', file_on_disk)
 
 		except :
@@ -593,7 +598,7 @@ class Uploader(SqlInterface, B2Interface) :
 			# post is populated in cache, so we can safely update it
 
 			if privacy :
-				post.privacy = privacythumbhash
+				post.privacy = privacy
 
 			post = InternalPost.parse_obj({
 				**post.dict(),
@@ -633,7 +638,7 @@ class Uploader(SqlInterface, B2Interface) :
 			if privacy == Privacy.draft and old_privacy != Privacy.unpublished :
 				raise BadRequest('only unpublished posts can be marked as drafts.')
 
-			tags_task: Task[TagGroups] = client.post_tags(post_id)
+			tags_task: Task[TagGroups] = tagger._fetch_tags_by_post(post_id)
 			vote_task: Task = None
 
 			if old_privacy in UnpublishedPrivacies and privacy not in UnpublishedPrivacies :
@@ -662,7 +667,7 @@ class Uploader(SqlInterface, B2Interface) :
 					post_id.int(), 1, 0, 1, calc_hot(1, 0, time()), confidence(1, 1), calc_cont(1, 0),
 					privacy.name, user.user_id, post_id.int(),
 				)
-				vote_task = VoteCache.put_async(f'{user.user_id}|{post_id}', 1)
+				vote_task = VoteKVS.put_async(f'{user.user_id}|{post_id}', 1)
 
 			else :
 				query = """
@@ -722,8 +727,8 @@ class Uploader(SqlInterface, B2Interface) :
 		if coordinates.width != coordinates.height :
 			raise BadRequest(f'icons must be square. width({coordinates.width}) != height({coordinates.height})')
 
-		ipost: Task[InternalPost] = ensure_future(client.post(post_id))
-		iuser: Task[InternalUser] = ensure_future(client.user(user.user_id))
+		ipost: Task[InternalPost] = ensure_future(posts._get_post(post_id))
+		iuser: Task[InternalUser] = ensure_future(users._get_user(user.user_id))
 		image = None
 
 		ipost: InternalPost = await ipost
@@ -777,8 +782,8 @@ class Uploader(SqlInterface, B2Interface) :
 		if round(coordinates.width / 3) != coordinates.height :
 			raise BadRequest(f'banners must be a 3x:1 rectangle. round(width / 3)({round(coordinates.width / 3)}) != height({coordinates.height})')
 
-		ipost: Task[InternalPost] = ensure_future(client.post(post_id))
-		iuser: Task[InternalUser] = ensure_future(client.user(user.user_id))
+		ipost: Task[InternalPost] = ensure_future(posts._get_post(post_id))
+		iuser: Task[InternalUser] = ensure_future(users._get_user(user.user_id))
 		image = None
 
 		ipost: Post = await ipost
@@ -830,8 +835,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 	@HttpErrorHandler('removing post')
 	async def deletePost(self: 'Uploader', user: KhUser, post_id: PostId) -> None :
-		ipost: InternalPost = await client.post(post_id)
+		ipost: InternalPost = await posts._get_post(post_id)
 
 		if ipost.user_id != user.user_id :
 			raise NotFound('the provided post does not exist or it does not belong to this account.')
-
