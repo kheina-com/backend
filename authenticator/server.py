@@ -1,14 +1,14 @@
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import load_der_public_key
-from kh_common import auth
-from kh_common.base64 import b64decode
-from kh_common.caching import ArgsCache
-from kh_common.datetime import datetime
-from kh_common.exceptions.http_error import Unauthorized
 from models import AuthAlgorithm, BotCreateRequest, BotCreateResponse, BotLoginRequest, ChangePasswordRequest, CreateUserRequest, LoginRequest, LoginResponse, LogoutRequest, PublicKeyRequest, PublicKeyResponse, TokenRequest, TokenResponse
 
 from authenticator import Authenticator
+from shared import auth
+from shared.base64 import b64decode
+from shared.caching import ArgsCache
+from shared.datetime import datetime
+from shared.exceptions.http_error import Unauthorized
 from shared.server import ServerApp
 
 from .authenticator import Authenticator
@@ -35,7 +35,7 @@ async def _fetch_public_key_override(key_id: int, algorithm: str) -> Ed25519Publ
 auth._fetchPublicKey = _fetch_public_key_override
 
 
-from kh_common.server import Request, ServerApp
+from shared.server import Request, ServerApp
 
 
 app = ServerApp(auth_required=False, cors=False)

@@ -34,10 +34,10 @@ VALUES
 INSERT INTO public.tag_classes
 (class)
 VALUES
+('artist'),
+('subject'),
 ('species'),
 ('gender'),
 ('environment'),
 ('franchise'),
-('misc'),
-('artist'),
-('subject');
+('misc');

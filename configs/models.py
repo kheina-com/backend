@@ -101,11 +101,11 @@ class CssProperty(Enum) :
 
 
 class UserConfig(BaseModel) :
-	blocking_behavior: Optional[BlockingBehavior]
-	blocked_tags: Optional[List[List[str]]]
-	blocked_users: Optional[List[int]]
-	wallpaper: Optional[conbytes(min_length=8, max_length=8)]
-	css_properties: Optional[Dict[str, Union[CssProperty, AvroInt, str]]]
+	blocking_behavior: Optional[BlockingBehavior] = None
+	blocked_tags: Optional[List[List[str]]] = None
+	blocked_users: Optional[List[int]] = None
+	wallpaper: Optional[conbytes(min_length=8, max_length=8)] = None
+	css_properties: Optional[Dict[str, Union[CssProperty, AvroInt, str]]] = None
 
 
 PostId: ConstrainedStr = constr(regex=r'^[a-zA-Z0-9_-]{8}$')

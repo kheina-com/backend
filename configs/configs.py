@@ -13,7 +13,8 @@ from shared.auth import KhUser
 from shared.base64 import b64decode
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
-from shared.config.credentials import creator_access_token
+from shared.config.constants import environment
+from shared.config.credentials import fetch
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
 from shared.sql import SqlInterface
 
@@ -22,7 +23,7 @@ from .models import BannerStore, ConfigType, CostsStore, CssProperty, UserConfig
 
 repo: SchemaRepository = SchemaRepository()
 
-PatreonClient: PatreonApi = PatreonApi(creator_access_token)
+PatreonClient: PatreonApi = PatreonApi(fetch('creator_access_token', str))
 KVS: KeyValueStore = KeyValueStore('kheina', 'configs', local_TTL=60)
 UserConfigSerializer: AvroSerializer = AvroSerializer(UserConfig)
 UserConfigKeyFormat: str = 'user_config.{user_id}'
@@ -63,6 +64,8 @@ class Configs(SqlInterface) :
 	@HttpErrorHandler('retrieving patreon campaign info')
 	@AerospikeCache('kheina', 'configs', 'patreon-campaign-funds', TTL_minutes=10)
 	def getFunding(self) -> int :
+		if environment.is_local() :
+			return 1500
 		return PatreonClient.fetch_campaign().data()[0].attribute('campaign_pledge_sum')
 
 

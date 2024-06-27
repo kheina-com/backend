@@ -9,7 +9,7 @@ from shared.caching.key_value_store import KeyValueStore
 from shared.crc import CRC
 from shared.exceptions.http_error import HttpErrorHandler, NotFound
 from shared.sql import SqlInterface
-
+from shared.utilities import getFullyQualifiedClassName
 
 KVS: KeyValueStore = KeyValueStore('kheina', 'avro_schemas', local_TTL=60)
 crc: CRC = CRC(64)
@@ -33,7 +33,7 @@ class SchemaRepository(SqlInterface) :
 		"""
 		fp: int = int_from_bytes(fingerprint)
 
-		data: List[bytes] = await self.query_async("""
+		data: List[memoryview] = await self.query_async("""
 			SELECT schema
 			FROM kheina.public.avro_schemas
 			WHERE fingerprint = %s;

@@ -2,15 +2,19 @@ from asyncio import Lock, get_event_loop
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from copy import copy
-from functools import partial, wraps
+from functools import partial
 from time import time
-from typing import Any, Dict, Iterable, List, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union
 
 import aerospike
 
 from ..config.constants import environment
-from ..utilities import __clear_cache__
+from ..config.credentials import fetch
+from ..utilities import __clear_cache__, coerse
 
+
+T = TypeVar('T')
+KeyType = Union[str, bytes, int]
 
 class KeyValueStore :
 
@@ -18,8 +22,10 @@ class KeyValueStore :
 
 	def __init__(self: 'KeyValueStore', namespace: str, set: str, local_TTL: float = 1) :
 		if not KeyValueStore._client and not environment.is_test() :
-			from kh_common.config.credentials import aerospike as config
-			config['hosts'] = list(map(tuple, config['hosts']))
+			config = {
+				'hosts': fetch('aerospike.hosts', List[Tuple[str, int]]),
+				'policies': fetch('aerospike.policies', Dict[str, Any]),
+			}
 			KeyValueStore._client = aerospike.client(config).connect()
 
 		self._cache: OrderedDict = OrderedDict()
@@ -30,8 +36,8 @@ class KeyValueStore :
 		self._get_many_lock: Lock = Lock()
 
 
-	def put(self: 'KeyValueStore', key: str, data: Any, TTL: int = 0) :
-		KeyValueStore._client.put(
+	def put(self: 'KeyValueStore', key: KeyType, data: Any, TTL: int = 0) :
+		KeyValueStore._client.put( # type: ignore
 			(self._namespace, self._set, key),
 			{ 'data': data },
 			meta={
@@ -44,42 +50,43 @@ class KeyValueStore :
 		self._cache[key] = (time() + self._local_TTL, data)
 
 
-	@wraps(put)
-	async def put_async(self: 'KeyValueStore', *args, **kwargs) :
+	async def put_async(self: 'KeyValueStore', key: KeyType, data: Any, TTL: int = 0) :
 		with ThreadPoolExecutor() as threadpool :
-			return await get_event_loop().run_in_executor(threadpool, partial(self.put, *args, **kwargs))
+			return await get_event_loop().run_in_executor(threadpool, partial(self.put, key, data, TTL))
 
 
-	def _get(self: 'KeyValueStore', key: str) :
+	def _get(self: 'KeyValueStore', key: KeyType, type: Optional[Type[T]] = None) -> T :
 		if key in self._cache :
 			return copy(self._cache[key][1])
 
-		_, _, data = KeyValueStore._client.get((self._namespace, self._set, key))
+		_, _, data = KeyValueStore._client.get((self._namespace, self._set, key)) # type: ignore
 		self._cache[key] = (time() + self._local_TTL, data['data'])
+
+		if type :
+			return coerse(data['data'], type)
 
 		return copy(data['data'])
 
 
-	def get(self: 'KeyValueStore', key: str) -> Any :
+	def get(self: 'KeyValueStore', key: KeyType, type: Optional[Type[T]] = None) -> T :
 		__clear_cache__(self._cache, time)
-		return self._get(key)
+		return self._get(key, type)
 
 
-	@wraps(get)
-	async def get_async(self: 'KeyValueStore', *args, **kwargs) :
+	async def get_async(self: 'KeyValueStore', key: KeyType, type: Optional[Type[T]] = None) -> T :
 		async with self._get_lock :
 			__clear_cache__(self._cache, time)
 
 		with ThreadPoolExecutor() as threadpool :
-			return await get_event_loop().run_in_executor(threadpool, partial(self._get, *args, **kwargs))
+			return await get_event_loop().run_in_executor(threadpool, partial(self._get, key, type))
 
 
-	def _get_many(self: 'KeyValueStore', keys: Iterable[str]) :
-		keys: Set[str] = set(keys)
-		remote_keys: Set[str] = keys - self._cache.keys()
+	def _get_many(self: 'KeyValueStore', k: Iterable[KeyType]) :
+		keys: Set[KeyType] = set(k)
+		remote_keys: Set[KeyType] = keys - self._cache.keys()
 
 		if remote_keys :
-			data: List[Tuple[Any]] = KeyValueStore._client.get_many(list(map(lambda k : (self._namespace, self._set, k), remote_keys)))
+			data: List[Tuple[Any, Any, Any]] = KeyValueStore._client.get_many(list(map(lambda k : (self._namespace, self._set, k), remote_keys))) # type: ignore
 			data_map: Dict[str, Any] = { }
 
 			exp: float = time() + self._local_TTL
@@ -110,23 +117,22 @@ class KeyValueStore :
 		}
 
 
-	def get_many(self: 'KeyValueStore', keys: Iterable[str]) -> Dict[str, Any] :
+	def get_many(self: 'KeyValueStore', keys: Iterable[KeyType]) -> Dict[KeyType, Any] :
 		__clear_cache__(self._cache, time)
 		return self._get_many(keys)
 
 
-	@wraps(get_many)
-	async def get_many_async(self: 'KeyValueStore', *args, **kwargs) :
+	async def get_many_async(self: 'KeyValueStore', keys: Iterable[KeyType]) -> Dict[KeyType, Any] :
 		async with self._get_many_lock :
 			with ThreadPoolExecutor() as threadpool :
-				return await get_event_loop().run_in_executor(threadpool, partial(self.get_many, *args, **kwargs))
+				return await get_event_loop().run_in_executor(threadpool, partial(self.get_many, keys))
 
 
-	def remove(self: 'KeyValueStore', key: str) -> None :
+	def remove(self: 'KeyValueStore', key: KeyType) -> None :
 		if key in self._cache :
 			del self._cache[key]
 
-		self._client.remove(
+		self._client.remove( # type: ignore
 			(self._namespace, self._set, key),
 			policy={
 				'max_retries': 3,
@@ -134,15 +140,14 @@ class KeyValueStore :
 		)
 
 
-	@wraps(remove)
-	async def remove_async(self: 'KeyValueStore', *args, **kwargs) :
+	async def remove_async(self: 'KeyValueStore', key: KeyType) -> None :
 		with ThreadPoolExecutor() as threadpool :
-			return await get_event_loop().run_in_executor(threadpool, partial(self.remove, *args, **kwargs))
+			return await get_event_loop().run_in_executor(threadpool, partial(self.remove, key))
 
 
-	def exists(self: 'KeyValueStore', key: str) -> bool :
+	def exists(self: 'KeyValueStore', key: KeyType) -> bool :
 		try :
-			_, meta = self._client.exists(
+			_, meta = self._client.exists( # type: ignore
 				(self._namespace, self._set, key),
 				policy={
 					'max_retries': 3,
@@ -155,11 +160,10 @@ class KeyValueStore :
 			return False
 
 
-	@wraps(exists)
-	async def exists_async(self: 'KeyValueStore', *args, **kwargs) :
+	async def exists_async(self: 'KeyValueStore', key: KeyType) -> bool :
 		with ThreadPoolExecutor() as threadpool :
-			return await get_event_loop().run_in_executor(threadpool, partial(self.exists, *args, **kwargs))
+			return await get_event_loop().run_in_executor(threadpool, partial(self.exists, key))
 
 
 	def truncate(self: 'KeyValueStore') -> None :
-		self._client.truncate(self._namespace, self._set, 0)
+		self._client.truncate(self._namespace, self._set, 0) # type: ignore

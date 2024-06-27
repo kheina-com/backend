@@ -1,11 +1,11 @@
 from typing import Any, Callable, Dict, Iterable, List, Optional, Self, Set, Tuple, Union
 
 from configs.configs import Configs
+from configs.models import UserConfig
 from shared.auth import KhUser
 from shared.caching import AerospikeCache, ArgsCache, SimpleCache
-from shared.models.config import UserConfig
 from shared.models.user import InternalUser
-
+from shared.utilities import stacktrace
 
 configs = Configs()
 
@@ -27,10 +27,10 @@ class BlockTree :
 		return result
 
 
-	def __init__(self: Self) :
-		self.tags: Set[str] = None
-		self.match: Dict[str, BlockTree] = None
-		self.nomatch: Dict[str, BlockTree] = None
+	def __init__(self: 'BlockTree') :
+		self.tags: Set[str] = set()
+		self.match: Dict[str, BlockTree] = { }
+		self.nomatch: Dict[str, BlockTree] = { }
 
 
 	def populate(self: Self, tags: Iterable[Iterable[str]]) :
@@ -44,22 +44,24 @@ class BlockTree :
 					match = False
 					tag = tag[1:]
 
+				branch: Dict[str, BlockTree]
+
 				if match :
 					if not tree.match :
 						tree.match = { }
 
-					tree = tree.match
+					branch = tree.match
 
 				else :
 					if not tree.nomatch :
 						tree.nomatch = { }
 
-					tree = tree.nomatch
+					branch = tree.nomatch
 
-				if tag not in tree :
-					tree[tag] = BlockTree()
+				if tag not in branch :
+					branch[tag] = BlockTree()
 
-				tree = tree[tag]
+				tree = branch[tag]
 
 
 	def blocked(self: Self, tags: Iterable[str]) -> bool :
@@ -70,7 +72,7 @@ class BlockTree :
 		return self._blocked(self)
 
 
-	def _blocked(self: Self, tree: Self) -> bool :
+	def _blocked(self: Self, tree: 'BlockTree') -> bool :
 		# TODO: it really feels like there's a better way to do this check
 		if not tree.match and not tree.nomatch :
 			return True
@@ -90,6 +92,7 @@ class BlockTree :
 
 
 @ArgsCache(30)
+@stacktrace
 async def fetch_block_tree(user: KhUser) -> Tuple[BlockTree, UserConfig] :
 	tree: BlockTree = BlockTree()
 

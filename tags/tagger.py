@@ -446,7 +446,7 @@ class Tagger(Tags) :
 				tags[group][tag] += 1
 
 		return TagGroups({
-			TagGroupPortable(group): list(sorted(tag_ranks.items(), key=lambda x : x[1], reverse=True))[:(25 if group == Misc else 10)]
+			TagGroupPortable(group): list(map(lambda x : x[0], sorted(tag_ranks.items(), key=lambda x : x[1], reverse=True)))[:(25 if group == Misc else 10)]
 			for group, tag_ranks in tags.items()
 		})
 

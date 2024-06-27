@@ -4,7 +4,7 @@ from re import IGNORECASE
 from re import compile as re_compile
 from secrets import randbelow, token_bytes
 from time import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
 import ujson as json
@@ -19,13 +19,14 @@ from psycopg2.errors import UniqueViolation
 from shared import logging
 from shared.base64 import b64decode, b64encode
 from shared.caching.key_value_store import KeyValueStore
-from shared.config.credentials import argon2, secrets
+from shared.config.credentials import fetch
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, Conflict, HttpError, InternalServerError, NotFound, Unauthorized
 from shared.hashing import Hashable
 from shared.models.auth import AuthState, Scope, TokenMetadata
 from shared.sql import SqlInterface
 from shared.utilities.json import json_stream
+from psycopg2 import Binary
 
 from .models import AuthAlgorithm, BotCreateResponse, BotLogin, BotType, LoginResponse, PublicKeyResponse, TokenResponse
 
@@ -113,15 +114,17 @@ class Authenticator(SqlInterface, Hashable) :
 
 
 	def _validateEmail(self, email: str) -> Dict[str, str] :
-		email = Authenticator.EmailRegex.search(email)
-		if not email :
+		e = Authenticator.EmailRegex.search(email)
+		if not e :
 			raise BadRequest('the given email is invalid.')
-		return email.groupdict()
+		return e.groupdict()
 
 
 	def _initArgon2(self) :
+		argon2 = fetch('argon2', Dict[str, Any])
 		self._argon2 = Argon2(**argon2)
-		self._secrets = [bytes.fromhex(salt) for salt in secrets]
+		secrets = fetch('secrets', List[str])
+		self._secrets = tuple(bytes.fromhex(salt) for salt in secrets)
 
 
 	def _hash_email(self, email) :
@@ -163,14 +166,13 @@ class Authenticator(SqlInterface, Hashable) :
 			signature = private_key.sign(public_key)
 
 			# insert the new key into db
-			data = self.query("""
+			data: Tuple[int, datetime, datetime] = self.query("""
 				INSERT INTO kheina.auth.token_keys
 				(public_key, signature, algorithm)
 				VALUES
 				(%s, %s, %s)
 				RETURNING key_id, issued, expires;
-				""",
-				(
+				""", (
 					public_key,
 					signature,
 					self._token_algorithm,
@@ -220,10 +222,10 @@ class Authenticator(SqlInterface, Hashable) :
 
 		return TokenResponse(
 			version=self._token_version,
-			algorithm=self._token_algorithm,
+			algorithm=self._token_algorithm, # type: ignore
 			key_id=key_id,
-			issued=issued,
-			expires=expires,
+			issued=issued, # type: ignore
+			expires=expires, # type: ignore
 			token=token.decode(),
 		)
 
@@ -234,9 +236,9 @@ class Authenticator(SqlInterface, Hashable) :
 		await KVS.remove_async(guid)
 
 
-	def fetchPublicKey(self, key_id, algorithm: AuthAlgorithm = None) -> PublicKeyResponse :
-		algorithm = algorithm.name if algorithm else self._token_algorithm
-		lookup_key = (algorithm, key_id)
+	def fetchPublicKey(self, key_id, algorithm: Optional[AuthAlgorithm] = None) -> PublicKeyResponse :
+		algo = algorithm.name if algorithm else self._token_algorithm
+		lookup_key = (algo, key_id)
 
 		try :
 
@@ -254,7 +256,7 @@ class Authenticator(SqlInterface, Hashable) :
 				)
 
 				if not data :
-					raise NotFound(f'Public key does not exist for algorithm: {algorithm} and key_id: {key_id}.')
+					raise NotFound(f'Public key does not exist for algorithm: {algo} and key_id: {key_id}.')
 
 				public_key = self._public_keyring[lookup_key] = {
 					'key': b64encode(data[0]).decode(),
@@ -272,7 +274,7 @@ class Authenticator(SqlInterface, Hashable) :
 			raise InternalServerError('an error occurred while retrieving public key.', logdata={ 'refid': refid })
 
 		return PublicKeyResponse(
-			algorithm=algorithm,
+			algorithm=algo, # type: ignore
 			**public_key,
 		)
 
@@ -377,7 +379,7 @@ class Authenticator(SqlInterface, Hashable) :
 			user_id = requester
 
 		# now we can create the BotLogin object that will be returned to the user
-		password: bytes = token_bytes(argon2['hash_len'] or 64)
+		password: bytes = token_bytes(64)
 		secret: int = randbelow(len(self._secrets))
 		password_hash: bytes = self._argon2.hash(password + self._secrets[secret]).encode()
 
@@ -422,19 +424,19 @@ class Authenticator(SqlInterface, Hashable) :
 
 
 	async def botLogin(self, token: str) -> LoginResponse :
-		bot_login: BotLogin = BotLoginDeserializer(b64decode(token))
+		bot_login: BotLogin = BotLoginDeserializer(b64decode(token)) # type: ignore
 
 		user_id: Optional[int]
-		password_hash: bytes
+		password_hash: str
 		secret: int
 		bot_type: BotType
 
 		try :
-			data = await self.query_async("""
+			data: Tuple[int, memoryview, int, int] = await self.query_async("""
 				SELECT
 					bot_login.user_id,
 					bot_login.password,
-					bot_login.secret,
+					bot_login.secret,Binary
 					bot_login.bot_type_id
 				FROM kheina.auth.bot_login
 				WHERE bot_id = %s;
@@ -447,8 +449,8 @@ class Authenticator(SqlInterface, Hashable) :
 				raise Unauthorized('bot login failed.')
 
 			bot_type_id: int
-			user_id, password_hash, secret, bot_type_id = data
-			password_hash = password_hash.tobytes().decode()
+			user_id, pw, secret, bot_type_id = data
+			password_hash = pw.tobytes().decode()
 			bot_type = BotType(bot_type_id)
 
 			if user_id != bot_login.user_id :
@@ -458,13 +460,13 @@ class Authenticator(SqlInterface, Hashable) :
 				raise Unauthorized('login failed.')
 
 			if self._argon2.check_needs_rehash(password_hash) :
-				password_hash = self._argon2.hash(bot_login.password + self._secrets[secret]).encode()
+				new_pw_hash = self._argon2.hash(bot_login.password + self._secrets[secret]).encode()
 				await self.query_async("""
 					UPDATE kheina.auth.bot_login
 					SET password = %s
 					WHERE bot_id = %s;
 					""",
-					(password_hash, bot_login.bot_id),
+					(new_pw_hash, bot_login.bot_id),
 					commit=True,
 				)
 
@@ -486,7 +488,7 @@ class Authenticator(SqlInterface, Hashable) :
 			handle='',  # TODO: if user_id is not None, populate handle
 			mod=False,
 			token=self.generate_token(user_id, { 'scope': [Scope.internal if bot_type == BotType.internal else Scope.bot] }),
-		)
+		) # type: ignore
 
 
 	def changePassword(self, email: str, old_password: str, new_password: str) :

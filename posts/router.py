@@ -1,6 +1,6 @@
 from asyncio import ensure_future
 from html import escape
-from typing import List
+from typing import List, Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter
@@ -11,7 +11,7 @@ from shared.models.auth import Scope
 from shared.server import Request, Response, ServerApp
 from users.users import Users
 
-from .models import BaseFetchRequest, FetchCommentsRequest, FetchPostsRequest, GetUserPostsRequest, InternalPost, Post, PostId, RssDateFormat, RssDescription, RssFeed, RssItem, RssMedia, RssTitle, Score, SearchResults, TimelineRequest, VoteRequest
+from .models import BaseFetchRequest, FetchCommentsRequest, FetchPostsRequest, GetUserPostsRequest, InternalPost, InternalScore, Post, PostId, RssDateFormat, RssDescription, RssFeed, RssItem, RssMedia, RssTitle, Score, SearchResults, TimelineRequest, VoteRequest
 from .posts import Posts
 
 
@@ -42,15 +42,15 @@ async def i1User(req: Request, user_id: int, body: BaseFetchRequest) -> List[Int
 	return await posts._fetch_own_posts(user_id, body.sort, body.count, body.page)
 
 
-@app.get('/i1/score/{post_id}', response_model=InternalPost)
-async def i1Score(req: Request, post_id: PostId, ) -> InternalPost :
+@app.get('/i1/score/{post_id}', response_model=Optional[InternalScore])
+async def i1Score(req: Request, post_id: PostId, ) -> Optional[InternalScore] :
 	await req.user.verify_scope(Scope.internal)
 	# TODO: this needs to be replaced with a model and updated above
 	return await posts._get_score(PostId(post_id))
 
 
-@app.get('/i1/vote/{post_id}/{user_id}', response_model=InternalPost)
-async def i1Vote(req: Request, post_id: PostId, user_id: int) -> InternalPost :
+@app.get('/i1/vote/{post_id}/{user_id}', response_model=int)
+async def i1Vote(req: Request, post_id: PostId, user_id: int) -> int :
 	await req.user.verify_scope(Scope.internal)
 	# TODO: this needs to be replaced with a model and updated above
 	return await posts._get_vote(user_id, PostId(post_id))
@@ -98,12 +98,13 @@ async def v1TimelinePosts(req: Request, body: TimelineRequest) -> List[Post] :
 
 
 async def get_post_media(post: Post) -> str :
-	filename: str = f'{post.post_id}/{escape(quote(post.filename))}'
+	filename: str = f'{post.post_id}/{escape(quote(post.filename or ""))}'
 	file_info = await b2.b2_get_file_info(filename)
+	assert file_info
 	return RssMedia.format(
 		url='https://cdn.fuzz.ly/' + filename,
-		mime_type=file_info['contentType'],
-		length=file_info['contentLength'],
+		mime_type=file_info.content_type,
+		length=file_info.size,
 	)
 
 

@@ -1,18 +1,19 @@
-from asyncio import Task, ensure_future
+from asyncio import ensure_future
 from hashlib import sha1
 from re import compile as re_compile
-from typing import Callable, Dict, Union
+from typing import Callable, Dict, Optional
 from uuid import UUID
 
 import aerospike
 import ujson as json
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
 from cryptography.hazmat.primitives.serialization import load_der_public_key
 from fastapi import Request
 
 from authenticator.authenticator import AuthAlgorithm, Authenticator, AuthState, PublicKeyResponse, Scope, TokenMetadata
-from shared.models.auth import AuthToken, KhUser
+from shared.models.auth import AuthToken, KhUser  # type: ignore
 
 from ..base64 import b64decode, b64encode
 from ..caching import ArgsCache
@@ -55,7 +56,8 @@ async def _fetchPublicKey(key_id: int, algorithm: str) -> Ed25519PublicKey :
 		raise Unauthorized('Key has expired.')
 
 	key: bytes = b64decode(load.key)
-	public_key: Ed25519PublicKey = load_der_public_key(key, backend=default_backend())
+	public_key: PublicKeyTypes = load_der_public_key(key, backend=default_backend())
+	assert isinstance(public_key, Ed25519PublicKey)
 
 	# don't verify in try/catch so that it doesn't cache an invalid token
 	public_key.verify(b64decode(load.signature), key)
@@ -66,7 +68,7 @@ async def _fetchPublicKey(key_id: int, algorithm: str) -> Ed25519PublicKey :
 async def v1token(token: str) -> AuthToken :
 	content: str
 	signature: str
-	load: str
+	load: bytes
 
 	content, signature = token.rsplit('.', 1)
 	load = b64decode(content[content.find('.')+1:])
@@ -78,13 +80,13 @@ async def v1token(token: str) -> AuthToken :
 	guid: bytes
 	data: bytes
 
-	algorithm, key_id, expires, user_id, guid, data = load.split(b'.', 5)
+	algorithm, key_id, expires, user_id, guid, data = load.split(b'.', 5) # type: ignore
 
-	algorithm: str = algorithm.decode()
-	key_id: int = int_from_bytes(b64decode(key_id))
-	expires: datetime = datetime.fromtimestamp(int_from_bytes(b64decode(expires)))
-	user_id: int = int_from_bytes(b64decode(user_id))
-	guid: UUID = UUID(bytes=b64decode(guid))
+	algorithm: str = algorithm.decode() # type: ignore
+	key_id: int = int_from_bytes(b64decode(key_id)) # type: ignore
+	expires: datetime = datetime.fromtimestamp(int_from_bytes(b64decode(expires))) # type: ignore
+	user_id: int = int_from_bytes(b64decode(user_id)) # type: ignore
+	guid: UUID = UUID(bytes=b64decode(guid)) # type: ignore
 
 	if key_id <= 0 :
 		raise Unauthorized('Key is invalid.')
@@ -93,8 +95,8 @@ async def v1token(token: str) -> AuthToken :
 		raise Unauthorized('Key has expired.')
 
 
-	token_info: Task[TokenMetadata] = ensure_future(KVS.get_async(guid.bytes))
-	public_key: Dict[str, Union[str, int, Ed25519PublicKey]] = await _fetchPublicKey(key_id, algorithm)
+	token_info = ensure_future(KVS.get_async(guid.bytes, TokenMetadata))
+	public_key = await _fetchPublicKey(key_id, algorithm)
 
 	try :
 		public_key.verify(b64decode(signature), content.encode())
@@ -104,15 +106,14 @@ async def v1token(token: str) -> AuthToken :
 
 
 	try :
-		token_info: TokenMetadata = await token_info
-
+		token_info = await token_info
 		assert token_info.state == AuthState.active, 'This token is no longer active.'
 		assert token_info.algorithm == algorithm, 'Token algorithm mismatch.'
 		assert token_info.expires == expires, 'Token expiration mismatch.'
 		assert token_info.key_id == key_id, 'Token encryption key mismatch.'
 
 	except aerospike.exception.RecordNotFound :
-		raise
+		raise Unauthorized('This token is no longer valid.')
 
 	except AssertionError as e :
 		raise Unauthorized(str(e))
@@ -142,16 +143,15 @@ async def verifyToken(token: str) -> AuthToken :
 
 
 async def retrieveAuthToken(request: Request) -> AuthToken :
-	token: str = request.headers.get('Authorization') or request.cookies.get('kh-auth')
+	token: Optional[str] = request.headers.get('Authorization') or request.cookies.get('kh-auth')
 
 	if not token :
 		raise Unauthorized('An authentication token was not provided.')
 
 	token_data: AuthToken = await verifyToken(token.split()[-1])
 
-	# TODO: this works great, but needs to be shelved until internal authentication is done
-	# if 'fp' in token_data.data and token_data.data['fp'] != browserFingerprint(request) :
-	# 	raise Unauthorized('The authentication token provided is not valid from this device or location.')
+	if 'fp' in token_data.data and token_data.data['fp'] != browserFingerprint(request) :
+		raise Unauthorized('The authentication token provided is not valid from this device or location.')
 
 	return token_data
 
@@ -176,7 +176,7 @@ def browserFingerprint(request: Request) -> str :
 	return b64encode(sha1(headers.encode()).digest()).decode()
 
 
-def userAgentStrip(ua: str) :
+def userAgentStrip(ua: Optional[str]) -> Optional[str] :
 	if not ua :
 		return None
 	parts = ua.partition('/')

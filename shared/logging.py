@@ -34,25 +34,25 @@ class LogHandler(logging.Handler) :
 
 	logging_available = not environment.is_local()
 
-	def __init__(self, name: str, *args: Tuple[Any], structs:Tuple[type]=(dict, list, tuple), **kwargs:Dict[str, Any]) -> None :
+	def __init__(self, name: str, *args, structs:List[type]=[dict, list, tuple], **kwargs:Dict[str, Any]) -> None :
 		logging.Handler.__init__(self, *args, **kwargs)
-		self._structs: Tuple[type] = structs
+		self._structs = tuple(structs)
 		try :
 			if not LogHandler.logging_available :
 				raise ValueError('logging unavailable.')
-			credentials: compute_engine.credentials.Credentials = compute_engine.Credentials()
-			logging_client: google_logging.client.Client = google_logging.Client(credentials=credentials)
-			self.agent: google_logging.logger.Logger = logging_client.logger(name)
+			credentials = compute_engine.Credentials()
+			logging_client = google_logging.Client(credentials=credentials)
+			self.agent = logging_client.logger(name)
 		except :
 			LogHandler.logging_available = False
-			self.agent: TerminalAgent = TerminalAgent()
+			self.agent = TerminalAgent()
 
 
 	def emit(self, record: logging.LogRecord) -> None :
 		if record.args and isinstance(record.msg, str) :
 			record.msg = record.msg % record.args
 		if record.exc_info :
-			e: Exception = record.exc_info[1]
+			e: BaseException = record.exc_info[1] # type: ignore
 			refid = getattr(e, 'refid', None)
 			errorinfo: Dict[str, Any] = {
 				'error': f'{getFullyQualifiedClassName(e)}: {e}',
@@ -87,11 +87,11 @@ class LogHandler(logging.Handler) :
 
 
 def getLogger(name: Union[str, None]=None, level:int=logging.INFO, filter:Callable=lambda x : x, disable:List[str]=[], **kwargs:Dict[str, Any]) -> Logger :
-	name: str = name or f'{repo_name}.{short_hash}'
+	name = name or f'{repo_name}.{short_hash}'
 	for loggerName in disable :
 		logging.getLogger(loggerName).propagate = False
 	logging.root.setLevel(logging.NOTSET)
-	handler: LogHandler = LogHandler(name, level=level)
+	handler: LogHandler = LogHandler(name, level=level) # type: ignore
 	handler.addFilter(filter)
 	logging.root.handlers.clear()
 	logging.root.addHandler(handler)

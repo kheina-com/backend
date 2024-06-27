@@ -6,9 +6,10 @@ from re import compile as re_compile
 from secrets import token_bytes
 from typing import Any, List, Optional, Type, Union
 
-from kh_common.base64 import b64decode, b64encode
 from pydantic import BaseModel, validator
 from pydantic_core import core_schema
+
+from ..base64 import b64decode, b64encode
 
 
 """
@@ -20,30 +21,6 @@ Example: PostId is used by both user and post models
 
 ################################################## MANY ##################################################
 
-@unique
-class Privacy(Enum) :
-	public: str = 'public'
-	unlisted: str = 'unlisted'
-	private: str = 'private'
-	unpublished: str = 'unpublished'
-	draft: str = 'draft'
-
-
-@unique
-class Rating(Enum) :
-	general: str = 'general'
-	mature: str = 'mature'
-	explicit: str = 'explicit'
-
-
-@unique
-class PostSort(Enum) :
-	new: str = 'new'
-	old: str = 'old'
-	top: str = 'top'
-	hot: str = 'hot'
-	best: str = 'best'
-	controversial: str = 'controversial'
 
 
 ################################################## POST ##################################################
@@ -64,16 +41,19 @@ class PostId(str) :
 	__int_max_value__: int = 281474976710655
 
 
+	@staticmethod
 	def generate() -> 'PostId' :
 		return PostId(token_bytes(6))
 
 
 	@lru_cache(maxsize=128)
+	@staticmethod
 	def _str_from_int(value: int) -> str :
 		return b64encode(int.to_bytes(value, 6, 'big')).decode()
 
 
 	@lru_cache(maxsize=128)
+	@staticmethod
 	def _str_from_bytes(value: bytes) -> str :
 		return b64encode(value).decode()
 
@@ -81,25 +61,23 @@ class PostId(str) :
 	def __new__(cls, value: Union[str, bytes, int]) :
 		# technically, the only thing needed to be done here to utilize the full 64 bit range is update the 6 bytes encoding to 8 and the allowed range in the int subtype
 
-		value_type: type = type(value)
-
-		if value_type == PostId :
+		if type(value) == PostId :
 			return super(PostId, cls).__new__(cls, value)
 
-		elif value_type == str :
+		elif type(value) == str :
 			if not PostId.__str_format__.match(value) :
 				raise ValueError('str values must be in the format of /^[a-zA-Z0-9_-]{8}$/')
 
 			return super(PostId, cls).__new__(cls, value)
 
-		elif value_type == int :
+		elif type(value) == int :
 			# the range of a 48 bit int stored in a 64 bit int (both starting at min values)
 			if not 0 <= value <= PostId.__int_max_value__ :
 				raise ValueError(f'int values must be between 0 and {PostId.__int_max_value__:,}.')
 
 			return super(PostId, cls).__new__(cls, PostId._str_from_int(value))
 
-		elif value_type == bytes :
+		elif type(value) == bytes :
 			if len(value) != 6 :
 				raise ValueError('bytes values must be exactly 6 bytes.')
 
@@ -118,7 +96,7 @@ class PostId(str) :
 	def __get_pydantic_core_schema__(self, _: Type[Any]) -> core_schema.CoreSchema :
 		return core_schema.no_info_after_validator_function(
 			PostId,
-			core_schema.any_schema(serialization=core_schema.str_schema()),
+			core_schema.any_schema(serialization=core_schema.str_schema()), # type: ignore
 		)
 
 
@@ -136,34 +114,20 @@ def _post_id_converter(value) :
 	return value
 
 
-PostIdValidator = validator('post_id', pre=True, always=True, allow_reuse=True)(PostId)
-
-
-class Score(BaseModel) :
-	up: int
-	down: int
-	total: int
-	user_vote: int
-
-
-class PostSize(BaseModel) :
-	width: int
-	height: int
-
 
 ################################################## USER ##################################################
 
 @unique
 class UserPrivacy(Enum) :
-	public: str = 'public'
-	private: str = 'private'
+	public = 'public'
+	private = 'private'
 
 
 @unique
 class Verified(Enum) :
-	artist: str = 'artist'
-	mod: str = 'mod'
-	admin: str = 'admin'
+	artist = 'artist'
+	mod = 'mod'
+	admin = 'admin'
 
 
 class UserPortable(BaseModel) :
@@ -242,16 +206,19 @@ class SetId(str) :
 	__int_max_value__: int = 1099511627775
 
 
+	@staticmethod
 	def generate() -> 'SetId' :
 		return SetId(token_bytes(5))
 
 
 	@lru_cache(maxsize=128)
+	@staticmethod
 	def _str_from_int(value: int) -> str :
 		return b64encode(int.to_bytes(value, 5, 'big')).decode()
 
 
 	@lru_cache(maxsize=128)
+	@staticmethod
 	def _str_from_bytes(value: bytes) -> str :
 		return b64encode(value).decode()
 
@@ -259,25 +226,23 @@ class SetId(str) :
 	def __new__(cls, value: Union[str, bytes, int]) :
 		# technically, the only thing needed to be done here to utilize the full 64 bit range is update the 4 bytes encoding to 8 and the allowed range in the int subtype
 
-		value_type: type = type(value)
-
-		if value_type == SetId :
+		if type(value) == SetId :
 			return super(SetId, cls).__new__(cls, value)
 
-		elif value_type == str :
+		elif type(value) == str :
 			if not SetId.__str_format__.match(value) :
 				raise ValueError('str values must be in the format of /^[a-zA-Z0-9_-]{7}$/')
 
 			return super(SetId, cls).__new__(cls, value)
 
-		elif value_type == int :
+		elif type(value) == int :
 			# the range of a 40 bit int stored in a 64 bit int (both starting at min values)
 			if not 0 <= value <= SetId.__int_max_value__ :
 				raise ValueError(f'int values must be between 0 and {SetId.__int_max_value__:,}.')
 
 			return super(SetId, cls).__new__(cls, SetId._str_from_int(value))
 
-		elif value_type == bytes :
+		elif type(value) == bytes :
 			if len(value) != 5 :
 				raise ValueError('bytes values must be exactly 5 bytes.')
 
@@ -296,7 +261,7 @@ class SetId(str) :
 	def __get_pydantic_core_schema__(self, _: Type[Any]) -> core_schema.CoreSchema :
 		return core_schema.no_info_after_validator_function(
 			SetId,
-			core_schema.any_schema(serialization=core_schema.str_schema()),
+			core_schema.any_schema(serialization=core_schema.str_schema()), # type: ignore
 		)
 
 

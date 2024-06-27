@@ -1,0 +1,52 @@
+{
+	"local": {
+		"mailgun": {
+			"endpoint": "https://api.mailgun.net/v3/not/real",
+			"auth": {
+				"login": "api",
+				"password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-yyyyyyyy-zzzzzzzz"
+			}
+		},
+		"aerospike": {
+			"hosts": [
+				[
+					"127.0.0.1",
+					4000
+				]
+			],
+			"policies": {
+				"timeout": 1000
+			}
+		},
+		"creator_access_token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+		"creator_refresh_token": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+		"b2": {
+			"bucket_name": "kheina-content",
+			"api_url": "localhost:9000",
+			"key_id": "QP44VmUpmRaXmtMJeen8",
+			"key": "kw7vBGROerYZjIb7i05SrAIrYV18Xn43ijIahWrY",
+			"key_name": "localhost-minio-key"
+		},
+		"db": {
+			"user": "kheina",
+			"password": "password",
+			"host": "127.0.0.1",
+			"port": "5432",
+			"dbname": "kheina"
+		},
+		"argon2": {
+			"time_cost": 12,
+			"memory_cost": 2048,
+			"parallelism": 2,
+			"hash_len": 32,
+			"salt_len": 32
+		},
+		"secrets": [
+			"475f5a2d92f72a1c1256d89c6e85ee8aa27875fd23f5b0869e",
+			"9055e3f449cad5ae4a410b061a030171a29ef86be9d5a9c501",
+			"3732e14f1d92c7cf50579d3574d13658ac0ce56fce5b3c14ab",
+			"19c5d41dbd0d25eda35f1fcc21b858ec5a0c8f2f671d95591a",
+			"77ec210173a911415b5edc0a976bdf990ab003b81593e326f2"
+		]
+	}
+}

@@ -15,13 +15,13 @@ class AuthToken(NamedTuple) :
 
 
 @unique
-class Scope(Enum) :
-	default: int = 0
-	bot: int = 1
-	user: int = 2
-	mod: int = 3
-	admin: int = 4
-	internal: int = 5
+class Scope(IntEnum) :
+	default = 0
+	bot = 1
+	user = 2
+	mod = 3
+	admin = 4
+	internal = 5
 
 	def all_included_scopes(self) :
 		return [v for v in Scope.__members__.values() if Scope.user.value <= v.value <= self.value] or [self]
@@ -51,8 +51,8 @@ class PublicKeyResponse(BaseModel) :
 
 @unique
 class AuthState(IntEnum) :
-	active: int = 0
-	inactive: int = 1
+	active = 0
+	inactive = 1
 
 
 class TokenMetadata(BaseModel) :

@@ -1,14 +1,15 @@
+from typing import Optional
 from pydantic import BaseModel
 
 from ._shared import Badge, InternalUser, User, UserPortable, UserPrivacy, Verified
 
 
 class UpdateSelf(BaseModel) :
-	name: str = None
-	privacy: UserPrivacy = None
-	icon: str = None
-	website: str = None
-	description: str = None
+	name: Optional[str] = None
+	privacy: Optional[UserPrivacy] = None
+	icon: Optional[str] = None
+	website: Optional[str] = None
+	description: Optional[str] = None
 
 
 class SetMod(BaseModel) :

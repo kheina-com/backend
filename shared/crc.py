@@ -1,6 +1,9 @@
+from typing import Optional, Self
+
+
 class CRC :
 
-	def __init__(self: 'CRC', bit_length: int = 32, polynomial: int = 0x04c11db7, init_value: int = None, xor_out: int = None) -> 'CRC' :
+	def __init__(self: 'CRC', bit_length: int = 32, polynomial: int = 0x04c11db7, init_value: Optional[int] = None, xor_out: Optional[int] = None) -> None :
 		if int(bit_length / 8) != float(bit_length / 8) :
 			raise ValueError('bit_length must be an integer and divisible by 8')
 
@@ -31,7 +34,7 @@ class CRC :
 		self.table = tuple(table)
 
 
-	def __call__(self: 'CRC', value: bytes) -> int :
+	def __call__(self: Self, value: bytes) -> int :
 		crc = self.init_value
 
 		for i in value :

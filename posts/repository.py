@@ -1,21 +1,22 @@
 from asyncio import Task, ensure_future
 from collections import defaultdict
-from datetime import timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from math import ceil
-from typing import Any, Callable, Dict, Iterable, List, Optional, Self, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Self, Set, Tuple, Union
 
 from pydantic import BaseModel
 
 from sets.models import InternalSet
-from shared.auth import KhUser
+from shared.auth import KhUser, Scope
 from shared.caching import AerospikeCache, ArgsCache, SimpleCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
-from shared.models.auth import Scope
-from shared.models.tag import TagGroups
 from shared.models.user import InternalUser, UserPortable, UserPrivacy, Verified
 from shared.sql import SqlInterface
 from shared.sql.query import Field, Join, JoinType, Operator, Order, Query, Table, Value, Where
+from shared.utilities import flatten
+from tags.models import TagGroups
 from tags.repository import Tags
 from users.repository import FollowKVS, UserKVS, Users, badge_map
 
@@ -32,27 +33,125 @@ tagger = Tags()
 
 
 # this steals the idea of a map from kh_common.map.Map, probably use that when types are figured out in a generic way
-class PrivacyMap(SqlInterface, dict) :
+class PrivacyMap(SqlInterface, Dict[Union[int, Privacy], Union[Privacy, int]]) :
 
-	def __missing__(self, key: int) -> UserPrivacy :
-		data: Tuple[str] = self.query(f"""
-			SELECT type
-			FROM kheina.public.privacy
-			WHERE privacy_id = %s
+	def __missing__(self, key: Union[int, str, Privacy]) -> Union[int, Privacy] :
+		if isinstance(key, int) :
+			d1: Tuple[str] = self.query(f"""
+				SELECT type
+				FROM kheina.public.privacy
+				WHERE privacy.privacy_id = %s
+				LIMIT 1;
+				""",
+				(key,),
+				fetch_one=True,
+			)
+			p = Privacy(value=d1[0])
+			id = key
+
+			self[id] = p
+			self[p] = id
+
+			# key is the id, return privacy
+			return p
+
+		else :
+			d2: Tuple[int] = self.query(f"""
+				SELECT privacy_id
+				FROM kheina.public.privacy
+				WHERE privacy.type = %s
+				LIMIT 1;
+				""",
+				(key,),
+				fetch_one=True,
+			)
+			p = Privacy(key)
+			id = d2[0]
+
+			self[id] = p
+			self[p] = id
+
+			# key is privacy, return the id
+			return id
+
+
+privacy_map: PrivacyMap = PrivacyMap()
+
+class RatingMap(SqlInterface, Dict[Union[int, Rating], Union[Rating, int]]) :
+
+	def __missing__(self, key: Union[int, str, Rating]) -> Union[int, Rating] :
+		if isinstance(key, int) :
+			d1: Tuple[str] = self.query(f"""
+				SELECT rating
+				FROM kheina.public.ratings
+				WHERE ratings.rating_id = %s
+				LIMIT 1;
+				""",
+				(key,),
+				fetch_one=True,
+			)
+			r = Rating(value=d1[0])
+			id = key
+
+			self[id] = r
+			self[r] = id
+
+			# key is the id, return rating
+			return r
+
+		else :
+			d2: Tuple[int] = self.query(f"""
+				SELECT rating_id
+				FROM kheina.public.ratings
+				WHERE ratings.rating = %s
+				LIMIT 1;
+				""",
+				(key,),
+				fetch_one=True,
+			)
+			r = Rating(key)
+			id = d2[0]
+
+			self[id] = r
+			self[r] = id
+
+			# key is rating, return the id
+			return id
+
+
+rating_map: RatingMap = RatingMap()
+
+
+class MediaTypeMap(SqlInterface, dict) :
+
+	def __missing__(self, key: int) -> MediaType :
+		data: Tuple[str, str] = self.query(f"""
+			SELECT file_type, mime_type
+			FROM kheina.public.media_type
+			WHERE media_type.media_type_id = %s
 			LIMIT 1;
 			""",
 			(key,),
 			fetch_one=True,
 		)
-		self[key] = UserPrivacy(value=data[0])
+		self[key] = MediaType(
+			file_type = data[0],
+			mime_type = data[1],
+		)
 		return self[key]
 
-privacy_map: PrivacyMap = PrivacyMap()
+media_type_map: MediaTypeMap = MediaTypeMap()
+
+
+@dataclass
+class UserCombined:
+	portable: UserPortable
+	internal: InternalUser
 
 
 class Posts(SqlInterface) :
 
-	def parse_response(self: Self, data: List[List[Any]]) -> List[InternalPost] :
+	def parse_response(self: Self, data: List[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes]]) -> List[InternalPost] :
 			posts: List[InternalPost] = []
 
 			for row in data :
@@ -60,16 +159,16 @@ class Posts(SqlInterface) :
 					post_id=row[0],
 					title=row[1],
 					description=row[2],
-					rating=self._get_rating_map()[row[3]],
+					rating=rating_map[row[3]], # type: ignore
 					parent=row[4],
 					created=row[5],
 					updated=row[6],
 					filename=row[7],
-					media_type=self._get_media_type_map()[row[8]],
+					media_type=media_type_map[row[8]],
 					size=PostSize(width=row[9], height=row[10]) if row[9] and row[10] else None,
 					user_id=row[11],
-					privacy=self._get_privacy_map()[row[12]],
-					thumbhash=row[13],
+					privacy=privacy_map[row[12]], # type: ignore
+					thumbhash=row[13], # type: ignore
 				)
 				posts.append(post)
 				ensure_future(PostKVS.put_async(post.post_id, post))
@@ -77,7 +176,7 @@ class Posts(SqlInterface) :
 			return posts
 
 
-	def internal_select(self: Self, query: Query) -> Callable[[List[List[Any]]], List[InternalPost]] :
+	def internal_select(self: Self, query: Query) -> Callable[[List[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes]]], List[InternalPost]] :
 		query.select(
 			Field('posts', 'post_id'),
 			Field('posts', 'title'),
@@ -131,21 +230,22 @@ class Posts(SqlInterface) :
 
 	async def post(self: Self, ipost: InternalPost, user: KhUser) -> Post :
 		post_id: PostId = PostId(ipost.post_id)
-		uploader: Task[InternalUser] = ensure_future(users._get_user(ipost.user_id))
-		tags: TagGroups = ensure_future(tagger._fetch_tags_by_post(post_id))
-		score: Task[Score] = ensure_future(self.getScore(user, post_id))
+		upl: Task[InternalUser] = ensure_future(users._get_user(ipost.user_id))
+		tags: Task[TagGroups] = ensure_future(tagger._fetch_tags_by_post(post_id))
+		score: Task[Optional[Score]] = ensure_future(self.getScore(user, post_id))
 
-		uploader: UserPortable = await uploader
-		blocked: Task[bool] = ensure_future(is_post_blocked(user, uploader, await tags))
+		uploader: InternalUser = await upl
+		upl_portable: Task[UserPortable] = ensure_future(users.portable(user, uploader))
+		blocked: Task[bool] = ensure_future(is_post_blocked(user, uploader, flatten(await tags)))
 
 		return Post(
 			post_id=post_id,
 			title=ipost.title,
 			description=ipost.description,
-			user=uploader,
+			user=await upl_portable,
 			score=await score,
 			rating=ipost.rating,
-			parent=ipost.parent,
+			parent=ipost.parent, # type: ignore
 			privacy=ipost.privacy,
 			created=ipost.created,
 			updated=ipost.updated,
@@ -202,7 +302,7 @@ class Posts(SqlInterface) :
 			return scores
 
 		for post_id, up, down in data :
-			post_id: PostId = PostId(post_id)
+			post_id = PostId(post_id)
 			score: InternalScore = InternalScore(
 				up=up,
 				down=down,
@@ -254,7 +354,7 @@ class Posts(SqlInterface) :
 			return votes
 
 		for post_id, upvote in data :
-			post_id: PostId = PostId(post_id)
+			post_id = PostId(post_id)
 			vote: int = 1 if upvote else -1
 			votes[post_id] = vote
 			ensure_future(VoteKVS.put_async(f'{user_id}|{post_id}', vote))
@@ -263,10 +363,10 @@ class Posts(SqlInterface) :
 
 
 	async def getScore(self: Self, user: KhUser, post_id: PostId) -> Optional[Score] :
-		score: Task[Optional[InternalScore]] = ensure_future(self._get_score(post_id))
+		score_task: Task[Optional[InternalScore]] = ensure_future(self._get_score(post_id))
 		vote: Task[int] = ensure_future(self._get_vote(user.user_id, post_id))
 
-		score: Optional[InternalScore] = await score
+		score = await score_task
 
 		if not score :
 			return None
@@ -333,7 +433,7 @@ class Posts(SqlInterface) :
 		}
 
 		for target, following in data :
-			following: bool = bool(following)
+			following = bool(following)
 			return_value[target] = following
 			ensure_future(FollowKVS.put_async(f'{user_id}|{target}', following))
 
@@ -348,7 +448,7 @@ class Posts(SqlInterface) :
 	async def _vote(self: Self, user: KhUser, post_id: PostId, upvote: Optional[bool]) -> Score :
 		self._validateVote(upvote)
 		with self.transaction() as transaction :
-			data = await transaction.query_async("""
+			data: Tuple[int, int, datetime] = await transaction.query_async("""
 				INSERT INTO kheina.public.post_votes
 				(user_id, post_id, upvote)
 				VALUES
@@ -366,8 +466,7 @@ class Posts(SqlInterface) :
 							AND post_votes.upvote IS NOT NULL
 				WHERE posts.post_id = %s
 				GROUP BY posts.post_id;
-				""",
-				(
+				""", (
 					user.user_id, post_id.int(), upvote,
 					upvote, user.user_id, post_id.int(),
 					post_id.int(),
@@ -399,8 +498,7 @@ class Posts(SqlInterface) :
 						best = %s,
 						controversial = %s
 					WHERE post_scores.post_id = %s;
-				""",
-				(
+				""", (
 					post_id.int(), up, down, top, h, best, cont,
 					up, down, top, h, best, cont, post_id.int(),
 				),
@@ -474,7 +572,7 @@ class Posts(SqlInterface) :
 				user_id = datum[0],
 				name = datum[1],
 				handle = datum[2],
-				privacy = privacy_map[datum[3]],
+				privacy = privacy_map[datum[3]], # type: ignore
 				icon = datum[4],
 				website = datum[5],
 				created = datum[6],
@@ -489,7 +587,7 @@ class Posts(SqlInterface) :
 		return users
 
 
-	async def _uploaders(self: Self, iposts: List[InternalPost], user: KhUser) -> Dict[int, UserPortable] :
+	async def _uploaders(self: Self, iposts: List[InternalPost], user: KhUser) -> Dict[int, UserCombined] :
 		"""
 		returns populated user objects for every uploader id provided
 
@@ -497,7 +595,7 @@ class Posts(SqlInterface) :
 		"""
 		uploader_ids: List[int] = list(set(map(lambda x : x.user_id, iposts)))
 		users_task: Task[Dict[int, InternalUser]] = ensure_future(self.users_many(uploader_ids))
-		following: Dict[int, Optional[bool]]
+		following: Mapping[int, Optional[bool]]
 
 		if await user.authenticated(False) :
 			following = await self.following_many(user.user_id, uploader_ids)
@@ -508,13 +606,16 @@ class Posts(SqlInterface) :
 		iusers: Dict[int, InternalUser] = await users_task
 
 		return {
-			user_id: UserPortable(
-				name=iuser.name,
-				handle=iuser.handle,
-				privacy=iuser.privacy,
-				icon=iuser.icon,
-				verified=iuser.verified,
-				following=following[user_id],
+			user_id: UserCombined(
+				internal=iuser,
+				portable=UserPortable(
+					name=iuser.name,
+					handle=iuser.handle,
+					privacy=iuser.privacy,
+					icon=iuser.icon,
+					verified=iuser.verified,
+					following=following[user_id],
+				),
 			)
 			for user_id, iuser in iusers.items()
 		}
@@ -594,11 +695,11 @@ class Posts(SqlInterface) :
 		returns a list of external post objects populated with user and other information
 		"""
 
-		uploaders_task: Task[Dict[int, UserPortable]] = ensure_future(self._uploaders(iposts, user))
+		uploaders_task: Task[Dict[int, UserCombined]] = ensure_future(self._uploaders(iposts, user))
 		scores_task: Task[Dict[PostId, Optional[Score]]] = ensure_future(self._scores(iposts, user))
 
 		tags: Dict[PostId, List[str]] = await self._tags_many(list(map(lambda x : PostId(x.post_id), iposts)))
-		uploaders: Dict[int, UserPortable] = await uploaders_task
+		uploaders: Dict[int, UserCombined] = await uploaders_task
 		scores: Dict[PostId, Optional[Score]] = await scores_task
 
 		posts: List[Post] = []
@@ -608,10 +709,10 @@ class Posts(SqlInterface) :
 				post_id=post_id,
 				title=post.title,
 				description=post.description,
-				user=uploaders[post.user_id],
+				user=uploaders[post.user_id].portable,
 				score=scores[post_id],
 				rating=post.rating,
-				parent=post.parent,
+				parent=post.parent, # type: ignore
 				privacy=post.privacy,
 				created=post.created,
 				updated=post.updated,
@@ -619,7 +720,7 @@ class Posts(SqlInterface) :
 				media_type=post.media_type,
 				size=post.size,
 				# only the first call retrieves blocked info, all the rest should be cached and not actually await
-				blocked=await is_post_blocked(user, uploaders[post.user_id], tags[post_id]),
+				blocked=await is_post_blocked(user, uploaders[post.user_id].internal, tags[post_id]),
 				thumbhash=post.thumbhash,
 			))
 		

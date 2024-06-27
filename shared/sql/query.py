@@ -1,50 +1,47 @@
 from dataclasses import dataclass
 from enum import Enum, unique
-from typing import Any, List, Tuple, Union
-
-
-Query = None
+from typing import Any, Generator, List, Optional, Tuple, Union
 
 
 @unique
 class Order(Enum) :
-	ascending: str = 'ASC'
-	ascending_nulls_first: str = 'ASC NULLS FIRST'
-	ascending_nulls_last: str = 'ASC NULLS LAST'
-	descending: str = 'DESC'
-	descending_nulls_first: str = 'DESC NULLS FIRST'
-	descending_nulls_last: str = 'DESC NULLS LAST'
+	ascending = 'ASC'
+	ascending_nulls_first = 'ASC NULLS FIRST'
+	ascending_nulls_last = 'ASC NULLS LAST'
+	descending = 'DESC'
+	descending_nulls_first = 'DESC NULLS FIRST'
+	descending_nulls_last = 'DESC NULLS LAST'
 
 
 @unique
 class JoinType(Enum) :
-	inner: str = 'INNER JOIN'
-	outer: str = 'FULL OUTER JOIN'
-	cross: str = 'CROSS JOIN'
-	left: str = 'LEFT JOIN'
-	right: str = 'RIGHT JOIN'
+	inner = 'INNER JOIN'
+	outer = 'FULL OUTER JOIN'
+	cross = 'CROSS JOIN'
+	left = 'LEFT JOIN'
+	right = 'RIGHT JOIN'
 
 
 @unique
 class Operator(Enum) :
-	equal: str = '{} = {}'
-	not_equal: str = '{} != {}'
-	greater_than: str = '{} > {}'
-	greater_than_equal_to: str = '{} >= {}'
-	less_than: str = '{} < {}'
-	less_than_equal_to: str = '{} <= {}'
-	like: str = '{} LIKE {}'
-	not_like: str = '{} NOT LIKE {}'
-	within: str = '{} IN {}'
-	not_in: str = '{} NOT IN {}'
-	is_null: str = '{} IS NULL'
-	is_not_null: str = '{} IS NOT NULL'
+	equal = '{} = {}'
+	not_equal = '{} != {}'
+	greater_than = '{} > {}'
+	greater_than_equal_to = '{} >= {}'
+	less_than = '{} < {}'
+	less_than_equal_to = '{} <= {}'
+	like = '{} LIKE {}'
+	not_like = '{} NOT LIKE {}'
+	within = '{} IN {}'
+	not_in = '{} NOT IN {}'
+	is_null = '{} IS NULL'
+	is_not_null = '{} IS NOT NULL'
 
 
 @dataclass
 class Value :
 	value: Any
-	function: str = None
+	function: Optional[str] = None
 
 	def __str__(self) :
 		if self.function :
@@ -59,7 +56,7 @@ class Value :
 class Field :
 	table: str
 	column: str
-	function: str = None
+	function: Optional[str] = None
 
 	def __str__(self) :
 		if self.function :
@@ -72,9 +69,9 @@ class Field :
 
 @dataclass
 class Where :
-	field: Union[Field, Value, Query]
+	field: Union[Field, Value, 'Query']
 	operator: Operator
-	value: Union[Field, Value, Query]
+	value: Union[Field, Value, 'Query']
 
 	def __str__(self) :
 		if self.operator in { Operator.is_null, Operator.is_not_null } :
@@ -83,17 +80,17 @@ class Where :
 		else :
 			return self.operator.value.format(self.field, self.value)
 
-	def params(self) -> List[Any] :
+	def params(self) -> Generator[Any, None, None] :
 		if hasattr(self.field, 'params') :
-			yield from self.field.params()
+			yield from self.field.params() # type: ignore
 
 		if hasattr(self.value, 'params') and self.operator not in { Operator.is_null, Operator.is_not_null } :
-			yield from self.value.params()
+			yield from self.value.params() # type: ignore
 
 
 class Table :
 
-	def __init__(self, string: str, alias: str = None) :
+	def __init__(self, string: str, alias: Optional[str] = None) :
 		assert string.startswith('kheina.')
 		assert string.count('.') == 2
 		if alias :
@@ -119,7 +116,7 @@ class Join :
 		self._table: Table = table
 		self._where: List[Where] = []
 
-	def where(self, *where: Tuple[Where]) :
+	def where(self, *where: Where) :
 		for w in where :
 			assert type(w) == Where
 			self._where.append(w)
@@ -132,7 +129,7 @@ class Join :
 			' AND '.join(list(map(str, self._where)))
 		)
 
-	def params(self) -> List[Any] :
+	def params(self) -> Generator[Any, None, None] :
 		for where in self._where :
 			yield from where.params()
 
@@ -142,16 +139,16 @@ class Query :
 	def __init__(self, table: Table) :
 		assert type(table) == Table
 
-		self._table: str = table
+		self._table: Table = table
 		self._joins: List[Join] = []
 		self._select: List[Field] = []
 		self._where: List[Where] = []
 		self._having: List[Where] = []
 		self._group: List[Field] = []
-		self._order: List[Tuple[Union[Field, Order]]] = []
-		self._limit: int = None
-		self._offset: int = None
-		self._function: str = None
+		self._order: List[Tuple[Field, Order]] = []
+		self._limit: Optional[int] = None
+		self._offset: Optional[int] = None
+		self._function: Optional[str] = None
 
 
 	def __build_query__(self) :
@@ -204,9 +201,9 @@ class Query :
 		return '(' + self.__build_query__() + ')'
 
 	def build(self) :
-		return self.__build_query__() + ';', self.params()
+		return self.__build_query__() + ';', tuple(self.params())
 
-	def params(self) :
+	def params(self) -> List[Any] :
 		# something needs to be selected
 		assert self._select
 
@@ -232,31 +229,31 @@ class Query :
 
 		return params
 
-	def select(self, *field: Tuple[Field]) :
+	def select(self, *field: Field) :
 		for f in field :
 			assert type(f) == Field
 			self._select.append(f)
 		return self
 
-	def join(self, *join: Tuple[Join]) :
+	def join(self, *join: Join) :
 		for j in join :
 			assert type(j) == Join
 			self._joins.append(j)
 		return self
 
-	def where(self, *where: Tuple[Where]) :
+	def where(self, *where: Where) :
 		for w in where :
 			assert type(w) == Where
 			self._where.append(w)
 		return self
 
-	def group(self, *field: Tuple[Field]) :
+	def group(self, *field: Field) :
 		for f in field :
 			assert type(f) == Field
 			self._group.append(f)
 		return self
 
-	def having(self, *having: Tuple[Where]) :
+	def having(self, *having: Where) :
 		for h in having :
 			assert type(h) == Where
 			self._having.append(h)

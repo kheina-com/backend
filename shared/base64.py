@@ -7,4 +7,4 @@ def b64encode(bytestring: bytes) -> bytes :
 
 
 def b64decode(bytestring: Union[str, bytes]) -> bytes :
-	return urlsafe_b64decode(bytestring + (4 - len(bytestring) % 4) * (b'=' if isinstance(bytestring, bytes) else '='))
+	return urlsafe_b64decode(bytestring + (4 - len(bytestring) % 4) * (b'=' if isinstance(bytestring, bytes) else '=')) # type: ignore

@@ -76,7 +76,7 @@ def HttpErrorHandler(message: str, exclusions: Iterable[str] = ['self'], handler
 
 		if iscoroutinefunction(func) :
 			@wraps(func)
-			async def wrapper(*args: Tuple[Any], **kwargs:Dict[str, Any]) -> Any :
+			async def wrapper(*args: Any, **kwargs: Any) -> Any :
 				try :
 					return await func(*args, **kwargs)
 
@@ -113,7 +113,7 @@ def HttpErrorHandler(message: str, exclusions: Iterable[str] = ['self'], handler
 
 		else :
 			@wraps(func)
-			def wrapper(*args: Tuple[Any], **kwargs:Dict[str, Any]) -> Any :
+			def wrapper(*args: Any, **kwargs: Any) -> Any :
 				try :
 					return func(*args, **kwargs)
 

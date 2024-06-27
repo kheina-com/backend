@@ -16,7 +16,7 @@ from exiftool import ExifToolAlpha as ExifTool
 from wand.image import Image
 
 from posts.models import InternalPost, MediaType, Post, PostId, PostSize, Privacy, Rating
-from posts.repository import Posts, VoteKVS
+from posts.repository import Posts, VoteKVS, privacy_map
 from posts.scoring import confidence
 from posts.scoring import controversial as calc_cont
 from posts.scoring import hot as calc_hot
@@ -384,14 +384,14 @@ class Uploader(SqlInterface, B2Interface) :
 		file_data: bytes,
 		filename: str,
 		post_id: PostId,
-		emoji_name: str = None,
+		emoji_name: Optional[str] = None,
 		web_resize: int = 0,
-	) -> Dict[str, Union[str, int, List[str]]] :
+	) -> Dict[str, Union[Optional[str], int, Dict[str, str]]] :
 		# validate it's an actual photo
 		with Image(blob=file_data) as image :
 			pass
 
-		file_on_disk: bytes = f'images/{uuid4().hex}_{filename}'.encode()
+		file_on_disk: str = f'images/{uuid4().hex}_{filename}'
 
 		with open(file_on_disk, 'wb') as file :
 			file.write(file_data)
@@ -401,7 +401,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 		try :
 			with ExifTool() as et :
-				content_type = et.get_tag(file_on_disk.decode(), 'File:MIMEType')
+				content_type = et.get_tag(file_on_disk, 'File:MIMEType') # type: ignore
 				et.execute(b'-overwrite_original_in_place', b'-ALL=', file_on_disk)
 
 		except :
@@ -448,7 +448,7 @@ class Uploader(SqlInterface, B2Interface) :
 						fullsize_image = self.get_image_data(image, compress = False)
 
 					# optimize
-					updated: Tuple[datetime] = transaction.query("""
+					upd: Tuple[datetime] = transaction.query("""
 						UPDATE kheina.public.posts
 							SET updated_on = NOW(),
 								media_type_id = media_mime_type_to_id(%s),
@@ -470,7 +470,7 @@ class Uploader(SqlInterface, B2Interface) :
 						),
 						fetch_one=True,
 					)
-					updated: datetime = updated[0]
+					updated: datetime = upd[0]
 					image_size: PostSize = PostSize(
 						width=image.size[0],
 						height=image.size[1],
@@ -511,7 +511,7 @@ class Uploader(SqlInterface, B2Interface) :
 					thumbnails['jpeg'] = thumbnail_url
 
 				# TODO: implement emojis
-				emoji: str = None
+				emoji: Optional[str] = None
 
 				transaction.commit()
 
@@ -525,7 +525,7 @@ class Uploader(SqlInterface, B2Interface) :
 				)
 				post.size = image_size
 				post.filename = filename
-				post.thumbhash = thumbhash
+				post.thumbhash = thumbhash # type: ignore
 
 				KVS.put(post_id, post)
 
@@ -610,12 +610,12 @@ class Uploader(SqlInterface, B2Interface) :
 		return True
 
 
-	async def _update_privacy(self: 'Uploader', user: KhUser, post_id: PostId, privacy: Privacy, transaction: Transaction = None, commit: bool = True) :
+	async def _update_privacy(self: 'Uploader', user: KhUser, post_id: PostId, privacy: Privacy, transaction: Optional[Transaction] = None, commit: bool = True) :
 		if privacy == Privacy.unpublished :
 			raise BadRequest('post privacy cannot be updated to unpublished.')
 
 		with transaction or self.transaction() as t :
-			data = t.query("""
+			data = await t.query_async("""
 				SELECT privacy.type
 				FROM kheina.public.posts
 					INNER JOIN kheina.public.privacy
@@ -638,8 +638,8 @@ class Uploader(SqlInterface, B2Interface) :
 			if privacy == Privacy.draft and old_privacy != Privacy.unpublished :
 				raise BadRequest('only unpublished posts can be marked as drafts.')
 
-			tags_task: Task[TagGroups] = tagger._fetch_tags_by_post(post_id)
-			vote_task: Task = None
+			tags_task: Task[TagGroups] = ensure_future(tagger._fetch_tags_by_post(post_id))
+			vote_task: Optional[Task] = None
 
 			if old_privacy in UnpublishedPrivacies and privacy not in UnpublishedPrivacies :
 				query = """
@@ -667,7 +667,7 @@ class Uploader(SqlInterface, B2Interface) :
 					post_id.int(), 1, 0, 1, calc_hot(1, 0, time()), confidence(1, 1), calc_cont(1, 0),
 					privacy.name, user.user_id, post_id.int(),
 				)
-				vote_task = VoteKVS.put_async(f'{user.user_id}|{post_id}', 1)
+				vote_task = ensure_future(VoteKVS.put_async(f'{user.user_id}|{post_id}', 1))
 
 			else :
 				query = """
@@ -715,11 +715,13 @@ class Uploader(SqlInterface, B2Interface) :
 
 	@HttpErrorHandler('updating post privacy')
 	async def updatePrivacy(self: 'Uploader', user: KhUser, post_id: PostId, privacy: Privacy) :
-		await self._update_privacy(user, post_id, privacy)
+		success = await self._update_privacy(user, post_id, privacy)
 
 		if await KVS.exists_async(post_id) :
 			# we need the created and updated values set by db, so just remove
 			ensure_future(KVS.remove_async(post_id))
+
+		return success
 
 
 	@HttpErrorHandler('setting user icon')

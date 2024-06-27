@@ -120,7 +120,7 @@ async def v1UpdatePrivacy(req: Request, body: PrivacyRequest) :
 	"""
 	await req.user.authenticated()
 
-	if await uploader.updatePrivacy(req.user, body.post_id, body.privacy) :
+	if await uploader.updatePrivacy(req.user, PostId(body.post_id), body.privacy) :
 		return NoContentResponse
 
 

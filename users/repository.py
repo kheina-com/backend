@@ -34,7 +34,7 @@ badge_map: BadgeMap = BadgeMap()
 
 class Users(SqlInterface) :
 
-	def _cleanText(self: Self, text: str) -> str :
+	def _cleanText(self: Self, text: str) -> Optional[str] :
 		text = text.strip()
 		return text if text else None
 

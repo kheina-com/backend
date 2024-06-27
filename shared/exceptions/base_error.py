@@ -3,21 +3,22 @@ from uuid import UUID, uuid4
 
 
 class BaseError(Exception) :
-	def __init__(self, message: str, *args:Tuple[Any], refid:Union[UUID, str, None]=None, logdata:Dict[str, Any]={ }, **kwargs: Dict[str, Any]) -> None :
+	def __init__(self, message: str, *args: Any, refid: Union[UUID, str, None] = None, logdata: Dict[str, Any] = { }, **kwargs: Any) -> None :
 		Exception.__init__(self, message)
 
-		self.refid: str = refid or logdata.get('refid') or uuid4()
+		self.refid = refid or logdata.get('refid') or uuid4()
 
-		if isinstance(self.refid, (str, bytes)) :
+		if isinstance(self.refid, UUID) :
+			pass
 
-			if len(self.refid) == 32 :
-				self.refid = UUID(hex=self.refid)
+		elif isinstance(self.refid, str) :
+			self.refid = UUID(hex=self.refid)
 
-			elif len(self.refid) == 16 :
-				self.refid = UUID(bytes=self.refid)
+		elif isinstance(self.refid, bytes) :
+			self.refid = UUID(bytes=self.refid)
 
-			else :
-				raise ValueError('badly formed refid.')
+		else :
+			raise ValueError('badly formed refid.')
 
 		if 'refid' in logdata :
 			del logdata['refid']

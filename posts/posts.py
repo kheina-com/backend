@@ -2,7 +2,7 @@ from asyncio import Task, ensure_future
 from collections import defaultdict
 from datetime import timedelta
 from math import ceil
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 from sets.models import InternalSet, SetId
 from sets.repository import Sets
@@ -13,7 +13,7 @@ from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
 from shared.sql.query import Field, Join, JoinType, Operator, Order, Query, Table, Value, Where
 
 from .models import InternalPost, MediaType, Post, PostId, PostSize, PostSort, Privacy, Rating, Score, SearchResults
-from .repository import Posts, users
+from .repository import Posts, privacy_map, rating_map, users  # type: ignore
 
 
 sets = Sets()
@@ -21,6 +21,7 @@ sets = Sets()
 
 class Posts(Posts) :
 
+	@staticmethod
 	def _normalize_tag(tag: str) :
 		if tag.startswith('set:') :
 			return tag
@@ -40,7 +41,7 @@ class Posts(Posts) :
 
 	@HttpErrorHandler('processing vote')
 	async def vote(self, user: KhUser, post_id: str, upvote: Optional[bool]) -> Score :
-		return await self._vote(user, post_id, upvote)
+		return await self._vote(user, PostId(post_id), upvote)
 
 
 	@AerospikeCache('kheina', 'tag_count', '{tag}', TTL_seconds=-1, local_TTL=600)
@@ -83,7 +84,7 @@ class Posts(Posts) :
 				WHERE posts.rating = %s
 					AND posts.privacy_id = privacy_to_id('public');
 				""",
-				(self._rating_to_id()[tag],),
+				(rating_map[tag],), # type: ignore
 				fetch_one=True,
 			)
 			count = data[0]
@@ -107,7 +108,7 @@ class Posts(Posts) :
 		return round(count)
 
 
-	async def total_results(self, tags: List[str]) -> int :
+	async def total_results(self, tags: Iterable[str]) -> int :
 		"""
 		returns an estimate on the total number of results available for a given query
 		"""
@@ -121,7 +122,7 @@ class Posts(Posts) :
 
 		factor: float = 1.1
 
-		counts: List[Dict[str, Union[bool, int]]] = []
+		counts: List[Tuple[int, bool]] = []
 
 		for tag in tags :
 			invert: bool = False
@@ -132,7 +133,7 @@ class Posts(Posts) :
 
 			if tag.startswith('set:') :
 				# sets track their own counts
-				iset: InternalSet = await sets._get_set(tag[4:])
+				iset: InternalSet = await sets._get_set(SetId(tag[4:]))
 				counts.append((iset.count, invert))
 				continue
 
@@ -160,7 +161,7 @@ class Posts(Posts) :
 
 
 	@ArgsCache(60)
-	async def _fetch_posts(self, sort: PostSort, tags: Tuple[str], count: int, page: int) -> List[InternalPost] :
+	async def _fetch_posts(self, sort: PostSort, tags: Optional[Tuple[str, ...]], count: int, page: int) -> List[InternalPost] :
 		idk = { }
 
 		if tags :
@@ -240,7 +241,7 @@ class Posts(Posts) :
 						Where(
 							Field('posts', 'privacy_id'),
 							Operator.equal,
-							"privacy_to_id('public')",
+							Value(privacy_map[Privacy.public]),
 						),
 					),
 					Join(
@@ -277,7 +278,7 @@ class Posts(Posts) :
 						Where(
 							Field('posts', 'privacy_id'),
 							Operator.equal,
-							"privacy_to_id('public')",
+							Value(privacy_map[Privacy.public]),
 						),
 					),
 				)
@@ -300,7 +301,7 @@ class Posts(Posts) :
 					Where(
 						Field('posts', 'privacy_id'),
 						Operator.equal,
-						"privacy_to_id('public')",
+						Value(privacy_map[Privacy.public]),
 					),
 				)
 
@@ -309,7 +310,7 @@ class Posts(Posts) :
 					Where(
 						Field('tags', 'deprecated'),
 						Operator.equal,
-						False,
+						Value(False),
 					),
 					Where(
 						Field('tags', 'tag'),
@@ -371,7 +372,7 @@ class Posts(Posts) :
 					Where(
 						Field('posts', 'rating'),
 						Operator.equal,
-						Value(self._rating_to_id()[include_rating[0]]),
+						Value(rating_map[include_rating[0]]),
 					),
 				)
 
@@ -380,7 +381,7 @@ class Posts(Posts) :
 					Where(
 						Field('posts', 'rating'),
 						Operator.not_equal,
-						Value(list(map(lambda x : self._rating_to_id()[x], exclude_rating)), 'all'),
+						Value(list(map(lambda x : rating_map[x], exclude_rating)), 'all'),
 					),
 				)
 
@@ -446,13 +447,13 @@ class Posts(Posts) :
 				Where(
 					Field('posts', 'privacy_id'),
 					Operator.equal,
-					"privacy_to_id('public')",
+					Value(privacy_map[Privacy.public]),
 				),
 			)
 
 		if sort in { PostSort.new, PostSort.old } :
 
-			if len(tags) == 1 and len(include_sets) == 1 :
+			if tags and len(tags) == 1 and len(include_sets) == 1 :
 				# this is a very special case, we want to hijack the new/old sorts to instead sort by set index.
 				# there's really no reason anyone would want to sort by post age for a single set
 				query.order(
@@ -521,15 +522,16 @@ class Posts(Posts) :
 
 		total: Task[int]
 
+		t: Optional[Tuple[str, ...]] = None
+
 		if tags :
-			tags: Tuple[str] = tuple(sorted(map(Posts._normalize_tag, filter(None, map(str.strip, filter(None, tags))))))
-			total = ensure_future(self.total_results(tags))
+			t = tuple(sorted(map(Posts._normalize_tag, filter(None, map(str.strip, filter(None, tags))))))
+			total = ensure_future(self.total_results(t))
 
 		else :
-			tags = None
 			total = ensure_future(self.post_count('_'))
 
-		iposts: List[InternalPost] = await self._fetch_posts(sort, tags, count, page)
+		iposts: List[InternalPost] = await self._fetch_posts(sort, t, count, page)
 		posts: List[Post] = await self.posts(iposts, user)
 
 		return SearchResults(
@@ -538,55 +540,6 @@ class Posts(Posts) :
 			page = page,
 			total = await total,
 		)
-
-
-	@SimpleCache(float('inf'))
-	def _get_rating_map(self) :
-		data = self.query("""
-			SELECT rating_id, rating
-			FROM kheina.public.ratings;
-			""",
-			fetch_all=True,
-		)
-		return { x[0]: Rating[x[1]] for x in data if x[1] in Rating.__members__ }
-
-
-	@SimpleCache(float('inf'))
-	def _rating_to_id(self) :
-		return { v.name: k for k, v in self._get_rating_map().items() }
-
-
-	@SimpleCache(float('inf'))
-	def _get_privacy_map(self) :
-		data = self.query("""
-			SELECT privacy_id, type
-			FROM kheina.public.privacy;
-			""",
-			fetch_all=True,
-		)
-		return { x[0]: Privacy[x[1]] for x in data if x[1] in Privacy.__members__ }
-
-
-	@SimpleCache(float('inf'))
-	def _privacy_to_id(self) :
-		return { v: k for k, v in self._get_privacy_map().items() }
-
-
-	@SimpleCache(600)
-	def _get_media_type_map(self) :
-		data = self.query("""
-			SELECT media_type_id, file_type, mime_type
-			FROM kheina.public.media_type;
-			""",
-			fetch_all=True,
-		)
-		return defaultdict(lambda : None, {
-			row[0]: MediaType(
-				file_type = row[1],
-				mime_type = row[2],
-			)
-			for row in data
-		})
 
 
 	@HttpErrorHandler('retrieving post')
@@ -676,7 +629,7 @@ class Posts(Posts) :
 			Where(
 				Field('posts', 'privacy_id'),
 				Operator.equal,
-				"privacy_to_id('public')"
+				Value(privacy_map[Privacy.public]),
 			),
 		).order(
 			Field('posts', 'created_on'),
@@ -715,7 +668,7 @@ class Posts(Posts) :
 			Where(
 				Field('posts', 'privacy_id'),
 				Operator.equal,
-				"privacy_to_id('public')"
+				Value(privacy_map[Privacy.public]),
 			),
 			Where(
 				Field('posts', 'created_on'),
@@ -845,7 +798,7 @@ class Posts(Posts) :
 			Where(
 				Field('posts', 'privacy_id'),
 				Operator.equal,
-				Value(self._privacy_to_id()[Privacy.draft]),				
+				Value(privacy_map[Privacy.draft]),				
 			),
 		).order(
 			Field('posts', 'created_on'),

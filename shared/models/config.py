@@ -19,9 +19,9 @@ class CostsStore(BaseModel) :
 
 
 @unique
-class ConfigType(str, Enum) :
-	banner: str = 'banner'
-	costs: str = 'costs'
+class ConfigType(Enum) :
+	banner = 'banner'
+	costs = 'costs'
 
 
 class UpdateBannerRequest(BaseModel) :
@@ -100,14 +100,6 @@ class CssProperty(Enum) :
 	funding: str = 'funding'
 	notification_text: str = 'notification_text'
 	notification_bg: str = 'notification_bg'
-
-
-class UserConfig(BaseModel) :
-	blocking_behavior: Optional[BlockingBehavior]
-	blocked_tags: Optional[List[List[str]]]
-	blocked_users: Optional[List[int]]
-	wallpaper: Optional[conbytes(min_length=8, max_length=8)]
-	css_properties: Optional[Dict[str, Union[CssProperty, AvroInt, str]]]
 
 
 class UserConfigRequest(BaseModel) :

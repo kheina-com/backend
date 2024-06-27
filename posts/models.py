@@ -1,26 +1,66 @@
 from datetime import datetime
 from enum import Enum, unique
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
-from kh_common.base64 import b64encode
 from pydantic import BaseModel, validator
 
-from shared.auth import KhUser, Scope
+from shared.base64 import b64encode
 from shared.config.constants import environment
 from shared.config.repo import short_hash
-from shared.models._shared import PostId, PostIdValidator, PostSize, PostSort, Privacy, Rating, Score, UserPortable, _post_id_converter
+from shared.models._shared import PostId, UserPortable, _post_id_converter
+
+
+@unique
+class Privacy(Enum) :
+	public = 'public'
+	unlisted = 'unlisted'
+	private = 'private'
+	unpublished = 'unpublished'
+	draft = 'draft'
+
+
+@unique
+class Rating(Enum) :
+	general = 'general'
+	mature = 'mature'
+	explicit = 'explicit'
+
+
+@unique
+class PostSort(Enum) :
+	new = 'new'
+	old = 'old'
+	top = 'top'
+	hot = 'hot'
+	best = 'best'
+	controversial = 'controversial'
+
+
+PostIdValidator = validator('post_id', pre=True, always=True, allow_reuse=True)(PostId)
+
+
+class Score(BaseModel) :
+	up: int
+	down: int
+	total: int
+	user_vote: int
+
+
+class PostSize(BaseModel) :
+	width: int
+	height: int
 
 
 class VoteRequest(BaseModel) :
 	_post_id_validator = PostIdValidator
 
 	post_id: PostId
-	vote: Union[int, None]
+	vote: int
 
 
 class TimelineRequest(BaseModel) :
-	count: Optional[int] = 64
-	page: Optional[int] = 1
+	count: int = 64
+	page: int = 1
 
 
 class BaseFetchRequest(TimelineRequest) :
@@ -39,8 +79,8 @@ class FetchCommentsRequest(BaseFetchRequest) :
 
 class GetUserPostsRequest(BaseModel) :
 	handle: str
-	count: Optional[int] = 64
-	page: Optional[int] = 1
+	count: int = 64
+	page: int = 1
 
 
 class MediaType(BaseModel) :
@@ -82,8 +122,8 @@ class Post(BaseModel) :
 	rating: Rating
 	parent: Optional[PostId]
 	privacy: Privacy
-	created: Optional[datetime]
-	updated: Optional[datetime]
+	created: datetime
+	updated: datetime
 	filename: Optional[str]
 	media_type: Optional[MediaType]
 	size: Optional[PostSize]
@@ -113,8 +153,8 @@ class InternalPost(BaseModel) :
 	rating: Rating
 	parent: Optional[int]
 	privacy: Privacy
-	created: Optional[datetime]
-	updated: Optional[datetime]
+	created: datetime
+	updated: datetime
 	filename: Optional[str]
 	media_type: Optional[MediaType]
 	size: Optional[PostSize]

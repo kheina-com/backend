@@ -1,17 +1,18 @@
 from datetime import datetime
 from enum import Enum, unique
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 from uuid import UUID
 
 from avrofastapi.models import RefId
 from avrofastapi.schema import AvroInt
-from kh_common.base64 import b64decode
 from pydantic import BaseModel, validator
+
+from shared.base64 import b64decode
 
 
 @unique
 class AuthAlgorithm(Enum) :
-	ed25519: str = 'ed25519'
+	ed25519 = 'ed25519'
 
 
 class TokenRequest(BaseModel) :
@@ -100,8 +101,10 @@ class BotCreateRequest(BaseModel) :
 	user_id: int
 
 	@validator('bot_type', pre=True, always=True)
-	def _bot_type_validator(value) :
-		return BotType[value]
+	def _bot_type_validator(value: Union[str, BotType]) -> BotType : # type: ignore
+		if isinstance(value, str) :
+			return BotType[value]
+		return value
 
 
 class BotCreateResponse(BaseModel) :

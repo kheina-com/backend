@@ -1,13 +1,9 @@
-from asyncio import ensure_future
 from math import log10, sqrt
-from typing import Optional, Union
+from typing import Union
 
-from kh_common.auth import KhUser
-from kh_common.config.constants import epoch
-from kh_common.exceptions.http_error import BadRequest
 from scipy.stats import norm
 
-from .models import InternalScore, PostId, Score
+from shared.config.constants import epoch
 
 
 """
@@ -42,10 +38,11 @@ def confidence(up: int, total: int) -> float :
 	if not total :
 		return 0
 	phat = up / total
-	return (
+	return float(
 		(phat + z_score_08 * z_score_08 / (2 * total)
-		- z_score_08 * sqrt((phat * (1 - phat)
-		+ z_score_08 * z_score_08 / (4 * total)) / total)) / (1 + z_score_08 * z_score_08 / total)
+			- z_score_08 * sqrt((phat * (1 - phat)
+			+ z_score_08 * z_score_08 / (4 * total)) / total))
+		/ (1 + z_score_08 * z_score_08 / total)
 	)
 
 

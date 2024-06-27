@@ -1,5 +1,5 @@
 import os
-from typing import List, Tuple
+from typing import List
 
 import ujson as json
 
@@ -20,7 +20,7 @@ def secureFolders() -> List[str] :
 		return ['credentials']
 
 
-def safeJoin(*args: Tuple[str]) -> str :
+def safeJoin(*args) -> str :
 	path = os.path.realpath(os.path.join(*args))
 	if path.startswith(cwd) and all(folder not in path for folder in secureFolders()) and os.path.exists(path) :
 		return path

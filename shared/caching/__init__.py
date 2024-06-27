@@ -62,7 +62,7 @@ def SimpleCache(TTL_seconds:float=0, TTL_minutes:float=0, TTL_hours:float=0, TTL
 	def decorator(func: Callable) -> Callable :
 		if iscoroutinefunction(func) :
 			@wraps(func)
-			async def wrapper(*args: Tuple[Any], **kwargs:Dict[str, Any]) -> Any :
+			async def wrapper(*args: Tuple[Any], **kwargs:Dict[str, Any]) -> Any : # type: ignore
 				async with decorator.lock :
 					if time() > decorator.expire :
 						decorator.expire = time() + TTL
@@ -96,7 +96,7 @@ def ArgsCache(TTL_seconds:float=0, TTL_minutes:float=0, TTL_hours:float=0, TTL_d
 
 		if iscoroutinefunction(func) :
 			@wraps(func)
-			async def wrapper(*key: Tuple[Any], **kwargs:Dict[str, Any]) -> Any :
+			async def wrapper(*key: Tuple[Any], **kwargs:Dict[str, Any]) -> Any : # type: ignore
 				async with decorator.lock :
 					__clear_cache__(decorator.cache, time)
 
@@ -141,12 +141,12 @@ def KwargsCache(TTL_seconds:float=0, TTL_minutes:float=0, TTL_hours:float=0, TTL
 
 		arg_spec: FullArgSpec = getfullargspec(func)
 		kw = dict(zip(arg_spec.args[-len(arg_spec.defaults):], arg_spec.defaults)) if arg_spec.defaults else { }
-		arg_spec: Tuple[str] = tuple(arg_spec.args)
+		arg_spec = tuple(arg_spec.args) # type: ignore
 
 		if iscoroutinefunction(func) :
 			@wraps(func)
-			async def wrapper(*args: Tuple[Hashable], **kwargs:Dict[str, Hashable]) -> Any :
-				key: Tuple[Any] = _cache_stream({ **kw, **dict(zip(arg_spec, args)), **kwargs })
+			async def wrapper(*args: Tuple[Hashable], **kwargs:Dict[str, Hashable]) -> Any : # type: ignore
+				key: Tuple[Any, ...] = _cache_stream({ **kw, **dict(zip(arg_spec, args)), **kwargs })
 
 				async with decorator.lock :
 					__clear_cache__(decorator.cache, time)
@@ -162,7 +162,7 @@ def KwargsCache(TTL_seconds:float=0, TTL_minutes:float=0, TTL_hours:float=0, TTL
 		else :
 			@wraps(func)
 			def wrapper(*args: Tuple[Hashable], **kwargs:Dict[str, Hashable]) -> Any :
-				key: Tuple[Any] = _cache_stream({ **kw, **dict(zip(arg_spec, args)), **kwargs })
+				key: Tuple[Any, ...] = _cache_stream({ **kw, **dict(zip(arg_spec, args)), **kwargs })
 
 				__clear_cache__(decorator.cache, time)
 
@@ -218,33 +218,34 @@ def AerospikeCache(
 
 	def decorator(func: Callable) -> Callable :
 
-		arg_spec: FullArgSpec = getfullargspec(func)
-		kw: Dict[str, Hashable] = dict(zip(arg_spec.args[-len(arg_spec.defaults):], arg_spec.defaults)) if arg_spec.defaults else { }
-		return_type: type = arg_spec.annotations.get('return')
-		arg_spec: Tuple[str] = tuple(arg_spec.args)
+		argspec: FullArgSpec = getfullargspec(func)
+		kw: Dict[str, Hashable] = dict(zip(argspec.args[-len(argspec.defaults):], argspec.defaults)) if argspec.defaults else { }
+		return_type: type = argspec.annotations.get('return') # type: ignore
+		arg_spec: Tuple[str, ...] = tuple(argspec.args)
+		del argspec
 
 		if not return_type :
 			raise NotImplementedError('return type must be defined to validate cached response data. response type can be defined with "->". def ex() -> int:')
 
 		if iscoroutinefunction(func) :
 			@wraps(func)
-			async def wrapper(*args: Tuple[Hashable], **kwargs: Dict[str, Hashable]) -> Any :
+			async def wrapper(*args: Tuple[Hashable], **kwargs: Dict[str, Hashable]) -> Any : # type: ignore
 				key: str = key_format.format(**{ **kw, **dict(zip(arg_spec, args)), **kwargs })
 
-				data: Any
+				data: return_type
 
 				try :
-					data: Any = await decorator.kvs.get_async(key)
+					data = await decorator.kvs.get_async(key)
 
 				except aerospike.exception.RecordNotFound :
-					data: return_type = await func(*args, **kwargs)
+					data = await func(*args, **kwargs)
 
 					if writable :
 						await decorator.kvs.put_async(key, data, TTL)
 
 				else :
 					if type(data) != return_type :
-						data: return_type = await func(*args, **kwargs)
+						data = await func(*args, **kwargs)
 
 						if writable :
 							await decorator.kvs.put_async(key, data, TTL)
@@ -256,20 +257,20 @@ def AerospikeCache(
 			def wrapper(*args: Tuple[Hashable], **kwargs: Dict[str, Hashable]) -> Any :
 				key: str = key_format.format(**{ **kw, **dict(zip(arg_spec, args)), **kwargs })
 
-				data: Any
+				data: return_type
 
 				try :
-					data: Any = decorator.kvs.get(key)
+					data = decorator.kvs.get(key)
 
 				except aerospike.exception.RecordNotFound :
-					data: return_type = func(*args, **kwargs)
+					data = func(*args, **kwargs)
 
 					if writable :
 						decorator.kvs.put(key, data, TTL)
 
 				else :
 					if type(data) != return_type :
-						data: return_type = func(*args, **kwargs)
+						data = func(*args, **kwargs)
 
 						if writable :
 							decorator.kvs.put(key, data, TTL)
@@ -279,125 +280,4 @@ def AerospikeCache(
 		return wrapper
 
 	decorator.kvs = _kvs or KeyValueStore(namespace, set, local_TTL)
-	return decorator
-
-
-class SumAggregator :
-	def __init__(self) :
-		self.data = defaultdict(lambda : 0)
-	
-	def update(self, data: Dict) :
-		for k, v in data.items() :
-			self.data[k] += v
-	
-	def result(self) :
-		value = self.data.copy()
-		self.data.clear()
-		return value
-
-
-class AverageAggregator :
-	def __init__(self) :
-		self.data = defaultdict(lambda : 0)
-		self.count = 0
-	
-	def update(self, data: Dict) :
-		self.count += 1
-		for k, v in data.items() :
-			self.data[k] += (v - self.data[k]) / self.count
-	
-	def result(self) :
-		value = self.data.copy()
-		self.data.clear()
-		self.count = 0
-		return value
-
-
-class StandardDeviation :
-	def __init__(self, count, avg, q_value) :
-		self.average: float = avg
-		self.count: int = count
-		self.variance: float = q_value / (count - 1)
-		self.deviation: float = sqrt(self.variance)
-
-
-class StandardDeviationAggregator :
-	def __init__(self) :
-		self.avg = defaultdict(lambda : 0)
-		self.variance = defaultdict(lambda : 0)
-		self.count = 0
-
-	def update(self, data: Dict) :
-		self.count += 1
-		for k, v in data.items() :
-			prev_avg = self.avg[k]
-			self.avg[k] += (v - prev_avg) / self.count
-			self.variance[k] += (v - prev_avg) * (v - self.avg[k])
-
-	def result(self) :
-		value = {
-			k: StandardDeviation(self.count, avg, self.variance[k])
-			for k, avg in self.avg.items()
-		}
-		self.count = 0
-		self.avg.clear()
-		self.variance.clear()
-		return value
-
-
-class Aggregator :
-	Sum: type = SumAggregator
-	Average: type = AverageAggregator
-	StandardDeviation: type = StandardDeviationAggregator
-
-
-def Aggregate(TTL_seconds:float=0, TTL_minutes:float=0, TTL_hours:float=0, TTL_days:float=0, exclusions:Iterable[str]=['self'], aggregator:Aggregator=Aggregator.Average) -> Callable :
-	"""
-	aggregates numeric inputs for a given time span
-	"""
-
-	exclusions: Set[str] = set(exclusions)
-	aggregator = aggregator()
-	TTL: float = TTL_seconds + TTL_minutes * 60 + TTL_hours * 3600 + TTL_days * 86400
-	del TTL_seconds, TTL_minutes, TTL_hours, TTL_days
-
-	def decorator(func: Callable) -> Callable :
-
-		arg_spec: FullArgSpec = getfullargspec(func)
-
-		if iscoroutinefunction(func) :
-			@wraps(func)
-			async def wrapper(*args: Tuple[Any], **kwargs:Dict[str, Any]) -> Any :
-				kwargs.update(zip(arg_spec.args, args))
-				keys: Set[str] = kwargs.keys() - exclusions
-				aggregator.update({
-					key: kwargs[key]
-					for key in keys
-				})
-
-				now: float = time()
-				if now > decorator.expire :
-					decorator.expire = now + TTL
-					kwargs.update(aggregator.result())
-					return await func(**kwargs)
-
-		else :
-			@wraps(func)
-			def wrapper(*args: Tuple[Any], **kwargs:Dict[str, Any]) -> Any :
-				kwargs.update(zip(arg_spec.args, args))
-				keys: Set[str] = kwargs.keys() - exclusions
-				aggregator.update({
-					key: kwargs[key]
-					for key in keys
-				})
-
-				now: float = time()
-				if now > decorator.expire :
-					decorator.expire = now + TTL
-					kwargs.update(aggregator.result())
-					return func(**kwargs)
-
-		return wrapper
-
-	decorator.expire = time() + TTL
 	return decorator

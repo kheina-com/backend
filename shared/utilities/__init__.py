@@ -1,7 +1,9 @@
 from collections import OrderedDict
 from math import ceil
 from time import time
-from typing import Any, Callable, Hashable, Iterable, Tuple
+from typing import Any, Callable, Hashable, Iterable, Optional, Tuple, Type, TypeVar
+
+from pydantic import parse_obj_as
 
 
 def __clear_cache__(cache: OrderedDict[Hashable, Tuple[float, Any]], t: Callable[[], float] = time) -> None :
@@ -32,12 +34,14 @@ def getFullyQualifiedClassName(obj: object) -> str :
 	return obj.__class__.__name__
 
 
-def stringSlice(string: str, start:str=None, end:str=None) -> str :
-	if not string : return None
+def stringSlice(string: str, start: Optional[str] = None, end: Optional[str] = None) -> str :
+	if not string :
+		raise ValueError('input string is required')
+
 	assert start or end, 'start or end is required'
-	start = string.rfind(start) + len(start) if start else None
-	end = string.find(end) if end else None
-	return string[start:end]
+	s = string.rfind(start) + len(start) if start else 0
+	e = string.find(end) if end else -1
+	return string[s:e]
 
 
 def flatten(it: Iterable[Any]) -> Iterable[Any] :
@@ -59,3 +63,13 @@ def int_to_bytes(integer: int) -> bytes :
 
 def int_from_bytes(bytestring: bytes) -> int :
 	return int.from_bytes(bytestring, 'big')
+
+
+T = TypeVar('T')
+def coerse(obj: Any, type: Type[T]) -> T :
+	"""
+	attempts to convert an object of any type into the type given
+
+	:raises: pydantic.ValidationError on failure
+	"""
+	return parse_obj_as(type, obj)

@@ -56,7 +56,10 @@ app.add_middleware(
 	],
 	allowed_methods = [
 		'GET',
+		'PUT',
 		'POST',
+		'PATCH',
+		'DELETE',
 	],
 	exposed_headers = [
 		'authorization',

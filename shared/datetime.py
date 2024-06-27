@@ -5,9 +5,11 @@ from typing import Union
 
 class datetime(pydatetime) :
 
-	def fromtimestamp(timestamp: Union[int, float], timezone: timezone = timezone.utc) :
-		return pydatetime.fromtimestamp(timestamp, timezone)
+	@classmethod
+	def fromtimestamp(cls, timestamp: Union[int, float], timezone: timezone = timezone.utc) :
+		return super().fromtimestamp(timestamp, timezone)
 
 
-	def now(timezone: timezone = timezone.utc) :
-		return pydatetime.now(timezone)
+	@classmethod
+	def now(cls, timezone: timezone = timezone.utc) :
+		return super().now(timezone)
