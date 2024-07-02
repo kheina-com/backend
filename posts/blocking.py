@@ -5,7 +5,7 @@ from configs.models import UserConfig
 from shared.auth import KhUser
 from shared.caching import AerospikeCache, ArgsCache, SimpleCache
 from shared.models.user import InternalUser
-from shared.utilities import stacktrace
+
 
 configs = Configs()
 
@@ -92,7 +92,6 @@ class BlockTree :
 
 
 @ArgsCache(30)
-@stacktrace
 async def fetch_block_tree(user: KhUser) -> Tuple[BlockTree, UserConfig] :
 	tree: BlockTree = BlockTree()
 

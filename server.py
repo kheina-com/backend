@@ -86,8 +86,3 @@ app.include_router(sets)
 app.include_router(tags)
 app.include_router(uploader)
 app.include_router(users)
-
-if __name__ == '__main__' :
-	from uvicorn.main import run
-	print("==> environment:", environment)
-	run(app, host='0.0.0.0', port=5000)

@@ -11,6 +11,7 @@ from shared.exceptions.http_error import HttpErrorHandler, NotFound
 from shared.sql import SqlInterface
 from shared.utilities import getFullyQualifiedClassName
 
+
 KVS: KeyValueStore = KeyValueStore('kheina', 'avro_schemas', local_TTL=60)
 crc: CRC = CRC(64)
 

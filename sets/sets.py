@@ -15,7 +15,7 @@ from shared.sql import SqlInterface
 from users.repository import Users
 
 from .models import InternalSet, PostSet, Set, SetId, SetNeighbors, UpdateSetRequest
-from .repository import SetKVS, SetNotFound, Sets
+from .repository import SetKVS, SetNotFound, Sets  # type: ignore
 
 
 """
@@ -46,8 +46,17 @@ users = Users()
 
 class Sets(Sets) :
 
+	@staticmethod
 	async def _verify_authorized(user: KhUser, iset: InternalSet) -> bool :
 		return user.user_id == iset.set_id or await user.verify_scope(Scope.mod, raise_error=False)
+
+
+	@staticmethod
+	def _validate_str(value: Optional[str], mask: str) -> str :
+		if value :
+			return value
+		
+		raise BadRequest(f'the provided {mask} value is invalid: {value}.')
 
 
 	@ArgsCache(float('inf'))
@@ -81,7 +90,7 @@ class Sets(Sets) :
 
 
 	@ArgsCache(float('inf'))
-	async def _id_to_media_type(self: Self, media_type_id: int) -> MediaType :
+	async def _id_to_media_type(self: Self, media_type_id: int) -> Optional[MediaType] :
 		if media_type_id is None :
 			return None
 
@@ -156,10 +165,12 @@ class Sets(Sets) :
 			privacy=privacy,
 			created=data[0],
 			updated=data[1],
+			first=None,
+			last=None,
 		)
 
 		ensure_future(SetKVS.put_async(set_id, iset))
-		return await self(iset, user)
+		return await self.set(iset, user)
 
 
 	@HttpErrorHandler('retrieving set')
@@ -179,14 +190,14 @@ class Sets(Sets) :
 		if not Sets._verify_authorized(user, iset) :
 			raise NotFound(SetNotFound.format(set_id=set_id))
 
-		params: List[Union[str, UserPrivacy, None]] = []
+		params: List[Union[str, UserPrivacy, int, None]] = []
 		bad_mask: List[str] = []
 		query: List[str] = []
 
 		for m in req.mask :
 
 			if m == 'owner' :
-				owner: int = await users._handle_to_user_id(req.owner)
+				owner: int = await users._handle_to_user_id(self._validate_str(req.owner, m))
 				params.append(owner)
 				iset.owner = owner
 				query.append(m + ' = %s')

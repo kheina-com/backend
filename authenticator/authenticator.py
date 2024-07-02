@@ -14,6 +14,7 @@ from avrofastapi.models import RefId
 from avrofastapi.serialization import AvroDeserializer, AvroSerializer
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from psycopg2 import Binary
 from psycopg2.errors import UniqueViolation
 
 from shared import logging
@@ -26,7 +27,6 @@ from shared.hashing import Hashable
 from shared.models.auth import AuthState, Scope, TokenMetadata
 from shared.sql import SqlInterface
 from shared.utilities.json import json_stream
-from psycopg2 import Binary
 
 from .models import AuthAlgorithm, BotCreateResponse, BotLogin, BotType, LoginResponse, PublicKeyResponse, TokenResponse
 

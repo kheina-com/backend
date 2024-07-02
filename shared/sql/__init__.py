@@ -1,5 +1,6 @@
 from asyncio import get_event_loop
 from concurrent.futures import ThreadPoolExecutor
+from enum import Enum
 from functools import partial
 from types import TracebackType
 from typing import Any, Callable, Dict, Optional, Type, Union
@@ -14,12 +15,11 @@ from ..config.credentials import fetch
 from ..logging import Logger, getLogger
 from ..sql.query import Query
 from ..timing import Timer
-from enum import Enum
 
 
 class SqlInterface :
 
-	db = fetch('db')
+	db: Dict[str, str] = { }
 
 	def __init__(self: 'SqlInterface', long_query_metric: float = 1, conversions: Dict[type, Callable] = { }) -> None :
 		self.logger: Logger = getLogger()
@@ -30,6 +30,7 @@ class SqlInterface :
 			Enum: lambda x : x.name,
 			**conversions,
 		}
+		SqlInterface.db = fetch('db', Dict[str, str])
 
 
 	def _sql_connect(self: 'SqlInterface') -> Connection :

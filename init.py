@@ -3,6 +3,7 @@ from os import listdir, remove
 from os.path import isfile, join
 from secrets import token_bytes
 
+import ujson
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -11,7 +12,6 @@ from account.models import LoginRequest
 from shared.backblaze import B2Interface
 from shared.base64 import b64encode
 from shared.sql import SqlInterface
-import ujson
 
 
 def startup() -> None :
