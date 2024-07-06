@@ -36,39 +36,36 @@ def execSql(unlock: bool = False) -> None :
 	files within those folders are treated the same.
 	"""
 	sql = SqlInterface()
-	conn = sql._sql_connect()
-	cur = conn.cursor()
+	with sql.pool.conn() as conn :
+		cur = conn.cursor()
 
-	sqllock = None
-	if not unlock and isfile('sql.lock') :
-		sqllock = open('sql.lock').read()
-		click.echo(f'==> sql.lock: {sqllock}')
+		sqllock = None
+		if not unlock and isfile('sql.lock') :
+			sqllock = int(open('sql.lock').read().strip())
+			click.echo(f'==> sql.lock: {sqllock}')
 
-	dirs = sorted(i for i in listdir('db') if isdir(f'db/{i}'))
-	dir = ""
-	for dir in dirs :
-		if dir != str(int(dir)) :
-			continue
-
-		if sqllock and sqllock >= dir :
-			continue
-
-		files = [join('db', dir, file) for file in sorted(listdir(join('db', dir)))]
-		for file in files :
-			if not isfile(file) :
+		dirs = sorted(int(i) for i in listdir('db') if isdir(f'db/{i}') and i == str(int(i)))
+		dir = ""
+		for dir in dirs :
+			if sqllock and sqllock >= dir :
 				continue
 
-			if not file.endswith('.sql') :
-				continue
+			files = [join('db', str(dir), file) for file in sorted(listdir(join('db', str(dir))))]
+			for file in files :
+				if not isfile(file) :
+					continue
 
-			with open(file) as f :
-				click.echo(f'==> exec: {file}')
-				cur.execute(f.read())
+				if not file.endswith('.sql') :
+					continue
 
-	conn.commit()
+				with open(file) as f :
+					click.echo(f'==> exec: {file}')
+					cur.execute(f.read())
 
-	with open('sql.lock', 'w') as f :
-		f.write(dir)
+		conn.commit()
+
+		with open('sql.lock', 'w') as f :
+			f.write(str(dir))
 
 
 @cli.command('icon')
