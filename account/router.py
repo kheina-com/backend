@@ -35,7 +35,7 @@ async def v1Login(req: Request, body: LoginRequest) :
 	return response
 
 
-@app.post('/logout', status_code=204)
+@app.delete('/logout', status_code=204)
 async def v1Logout(req: Request) :
 	await req.user.authenticated()
 
@@ -81,7 +81,7 @@ async def v1BotCreate(req: Request) :
 	return auth.createBot(BotType.bot, req.user.user_id)
 
 
-@app.get('/bot_internal', response_model=BotCreateResponse)
-async def v1BotCreateInternal(req: Request) :
-	await req.user.verify_scope(Scope.admin)
-	return auth.createBot(BotType.internal, req.user.user_id)
+# @app.get('/bot_internal', response_model=BotCreateResponse)
+# async def v1BotCreateInternal(req: Request) :
+# 	await req.user.verify_scope(Scope.admin)
+# 	return auth.createBot(BotType.internal, req.user.user_id)

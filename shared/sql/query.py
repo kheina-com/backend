@@ -1,16 +1,18 @@
 from dataclasses import dataclass
 from enum import Enum, unique
-from typing import Any, Generator, List, Optional, Tuple, Union
+from functools import lru_cache
+from re import compile
+from typing import Any, Generator, List, Optional, Self, Tuple, Union
 
 
 @unique
 class Order(Enum) :
-	ascending = 'ASC'
-	ascending_nulls_first = 'ASC NULLS FIRST'
-	ascending_nulls_last = 'ASC NULLS LAST'
-	descending = 'DESC'
+	ascending              = 'ASC'
+	ascending_nulls_first  = 'ASC NULLS FIRST'
+	ascending_nulls_last   = 'ASC NULLS LAST'
+	descending             = 'DESC'
 	descending_nulls_first = 'DESC NULLS FIRST'
-	descending_nulls_last = 'DESC NULLS LAST'
+	descending_nulls_last  = 'DESC NULLS LAST'
 
 
 @unique
@@ -18,29 +20,29 @@ class JoinType(Enum) :
 	inner = 'INNER JOIN'
 	outer = 'FULL OUTER JOIN'
 	cross = 'CROSS JOIN'
-	left = 'LEFT JOIN'
+	left  = 'LEFT JOIN'
 	right = 'RIGHT JOIN'
 
 
 @unique
 class Operator(Enum) :
-	equal = '{} = {}'
-	not_equal = '{} != {}'
-	greater_than = '{} > {}'
+	equal                 = '{} = {}'
+	not_equal             = '{} != {}'
+	greater_than          = '{} > {}'
 	greater_than_equal_to = '{} >= {}'
-	less_than = '{} < {}'
-	less_than_equal_to = '{} <= {}'
-	like = '{} LIKE {}'
-	not_like = '{} NOT LIKE {}'
-	within = '{} IN {}'
-	not_in = '{} NOT IN {}'
-	is_null = '{} IS NULL'
-	is_not_null = '{} IS NOT NULL'
+	less_than             = '{} < {}'
+	less_than_equal_to    = '{} <= {}'
+	like                  = '{} LIKE {}'
+	not_like              = '{} NOT LIKE {}'
+	within                = '{} IN {}'
+	not_in                = '{} NOT IN {}'
+	is_null               = '{} IS NULL'
+	is_not_null           = '{} IS NOT NULL'
 
 
 @dataclass
 class Value :
-	value: Any
+	value:    Any
 	function: Optional[str] = None
 
 	def __str__(self) :
@@ -48,14 +50,14 @@ class Value :
 			return f'{self.function}(%s)'
 		return '%s'
 
-	def params(self) -> Any :
+	def params(self) -> Generator[Any, Any, None] :
 		yield self.value
 
 
 @dataclass
 class Field :
-	table: str
-	column: str
+	table:    str
+	column:   str
 	function: Optional[str] = None
 
 	def __str__(self) :
@@ -69,9 +71,9 @@ class Field :
 
 @dataclass
 class Where :
-	field: Union[Field, Value, 'Query']
+	field:    Union[Field, Value, 'Query']
 	operator: Operator
-	value: Union[Field, Value, 'Query']
+	value:    Union[Field, Value, 'Query']
 
 	def __str__(self) :
 		if self.operator in { Operator.is_null, Operator.is_not_null } :
@@ -81,11 +83,11 @@ class Where :
 			return self.operator.value.format(self.field, self.value)
 
 	def params(self) -> Generator[Any, None, None] :
-		if hasattr(self.field, 'params') :
-			yield from self.field.params() # type: ignore
+		if isinstance(self.field, (Value, Query)) :
+			yield from self.field.params()
 
-		if hasattr(self.value, 'params') and self.operator not in { Operator.is_null, Operator.is_not_null } :
-			yield from self.value.params() # type: ignore
+		if isinstance(self.value, (Value, Query)) and self.operator not in { Operator.is_null, Operator.is_not_null } :
+			yield from self.value.params()
 
 
 class Table :
@@ -95,7 +97,7 @@ class Table :
 		assert string.count('.') == 2
 		if alias :
 			self.__value__ = string + ' AS ' + alias
-		
+
 		else :
 			self.__value__ = string
 
@@ -112,9 +114,9 @@ class Join :
 		assert type(join_type) == JoinType
 		assert type(table) == Table
 
-		self._join_type: JoinType = join_type
-		self._table: Table = table
-		self._where: List[Where] = []
+		self._join_type: JoinType    = join_type
+		self._table:     Table       = table
+		self._where:     List[Where] = []
 
 	def where(self, *where: Where) :
 		for w in where :
@@ -134,30 +136,117 @@ class Join :
 			yield from where.params()
 
 
+_col_regex = compile(r'^\w+$')
+@lru_cache(maxsize=None)
+def __sanitize__(col: str) -> str :
+	"""
+	throws an error when a column doesn't just use alphanumerics
+	"""
+	if not _col_regex.fullmatch(col) :
+		raise ValueError(f'column does not match pattern: {col}')
+
+	return col
+
+
+class Insert :
+
+	def __init__(self, *columns: str) :
+		self.columns: Tuple[str, ...] = tuple(map(__sanitize__, columns))
+
+		self._values:    List[Tuple[Union[Field, Value, 'Query'], ...]] = []
+
+
+	def values(self: Self, *values: Union[Field, Value, 'Query']) -> Self :
+		assert len(values) == len(self.columns)
+		self._values.append(values)
+		return self
+
+
+	def params(self: Self) :
+		for values in self._values :
+			for value in values :
+				if isinstance(value, (Value, Query)) :
+					yield from value.params()
+
+
+	def __str__(self) :
+		assert self._values
+		return (
+			'(' + ','.join(self.columns) + ')' +
+			'VALUES' +
+			','.join(['(' + ','.join(tuple(map(str, i))) + ')' for i in self._values])
+		)
+
+
+class Update :
+
+	def __init__(self, column: str, value: Value) -> None :
+		self.column: str   = __sanitize__(column)
+		self.value:  Value = value
+
+
+	def __str__(self: Self) :
+		return self.column + '=%s'
+
+
+	def params(self) -> Generator[Any, Any, None] :
+		yield from self.value.params()
+
+
 class Query :
 
-	def __init__(self, table: Table) :
+	def __init__(self, table: Table) -> None :
 		assert type(table) == Table
 
-		self._table: Table = table
-		self._joins: List[Join] = []
-		self._select: List[Field] = []
-		self._where: List[Where] = []
-		self._having: List[Where] = []
-		self._group: List[Field] = []
-		self._order: List[Tuple[Field, Order]] = []
-		self._limit: Optional[int] = None
-		self._offset: Optional[int] = None
-		self._function: Optional[str] = None
+		self._table:     Table                     = table
+		self._joins:     List[Join]                = []
+		self._select:    List[Field]               = []
+		self._where:     List[Where]               = []
+		self._having:    List[Where]               = []
+		self._group:     List[Field]               = []
+		self._order:     List[Tuple[Field, Order]] = []
+		self._update:    List[Update]              = []
+		self._limit:     Optional[int]             = None
+		self._offset:    Optional[int]             = None
+		self._function:  Optional[str]             = None
+		self._delete:    Optional[bool]            = None
+		self._insert:    Optional[Insert]          = None
+		self._returning: Optional[Tuple[str, ...]] = None
 
 
-	def __build_query__(self) :
-		# something needs to be selected
-		assert self._select
+	def __build_query__(self: Self) -> str :
+		if self._insert :
+			assert not self._select
+			sql = f'INSERT INTO {self._table} ' + str(self._insert)
 
-		query = f'SELECT {",".join(list(map(str, self._select)))} FROM {self._table}'
+			if self._returning :
+				return sql + 'RETURNING ' + ','.join(self._returning)
+
+			return sql
+
+		query: str
+		select = False
+
+		if self._update :
+			query = (
+				f'UPDATE {self._table} SET ' +
+				','.join(list(map(str, self._update)))
+			)
+
+		elif self._select :
+			select = True
+			query = f'SELECT {",".join(list(map(str, self._select)))} FROM {self._table}'
+
+		elif self._delete :
+			query = f'DELETE FROM {self._table}'
+
+		else :
+			raise ValueError('Query requires one of: insert, select, update, delete.')
 
 		if self._joins :
+			if not select :
+				raise NotImplementedError("haven't done this yet lol")
+
 			query += (
 				' ' +
 				' '.join(list(map(str, self._joins)))
@@ -170,44 +259,59 @@ class Query :
 			)
 
 		if self._group :
+			assert select
 			query += (
 				' GROUP BY ' +
 				','.join(list(map(str, self._group)))
 			)
 
 		if self._having :
+			assert select
 			query += (
 				' HAVING ' +
 				' AND '.join(list(map(str, self._having)))
 			)
 
 		if self._order :
+			assert select
 			query += (
 				' ORDER BY ' +
 				','.join(list(map(lambda x : f'{x[0]} {x[1].value}', self._order)))
 			)
 
 		if self._limit :
+			assert select
 			query += ' LIMIT %s'
 
 		if self._offset :
+			assert select
 			query += ' OFFSET %s'
+
+		if self._returning :
+			assert not select
+			query += ' RETURNING ' + ','.join(self._returning)
 
 		return query
 
-	def __str__(self) :
+	def __str__(self: Self) -> str :
 		if self._function :
 			return f'{self._function}(' + self.__build_query__() + ')'
 		return '(' + self.__build_query__() + ')'
 
-	def build(self) :
+	def build(self: Self) -> Tuple[str, Tuple[Any, ...]] :
 		return self.__build_query__() + ';', tuple(self.params())
 
-	def params(self) -> List[Any] :
-		# something needs to be selected
-		assert self._select
+	def params(self: Self) -> List[Any] :
+		if self._insert :
+			assert not self._select
+			return list(self._insert.params())
 
 		params = []
+
+		if self._update :
+			assert not self._select
+			for update in self._update :
+				params += list(update.params())
 
 		if self._joins :
 			for join in self._joins :
@@ -229,58 +333,76 @@ class Query :
 
 		return params
 
-	def select(self, *field: Field) :
+	def select(self: Self, *field: Field) -> Self :
 		for f in field :
 			assert type(f) == Field
 			self._select.append(f)
 		return self
 
-	def join(self, *join: Join) :
+	def join(self: Self, *join: Join) -> Self :
 		for j in join :
 			assert type(j) == Join
 			self._joins.append(j)
 		return self
 
-	def where(self, *where: Where) :
+	def where(self: Self, *where: Where) -> Self :
 		for w in where :
 			assert type(w) == Where
 			self._where.append(w)
 		return self
 
-	def group(self, *field: Field) :
+	def group(self: Self, *field: Field) -> Self :
 		for f in field :
 			assert type(f) == Field
 			self._group.append(f)
 		return self
 
-	def having(self, *having: Where) :
+	def having(self: Self, *having: Where) -> Self :
 		for h in having :
 			assert type(h) == Where
 			self._having.append(h)
 		return self
 
-	def order(self, field: Field, order: Order) :
+	def order(self: Self, field: Field, order: Order) -> Self :
 		assert type(field) == Field
 		assert type(order) == Order
 		self._order.append((field, order))
 		return self
 
-	def limit(self, records: int) :
+	def limit(self: Self, records: int) -> Self :
 		assert records > 0
 		self._limit = records
 		return self
 
-	def offset(self, records: int) :
+	def offset(self: Self, records: int) -> Self :
 		assert records > 0
 		self._offset = records
 		return self
 
-	def page(self, page: int) :
+	def page(self: Self, page: int) -> Self :
 		assert page > 0
 		assert self._limit and self._limit > 0
 		self._offset = self._limit * (page - 1)
 		return self
 
-	def function(self, function: str) :
+	def function(self: Self, function: str) -> Self :
 		self._function = function
+		return self
+
+	def insert(self: Self, insert: Insert) -> Self :
+		self._insert = insert
+		return self
+
+	def update(self: Self, *update: Update) -> Self :
+		for u in update :
+			assert type(u) == Update
+			self._update.append(u)
+		return self
+
+	def delete(self: Self) -> Self :
+		self._delete = True
+		return self
+
+	def returning(self: Self, *returning: str) -> Self :
+		self._returning = tuple(map(__sanitize__, returning))
 		return self

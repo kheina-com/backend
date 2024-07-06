@@ -23,7 +23,7 @@ class CreateRequest(BaseModel) :
 	privacy: Optional[Privacy]
 
 	@validator('reply_to', pre=True, always=True)
-	def _parent_validator(value) :
+	def _parent_validator(cls, value) :
 		if value :
 			return PostId(value)
 

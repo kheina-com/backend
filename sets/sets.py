@@ -1,10 +1,10 @@
 from asyncio import Task, ensure_future, wait
 from collections import defaultdict
 from enum import Enum
-from typing import Dict, List, Optional, Self, Tuple, Union
+from typing import Dict, List, Literal, Optional, Self, Tuple, Union, get_args
 
 from posts.models import InternalPost, MediaType, Post, PostId, PostSize, Privacy, Rating
-from posts.repository import Posts
+from posts.repository import Posts, privacy_map
 from shared.auth import KhUser, Scope
 from shared.caching import AerospikeCache, ArgsCache
 from shared.datetime import datetime
@@ -57,6 +57,19 @@ class Sets(Sets) :
 			return value
 		
 		raise BadRequest(f'the provided {mask} value is invalid: {value}.')
+
+
+	@staticmethod
+	def _validate_privacy(p: Optional[Privacy]) -> int :
+		try :
+			assert p is not None, 'privacy value must be public or private'
+
+		except AssertionError as e :
+			raise BadRequest(str(e))
+
+		ip = privacy_map[p]
+		assert isinstance(ip, int)
+		return ip
 
 
 	@ArgsCache(float('inf'))
@@ -123,7 +136,9 @@ class Sets(Sets) :
 			fetch_one=True,
 		)
 
-		return UserPrivacy(data[0])
+		p = Privacy(data[0])
+		assert p == Privacy.public or p == Privacy.private
+		return p
 
 
 	@HttpErrorHandler('creating a set')
@@ -162,7 +177,7 @@ class Sets(Sets) :
 			count=0,
 			title=title,
 			description=description,
-			privacy=privacy,
+			privacy=Sets._validate_privacy(privacy),
 			created=data[0],
 			updated=data[1],
 			first=None,
@@ -214,7 +229,7 @@ class Sets(Sets) :
 
 			elif m == 'privacy' :
 				params.append(req.privacy)
-				iset.privacy = req.privacy
+				iset.privacy = Sets._validate_privacy(req.privacy)
 				query.append(m + ' = privacy_to_id(%s)')
 
 			else :
@@ -350,6 +365,7 @@ class Sets(Sets) :
 			int, int, Optional[str], Optional[str], int, datetime, datetime,  # set
 			int, int,  # post index
 			int, Optional[str], Optional[str], int, int, datetime, datetime, Optional[str], int, int, int, int, int,  # posts
+			int, int, int, # first, last, index
 		]] = await self.query_async("""
 			WITH post_sets AS (
 				SELECT
@@ -395,14 +411,14 @@ class Sets(Sets) :
 				posts.description,
 				posts.rating,
 				posts.parent,
-				posts.created_on,
-				posts.updated_on,
+				posts.created,
+				posts.updated,
 				posts.filename,
-				posts.media_type_id,
+				posts.media_type,
 				posts.width,
 				posts.height,
 				posts.uploader,
-				posts.privacy_id,
+				posts.privacy,
 				f.first,
 				l.last,
 				l.index
@@ -440,11 +456,11 @@ class Sets(Sets) :
 						owner=row[1],
 						title=row[2],
 						description=row[3],
-						privacy=await self._id_to_set_privacy(row[4]),
+						privacy=row[4],
 						created=row[5],
 						updated=row[6],
-						first=row[22],
-						last=row[23],
+						first=PostId(row[22]),
+						last=PostId(row[23]),
 						count=row[24] + 1,
 					),
 				))
@@ -455,18 +471,18 @@ class Sets(Sets) :
 					post_id=row[9],
 					title=row[10],
 					description=row[11],
-					rating=await self._id_to_rating(row[12]),
+					rating=row[12],
 					parent=row[13],
 					created=row[14],
 					updated=row[15],
 					filename=row[16],
-					media_type=await self._id_to_media_type(row[17]),
+					media_type=row[17],
 					size=PostSize(
 						width=row[18],
 						height=row[19],
 					) if row[18] and row[19] else None,
 					user_id=row[20],
-					privacy=await self._id_to_privacy(row[21]),
+					privacy=row[21],
 				),
 			))
 
@@ -507,7 +523,11 @@ class Sets(Sets) :
 	async def get_user_sets(self: Self, user: KhUser, handle: str) -> List[Set] :
 		owner: int = await users._handle_to_user_id(handle)
 		# TODO: MISSING FINAL SELECT
-		data: List[Tuple[int, int, Optional[str], Optional[str], int, datetime, datetime]] = await self.query_async("""
+		data: List[Tuple[
+			int, int, Optional[str], Optional[str], int, datetime, datetime, # set
+			int, int, # first
+			int, int, # last
+		]] = await self.query_async("""
 			WITH user_sets AS (
 				SELECT
 					sets.set_id,
@@ -520,24 +540,46 @@ class Sets(Sets) :
 				FROM kheina.public.sets
 				WHERE sets.owner = %s
 			), f AS (
-				SELECT set_post.set_id, post_id AS first, index
+				SELECT
+					post_id AS first,
+					index
 				FROM user_sets
 					INNER JOIN kheina.public.set_post
 						ON set_post.set_id = user_sets.set_id
 				ORDER BY set_post.index ASC
 				LIMIT 1
 			), l AS (
-				SELECT set_post.set_id, post_id AS last, index
+				SELECT
+					post_id AS last,
+					index
 				FROM user_sets
 					INNER JOIN kheina.public.set_post
 						ON set_post.set_id = user_sets.set_id
 				ORDER BY set_post.index DESC
 				LIMIT 1
 			)
+			SELECT
+				user_sets.set_id,
+				user_sets.owner,
+				user_sets.title,
+				user_sets.description,
+				user_sets.privacy,
+				user_sets.created,
+				user_sets.updated,
+				f.first,
+				l.last,
+				l.index
+			FROM user_sets
+				INNER JOIN f
+					ON true
+				INNER JOIN l
+					ON true;
 			""",
 			(owner,),
 			fetch_all=True,
 		)
+
+
 
 		isets: List[InternalSet] = [
 			InternalSet(
@@ -545,10 +587,12 @@ class Sets(Sets) :
 				owner=row[1],
 				title=row[2],
 				description=row[3],
-				privacy=await self._id_to_set_privacy(row[4]),
+				privacy=row[4],
 				created=row[5],
 				updated=row[6],
-				count=0 if row[7] is None else row[7] + 1,  # set indices are 0-indexed, so add one
+				first=PostId(row[7]) if row[7] is not None else None,
+				last=PostId(row[8]) if row[8] is not None else None,
+				count=0 if row[9] is None else row[9] + 1,  # set indices are 0-indexed, so add one
 			)
 			for row in data
 		]

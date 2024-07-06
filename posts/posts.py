@@ -58,7 +58,7 @@ class Posts(Posts) :
 			data = await self.query_async("""
 				SELECT COUNT(1)
 				FROM kheina.public.posts
-				WHERE posts.privacy_id = privacy_to_id('public');
+				WHERE posts.privacy = privacy_to_id('public');
 				""",
 				fetch_one=True,
 			)
@@ -70,7 +70,7 @@ class Posts(Posts) :
 				SELECT COUNT(1)
 				FROM kheina.public.posts
 				WHERE posts.uploader = %s
-					AND posts.privacy_id = privacy_to_id('public');
+					AND posts.privacy = privacy_to_id('public');
 				""",
 				(user_id,),
 				fetch_one=True,
@@ -82,7 +82,7 @@ class Posts(Posts) :
 				SELECT COUNT(1)
 				FROM kheina.public.posts
 				WHERE posts.rating = %s
-					AND posts.privacy_id = privacy_to_id('public');
+					AND posts.privacy = privacy_to_id('public');
 				""",
 				(rating_map[tag],), # type: ignore
 				fetch_one=True,
@@ -97,7 +97,7 @@ class Posts(Posts) :
 						ON tags.tag_id = tag_post.tag_id
 					INNER JOIN kheina.public.posts
 						ON tag_post.post_id = posts.post_id
-							AND posts.privacy_id = privacy_to_id('public')
+							AND posts.privacy = privacy_to_id('public')
 				WHERE tags.tag = %s;
 				""",
 				(tag,),
@@ -239,7 +239,7 @@ class Posts(Posts) :
 							Field('tag_post', 'post_id'),
 						),
 						Where(
-							Field('posts', 'privacy_id'),
+							Field('posts', 'privacy'),
 							Operator.equal,
 							Value(privacy_map[Privacy.public]),
 						),
@@ -276,7 +276,7 @@ class Posts(Posts) :
 							Field('users', 'user_id'),
 						),
 						Where(
-							Field('posts', 'privacy_id'),
+							Field('posts', 'privacy'),
 							Operator.equal,
 							Value(privacy_map[Privacy.public]),
 						),
@@ -299,7 +299,7 @@ class Posts(Posts) :
 					),
 				).where(
 					Where(
-						Field('posts', 'privacy_id'),
+						Field('posts', 'privacy'),
 						Operator.equal,
 						Value(privacy_map[Privacy.public]),
 					),
@@ -445,7 +445,7 @@ class Posts(Posts) :
 				),
 			).where(
 				Where(
-					Field('posts', 'privacy_id'),
+					Field('posts', 'privacy'),
 					Operator.equal,
 					Value(privacy_map[Privacy.public]),
 				),
@@ -467,7 +467,7 @@ class Posts(Posts) :
 
 			else :
 				query.order(
-					Field('posts', 'created_on'),
+					Field('posts', 'created'),
 					Order.descending_nulls_first if sort == PostSort.new else Order.ascending_nulls_last,
 				).group(
 					Field('posts', 'post_id'),
@@ -479,7 +479,7 @@ class Posts(Posts) :
 				Field('post_scores', sort.name),
 				Order.descending_nulls_first,
 			).order(
-				Field('posts', 'created_on'),
+				Field('posts', 'created'),
 				Order.descending_nulls_first,
 			).join(
 				Join(
@@ -562,20 +562,20 @@ class Posts(Posts) :
 				posts.description,
 				posts.rating,
 				posts.parent,
-				posts.created_on,
-				posts.updated_on,
+				posts.created,
+				posts.updated,
 				posts.filename,
-				posts.media_type_id,
+				posts.media_type,
 				posts.width,
 				posts.height,
 				posts.uploader,
-				posts.privacy_id,
+				posts.privacy,
 				posts.thumbhash
 			FROM kheina.public.posts
 				LEFT JOIN kheina.public.post_scores
 					ON post_scores.post_id = posts.post_id
 			WHERE posts.parent = %s
-				AND posts.privacy_id = privacy_to_id('public')
+				AND posts.privacy = privacy_to_id('public')
 			ORDER BY post_scores.{sort.name} DESC NULLS LAST
 			LIMIT %s
 			OFFSET %s;
@@ -627,12 +627,12 @@ class Posts(Posts) :
 			),
 		).where(
 			Where(
-				Field('posts', 'privacy_id'),
+				Field('posts', 'privacy'),
 				Operator.equal,
 				Value(privacy_map[Privacy.public]),
 			),
 		).order(
-			Field('posts', 'created_on'),
+			Field('posts', 'created'),
 			Order.descending_nulls_first,
 		).limit(
 			count,
@@ -666,12 +666,12 @@ class Posts(Posts) :
 			),
 		).where(
 			Where(
-				Field('posts', 'privacy_id'),
+				Field('posts', 'privacy'),
 				Operator.equal,
 				Value(privacy_map[Privacy.public]),
 			),
 			Where(
-				Field('posts', 'created_on'),
+				Field('posts', 'created'),
 				Operator.greater_than_equal_to,
 				Value(now - timedelta(days=1)),
 			),
@@ -679,7 +679,7 @@ class Posts(Posts) :
 			Field('posts', 'post_id'),
 			Field('users', 'user_id'),
 		).order(
-			Field('posts', 'created_on'),
+			Field('posts', 'created'),
 			Order.descending_nulls_first,
 		)
 
@@ -746,7 +746,7 @@ class Posts(Posts) :
 
 		if sort in { PostSort.new, PostSort.old } :
 			query.order(
-				Field('posts', 'created_on'),
+				Field('posts', 'created'),
 				Order.descending_nulls_first if sort == PostSort.new else Order.ascending_nulls_last,
 			)
 
@@ -755,7 +755,7 @@ class Posts(Posts) :
 				Field('post_scores', sort.name),
 				Order.descending_nulls_first,
 			).order(
-				Field('posts', 'created_on'),
+				Field('posts', 'created'),
 				Order.descending_nulls_first,
 			)
 
@@ -796,12 +796,12 @@ class Posts(Posts) :
 				Value(user.user_id),				
 			),
 			Where(
-				Field('posts', 'privacy_id'),
+				Field('posts', 'privacy'),
 				Operator.equal,
 				Value(privacy_map[Privacy.draft]),				
 			),
 		).order(
-			Field('posts', 'created_on'),
+			Field('posts', 'created'),
 			Order.descending_nulls_first,
 		)
 

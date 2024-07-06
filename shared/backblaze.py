@@ -1,9 +1,13 @@
+from asyncio import get_event_loop
 from asyncio import sleep as sleep_async
 from base64 import b64encode
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from hashlib import sha1 as hashlib_sha1
 from io import BytesIO
 from time import sleep
-from typing import Any, Dict, Optional, Union
+from types import TracebackType
+from typing import Any, Dict, Optional, Self, Type, Union
 from urllib.parse import quote, unquote
 
 import ujson as json
@@ -14,6 +18,7 @@ from minio.datatypes import Object
 from requests import Response
 from requests import get as requests_get
 from requests import post as requests_post
+from urllib3.response import HTTPResponse
 
 from .config.constants import environment
 from .config.credentials import fetch
@@ -21,12 +26,27 @@ from .exceptions.base_error import BaseError
 from .logging import Logger, getLogger
 
 
-class B2AuthorizationError(BaseError) :
-	pass
-
-
 class B2UploadError(BaseError) :
 	pass
+
+
+class FileResponse :
+	def __init__(self: 'FileResponse', res: HTTPResponse) :
+		self.res: HTTPResponse = res
+
+
+	def __enter__(self: Self) -> Self :
+		return self
+
+
+	def __exit__(self: Self, exc_type: Optional[Type[BaseException]], exc_obj: Optional[BaseException], exc_tb: Optional[TracebackType]) :
+		self.res.close()
+		self.res.release_conn()
+
+
+	async def read(self: Self) :
+		with ThreadPoolExecutor() as threadpool :
+			return await get_event_loop().run_in_executor(threadpool, self.res.read)
 
 
 class B2Interface :
@@ -183,7 +203,12 @@ class B2Interface :
 		)
 
 
-	async def b2_delete_file_async(self: 'B2Interface', filename: str) -> None :
+	async def upload_async(self: 'B2Interface', file_data: bytes, filename: str, content_type:Union[str, None]=None, sha1:Union[str, None]=None) -> None :
+		with ThreadPoolExecutor() as threadpool :
+			return await get_event_loop().run_in_executor(threadpool, partial(self.b2_upload, file_data, filename, content_type, sha1))
+
+
+	def b2_delete_file(self: 'B2Interface', filename: str) -> None :
 		# files = None
 
 		for _ in range(self.b2_max_retries) :
@@ -196,6 +221,11 @@ class B2Interface :
 
 			except Exception as e :
 				self.logger.error('error encountered during b2 delete.', exc_info=e)
+
+
+	async def b2_delete_file_async(self: 'B2Interface', filename: str) -> None :
+		with ThreadPoolExecutor() as threadpool :
+			return await get_event_loop().run_in_executor(threadpool, partial(self.b2_delete_file, filename))
 
 
 	# async def b2_upload_async(self: 'B2Interface', file_data: bytes, filename: str, content_type:Union[str, None]=None, sha1:Union[str, None]=None) -> Dict[str, Any] :
@@ -256,7 +286,7 @@ class B2Interface :
 	# 	)
 
 
-	async def b2_get_file_info(self: 'B2Interface', filename: str) -> Optional[Object] :
+	def _get_file_info(self: 'B2Interface', filename: str) -> Optional[Object] :
 		try :
 			for _ in range(self.b2_max_retries) :
 				return self.client.stat_object(
@@ -285,3 +315,47 @@ class B2Interface :
 
 		except Exception as e :
 			self.logger.error('error encountered during b2 get file info.', exc_info=e)
+
+
+	async def b2_get_file_info(self: 'B2Interface', filename: str) -> Optional[Object] :
+		with ThreadPoolExecutor() as threadpool :
+			return await get_event_loop().run_in_executor(threadpool, partial(self._get_file_info, filename))
+
+
+	def _get_file(self: 'B2Interface', filename: str) -> FileResponse :
+		try :
+			for _ in range(self.b2_max_retries) :
+				r: HTTPResponse = self.client.get_object(
+					self.bucket_name,
+					filename,
+				)
+				return FileResponse(r)
+				# async with async_request(
+				# 	'POST',
+				# 	self.b2_api_url + '/b2api/v2/b2_list_file_versions',
+				# 	json={
+				# 		'bucketId': self.b2_bucket_id,
+				# 		'startFileName': filename,
+				# 		'maxFileCount': 5,
+				# 	},
+				# 	headers={ 'authorization': self.b2_auth_token },
+				# ) as response :
+
+				# 	if response.status == 401 :
+				# 		self._b2_authorize()
+				# 		continue
+
+				# 	return next(filter(lambda x : x['fileName'] == filename, (await response.json())['files']))
+
+		except StopIteration as e :
+			self.logger.error('file not found in b2.', exc_info=e)
+
+		except Exception as e :
+			self.logger.error('error encountered during b2 get file info.', exc_info=e)
+		
+		raise FileNotFoundError('bruh')
+
+
+	async def b2_get_file(self: 'B2Interface', filename: str) -> FileResponse :
+		with ThreadPoolExecutor() as threadpool :
+			return await get_event_loop().run_in_executor(threadpool, partial(self._get_file, filename))

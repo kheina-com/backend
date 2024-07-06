@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Self, Tuple, Union
 
 from posts.models import InternalPost, MediaType, Post, PostId, PostSize, Privacy, Rating
-from posts.repository import Posts
+from posts.repository import Posts, privacy_map
 from shared.auth import KhUser, Scope
 from shared.caching import AerospikeCache, ArgsCache
 from shared.caching.key_value_store import KeyValueStore
@@ -26,7 +26,7 @@ posts = Posts()
 
 class Sets(SqlInterface, Hashable) :
 
-	def __init__(self: Self) -> None :
+	def __init__(self: 'Sets') -> None :
 		SqlInterface.__init__(
 			self,
 			conversions={
@@ -38,9 +38,16 @@ class Sets(SqlInterface, Hashable) :
 		Hashable.__init__(self)
 
 
+	@staticmethod
+	def _validate_privacy(p: Optional[Union[Privacy, int]]) -> UserPrivacy :
+		assert isinstance(p, Privacy), 'privacy value must of the Privacy type'
+		assert p == Privacy.public or p == Privacy.private, 'privacy value must be public or private'
+		return p
+
+
 	@AerospikeCache('kheina', 'sets', '{set_id}', _kvs=SetKVS)
 	async def _get_set(self: Self, set_id: SetId) -> InternalSet :
-		data: Tuple[int, Optional[str], Optional[str], int, datetime, datetime] = await self.query_async("""
+		data: Tuple[int, Optional[str], Optional[str], int, datetime, datetime, int, int, int] = await self.query_async("""
 			WITH f AS (
 				SELECT post_id AS first, index
 				FROM kheina.public.set_post
@@ -79,45 +86,53 @@ class Sets(SqlInterface, Hashable) :
 			raise NotFound(SetNotFound.format(set_id=set_id))
 
 		return InternalSet(
-			set_id=set_id,
+			set_id=set_id.int(),
 			owner=data[0],
 			title=data[1],
 			description=data[2],
-			privacy=await self._id_to_set_privacy(data[3]),
+			privacy=data[3],
 			created=data[4],
 			updated=data[5],
-			first=data[6],
-			last=data[7],
+			first=PostId(data[6]),
+			last=PostId(data[7]),
 			count=data[8] + 1,  # set indices are 0-indexed, so add one
 		)
 
 
 	async def set(self: Self, iset: InternalSet, user: KhUser) -> Set :
-		owner: Task[InternalUser] = ensure_future(users._get_user(iset.owner))
-		first: Task[Optional[InternalPost]] = ensure_future(posts._get_post(iset.first))
-		last: Task[Optional[InternalPost]] = ensure_future(posts._get_post(iset.last))
+		first_task: Optional[Task[Optional[InternalPost]]] = None
+		last_task:  Optional[Task[Optional[InternalPost]]] = None
+		owner_task: Task[InternalUser]                     = ensure_future(users._get_user(iset.owner))
 
-		first: Optional[InternalPost] = await first
+		if iset.first :
+			first_task = ensure_future(posts._get_post(iset.first))
+
+		if iset.last :
+			last_task = ensure_future(posts._get_post(iset.last))
+
 		first_post: Optional[Post] = None
-		if first :
-			first_post = await posts.post(first, user)
+		if first_task :
+			first: Optional[InternalPost] = await first_task
+			if first :
+				first_post = await posts.post(first, user)
 
-		last: Optional[InternalPost] = await last
 		last_post: Optional[Post] = None
-		if last :
-			last_post = await posts.post(last, user)
+		if last_task :
+			last: Optional[InternalPost] = await last_task
+			if last :
+				last_post = await posts.post(last, user)
 
-		owner: InternalUser = await owner
+		owner: InternalUser = await owner_task
 
 		return Set(
-			set_id=SetId(self.set_id),
-			owner=await owner.portable(user),
-			count=self.count,
-			title=self.title,
-			description=self.description,
-			privacy=self.privacy,
-			created=self.created,
-			updated=self.updated,
+			set_id=SetId(iset.set_id),
+			owner=await users.portable(user, owner),
+			count=iset.count,
+			title=iset.title,
+			description=iset.description,
+			privacy=Sets._validate_privacy(privacy_map[iset.privacy]),
+			created=iset.created,
+			updated=iset.updated,
 			first=first_post,
 			last=last_post,
 		)
@@ -138,7 +153,7 @@ class Sets(SqlInterface, Hashable) :
 		:return: boolean - True if the user has permission, otherwise False
 		"""
 
-		if iset.privacy == UserPrivacy.public :
+		if iset.privacy == Privacy.public :
 			return True
 
 		if not await user.authenticated(raise_error=False) :

@@ -1,4 +1,4 @@
-from asyncio import Task, ensure_future, run
+from asyncio import Task, ensure_future
 
 from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse
@@ -28,10 +28,10 @@ async def shutdown() :
 
 
 ################################################## INTERNAL ##################################################
-@app.get('/i1/user/{user_id}', response_model=UserConfig)
-async def i1UserConfig(req: Request, user_id: int) -> UserConfig :
-	await req.user.verify_scope(Scope.internal)
-	return await configs._getUserConfig(user_id)
+# @app.get('/i1/user/{user_id}', response_model=UserConfig)
+# async def i1UserConfig(req: Request, user_id: int) -> UserConfig :
+# 	await req.user.verify_scope(Scope.internal)
+# 	return await configs._getUserConfig(user_id)
 
 
 ##################################################  PUBLIC  ##################################################
@@ -86,4 +86,4 @@ async def v1UserTheme(req: Request) -> PlainTextResponse :
 	)
 
 
-run(startup())  # fastapi/starlette doesn't trigger startup event, so run it manually
+# run(startup())  # fastapi/starlette doesn't trigger startup event, so run it manually

@@ -71,12 +71,12 @@ app.add_middleware(
 	] + list(HeadersToSet.keys()),
 	max_age = 86400,
 )
-app.add_middleware(TrustedHostMiddleware, allowed_hosts={
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=[
 	'localhost',
 	'127.0.0.1',
 	'*.fuzz.ly',
 	'fuzz.ly',
-})
+])
 app.add_middleware(KhAuthMiddleware, required=False)
 
 app.include_router(account)

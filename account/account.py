@@ -87,14 +87,18 @@ class Account(SqlInterface, Hashable) :
 			'key': Account.AccountCreateKey,
 		})
 
-		await sendEmail(
-			f'{name} <{email}>',
-			'Finish your fuzz.ly account',
-			Account.VerifyEmailText,
-			title=f'Hey, {name}',
-			button=Button(text='Finalize Account', link=self._finalize_link.format(token=data.token)),
-			subtext=Account.VerifyEmailSubtext,
-		)
+		if environment.is_local() :
+			self.logger.info(f'server running in local environment. token data: {data}')
+
+		else :
+			await sendEmail(
+				f'{name} <{email}>',
+				'Finish your fuzz.ly account',
+				Account.VerifyEmailText,
+				title=f'Hey, {name}',
+				button=Button(text='Finalize Account', link=self._finalize_link.format(token=data.token)),
+				subtext=Account.VerifyEmailSubtext,
+			)
 
 
 	@HttpErrorHandler('finalizing user account', exclusions=['self', 'password'])

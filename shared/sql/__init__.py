@@ -1,20 +1,38 @@
 from asyncio import get_event_loop
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field, is_dataclass
 from enum import Enum
-from functools import partial
+from functools import lru_cache, partial
 from types import TracebackType
-from typing import Any, Callable, Dict, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Self, Tuple, Type, Union
+from re import compile
 
 from psycopg2 import Binary
 from psycopg2 import connect as dbConnect
 from psycopg2.errors import ConnectionException, InterfaceError
 from psycopg2.extensions import connection as Connection
 from psycopg2.extensions import cursor as Cursor
+from pydantic import BaseModel
+from pydantic.fields import ModelField
 
 from ..config.credentials import fetch
 from ..logging import Logger, getLogger
-from ..sql.query import Query
 from ..timing import Timer
+from .query import Insert, Operator, Query, Table, Value, Field, Where, Update
+
+
+_orm_regex = compile(r'orm:"([^\n]*?)(?<!\\)"')
+_orm_attr_regex = compile(r'(col|map|pk|gen|default)(?:\[([\s\S]*?)\])?')
+
+
+@dataclass
+class FieldAttributes :
+	map:         List[Tuple[Tuple[str, ...], str]] = field(default_factory=lambda : [])
+	column:      Optional[str]                     = None
+	primary_key: Optional[bool]                    = None
+	generated:   Optional[bool]                    = None
+	default:     Optional[bool]                    = None
+	ignore:      Optional[bool]                    = None
 
 
 class SqlInterface :
@@ -35,7 +53,7 @@ class SqlInterface :
 
 	def _sql_connect(self: 'SqlInterface') -> Connection :
 		try :
-			conn: Connection = dbConnect(**SqlInterface.db)
+			conn: Connection = dbConnect(**SqlInterface.db) # type: ignore
 			self.logger.info('connected to database.')
 			return conn
 
@@ -114,6 +132,352 @@ class SqlInterface :
 		return 0
 		SqlInterface._conn.close()
 		return SqlInterface._conn.closed
+
+
+	@staticmethod
+	def _table_name(model: BaseModel) -> Table :
+		if not hasattr(model, '__table_name__') :
+			raise AttributeError('model must be defined with the __table_name__ attribute')
+
+		table_name = getattr(model, '__table_name__')
+		if not isinstance(table_name, Table) :
+			raise AttributeError('model __table_name__ attribute must be sql.Table type')
+
+		return table_name
+
+
+	@lru_cache(maxsize=None)
+	@staticmethod
+	def _orm_attr_parser(field: ModelField) -> FieldAttributes :
+		if not field.field_info.description :
+			return FieldAttributes()
+
+		match = _orm_regex.search(field.field_info.description)
+		if not match :
+			return FieldAttributes()
+
+		orm_info = match.group(1).replace(r'\"', r'"')
+
+		if orm_info == '-' :
+			return FieldAttributes(ignore=True)
+
+		attributes = FieldAttributes()
+		for i in orm_info.split(';') :
+			match = _orm_attr_regex.search(i)
+			if not match :
+				continue
+
+			attr_key = match.group(1)
+			if attr_key == 'col' :
+				attributes.column = match.group(2).strip()
+
+			elif attr_key == 'map' :
+				for m in match.group(2).split(',') :
+					path, col = m.split(':')
+					attributes.map.append((tuple(path.split('.')), str(col)))
+
+			elif attr_key == 'pk' :
+				attributes.primary_key = True
+
+			elif attr_key == 'gen' :
+				attributes.generated = True
+
+			elif attr_key == 'default' :
+				attributes.default = True
+
+		return attributes
+
+
+	async def insert(self: Self, model: BaseModel) -> BaseModel :
+		"""
+		inserts a model into the database table defined by __table_name__.
+
+		Available field attributes:
+			gen - indicates that the column is generated and should be assigned on return
+			default - indicates that the column has a default value when null, and will be assigned when not provided
+			col[column] - changes the column used for the field
+			map[subtype.field:column,field:column2] - maps a subtype's field to columns. separate nested fields by periods.
+		"""
+		table: Table                 = self._table_name(model)
+		d:     Dict[str, Any]        = model.dict()
+		paths: List[Tuple[str, ...]] = []
+		vals:  List[Value]           = []
+		cols:  List[str]             = []
+		ret:   List[str]             = []
+
+		for key, field in model.__fields__.items() :
+			attrs = SqlInterface._orm_attr_parser(field)
+			if attrs.ignore :
+				continue
+
+			if attrs.generated :
+				ret.append(attrs.column or field.name)
+				paths.append((key,))
+				continue
+
+			if attrs.map :
+				for m in attrs.map :
+					param = d[key]
+
+					if param :
+						for k in m[0] :
+							param = getattr(param, k)
+
+					if attrs.default is not None and param is None :
+						ret.append(m[1])
+						paths.append(tuple([key, *m[0]]))
+
+					else :
+						cols.append(m[1])
+						vals.append(Value(param))
+
+			else :
+				if attrs.default is not None and d[key] is None :
+					ret.append(attrs.column or field.name)
+					paths.append((key,))
+
+				else :
+					cols.append(attrs.column or field.name)
+					vals.append(Value(d[key]))
+
+		query: Query = Query(table).insert(Insert(*cols).values(*vals))
+
+		if ret :
+			query.returning(*ret)
+
+		data: Tuple[Any, ...] = await self.query_async(query, commit=True, fetch_one=bool(ret))
+
+		for i, path in enumerate(paths) :
+			v2 = model
+
+			for k in path :
+				v = v2
+				v2 = getattr(v, k)
+				if v2 is None and v.__annotations__[k] :
+					anno: type = v.__annotations__[k]
+
+					if getattr(anno, '__origin__', None) is Union and len(anno.__args__) == 2 and type(None) in anno.__args__ :
+						anno = anno.__args__[0 if anno.__args__.index(type(None)) else 1]
+
+					if issubclass(anno, BaseModel) or is_dataclass(anno) :
+						v2 = anno()
+
+					setattr(v, k, v2)
+
+			setattr(v, k, data[i])
+
+		return model
+
+
+	@staticmethod
+	def _assign_field_values(model: BaseModel, data: Tuple[Any, ...]) -> BaseModel :
+		i = 0
+		for key, field in model.__fields__.items() :
+			attrs = SqlInterface._orm_attr_parser(field)
+			if attrs.ignore :
+				continue
+
+			if attrs.map :
+				unset = True
+
+				for m in attrs.map :
+					val = getattr(model, key)
+
+					if val is None :
+						val = field.type_()
+
+					v2 = val
+
+					for k in m[0] :
+						v = v2
+						v2 = getattr(v, k)
+						if v2 is None and v.__annotations__[k] :
+							anno: type = v.__annotations__[k]
+
+							if getattr(anno, '__origin__', None) is Union and len(anno.__args__) == 2 and type(None) in anno.__args__ :
+								anno = anno.__args__[0 if anno.__args__.index(type(None)) else 1]
+
+							if issubclass(anno, BaseModel) or is_dataclass(anno) :
+								v2 = anno()
+
+							setattr(v, k, v2)
+
+					if data[i] :
+						unset = False
+
+					setattr(v, k, data[i])
+					setattr(model, key, val)
+					i += 1
+
+				if unset :
+					setattr(model, key, field.default)
+
+			else :
+				setattr(model, key, data[i])
+				i += 1
+
+		return model
+
+
+	async def select(self: Self, model: BaseModel) -> BaseModel :
+		"""
+		fetches a model from the database table defined by __table_name__ using the populated field indicated by the pk
+
+		Available field attributes:
+			pk - specifies the field as the primary key. field value must be populated.
+			col[column] - changes the column used for the field
+			map[subtype.field:column,field:column2] - maps a subtype's field to columns. separate nested fields by periods.
+		"""
+		table = self._table_name(model)
+		d     = model.dict()
+		query = Query(table)
+		_, t  = str(table).rsplit('.', 1)
+		pk    = 0
+
+		for key, field in model.__fields__.items() :
+			attrs = SqlInterface._orm_attr_parser(field)
+			if attrs.ignore :
+				continue
+
+			if attrs.map :
+				for m in attrs.map :
+					query.select(Field(t, m[1]))
+
+			else :
+				query.select(Field(t, attrs.column or field.name))
+
+			if attrs.primary_key :
+				pk += 1
+				query.where(Where(
+					Field(t, attrs.column or field.name),
+					Operator.equal,
+					Value(d[key]),
+				))
+
+		assert pk > 0
+		data: Tuple[Any, ...] = await self.query_async(query, fetch_one=True)
+
+		if not data :
+			raise KeyError('value does not exist in database')
+
+		return SqlInterface._assign_field_values(model, data)
+
+
+	async def update(self: Self, model: BaseModel) -> BaseModel :
+		"""
+		updates a model in the database table defined by __table_name__.
+
+		Available field attributes:
+			gen - indicates that the column is generated and should be assigned on return
+			default - indicates that the column has a default value when null, and will be assigned when not provided
+			col[column] - changes the column used for the field
+			map[subtype.field:column,field:column2] - maps a subtype's field to columns. separate nested fields by periods.
+		"""
+		table: Table                 = self._table_name(model)
+		query: Query                 = Query(table)
+		d:     Dict[str, Any]        = model.dict()
+		paths: List[Tuple[str, ...]] = []
+		vals:  List[Value]           = []
+		cols:  List[str]             = []
+		ret:   List[str]             = []
+
+		_, t  = str(table).rsplit('.', 1)
+		pk    = 0
+
+		for key, field in model.__fields__.items() :
+			attrs = SqlInterface._orm_attr_parser(field)
+			if attrs.ignore :
+				continue
+			
+			if attrs.primary_key :
+				pk += 1
+				query.where(Where(
+					Field(t, attrs.column or field.name),
+					Operator.equal,
+					Value(d[key]),
+				))
+
+			if attrs.generated :
+				ret.append(attrs.column or field.name)
+				paths.append((key,))
+				continue
+
+			if attrs.map :
+				for m in attrs.map :
+					param = d[key]
+
+					if param :
+						for k in m[0] :
+							param = getattr(param, k)
+
+					cols.append(m[1])
+					vals.append(Value(param))
+
+			else :
+				cols.append(attrs.column or field.name)
+				vals.append(Value(d[key]))
+
+		for i in range(len(cols)) :
+			query.update(Update(
+				cols[i],
+				vals[i],
+			))
+
+		if ret :
+			query.returning(*ret)
+
+		assert pk > 0
+		data: Tuple[Any, ...] = await self.query_async(query, commit=True, fetch_one=bool(ret))
+
+		for i, path in enumerate(paths) :
+			v2 = model
+
+			for k in path :
+				v = v2
+				v2 = getattr(v, k)
+				if v2 is None and v.__annotations__[k] :
+					anno: type = v.__annotations__[k]
+
+					if getattr(anno, '__origin__', None) is Union and len(anno.__args__) == 2 and type(None) in anno.__args__ :
+						anno = anno.__args__[0 if anno.__args__.index(type(None)) else 1]
+
+					if issubclass(anno, BaseModel) or is_dataclass(anno) :
+						v2 = anno()
+
+					setattr(v, k, v2)
+
+			setattr(v, k, data[i])
+
+		return model
+
+
+	async def delete(self: Self, model: BaseModel) -> None :
+		"""
+		deletes a model from the database table defined by __table_name__ using the populated field indicated by the pk
+
+		Available field attributes:
+			pk - specifies the field as the primary key. field value must be populated.
+			col[column] - changes the column used for the field
+			map[subtype.field:column,field:column2] - maps a subtype's field to columns. separate nested fields by periods.
+		"""
+		table = self._table_name(model)
+		d     = model.dict()
+		query = Query(table).delete()
+		_, t  = str(table).rsplit('.', 1)
+		pk    = 0
+
+		for key, field in model.__fields__.items() :
+			attrs = SqlInterface._orm_attr_parser(field)
+			if attrs.primary_key :
+				pk += 1
+				query.where(Where(
+					Field(t, attrs.column or field.name),
+					Operator.equal,
+					Value(d[key]),
+				))
+
+		assert pk > 0
+		await self.query_async(query, commit=True)
 
 
 class Transaction :

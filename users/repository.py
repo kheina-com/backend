@@ -5,6 +5,7 @@ from shared.auth import KhUser
 from shared.caching import AerospikeCache, SimpleCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
+from shared.maps import privacy_map
 from shared.models.user import Badge, InternalUser, User, UserPortable, UserPrivacy, Verified
 from shared.sql import SqlInterface
 
@@ -52,17 +53,6 @@ class Users(SqlInterface) :
 
 
 	@SimpleCache(600)
-	def _get_privacy_map(self: Self) -> Dict[str, UserPrivacy] :
-		data = self.query("""
-			SELECT privacy_id, type
-			FROM kheina.public.privacy;
-			""",
-			fetch_all=True,
-		)
-		return { x[0]: UserPrivacy[x[1]] for x in data if x[1] in UserPrivacy.__members__ }
-
-
-	@SimpleCache(600)
 	def _get_badge_map(self: Self) -> Dict[int, Badge] :
 		data = self.query("""
 			SELECT badge_id, emoji, label
@@ -85,10 +75,10 @@ class Users(SqlInterface) :
 				users.user_id,
 				users.display_name,
 				users.handle,
-				users.privacy_id,
+				users.privacy,
 				users.icon,
 				users.website,
-				users.created_on,
+				users.created,
 				users.description,
 				users.banner,
 				users.admin,
@@ -124,7 +114,7 @@ class Users(SqlInterface) :
 			user_id = data[0],
 			name = data[1],
 			handle = data[2],
-			privacy = self._get_privacy_map()[data[3]],
+			privacy = privacy_map[data[3]], # type: ignore
 			icon = data[4],
 			website = data[5],
 			created = data[6],

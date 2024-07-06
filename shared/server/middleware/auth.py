@@ -17,7 +17,7 @@ class KhAuthMiddleware:
 
 	async def __call__(self, scope: request_scope, receive: Receive, send: Send) -> None :
 		if scope['type'] not in { 'http', 'websocket' } :
-			raise NotImplementedError()
+			return await self.app(scope, receive, send)
 
 		request: Request = Request(scope, receive, send)
 
@@ -34,7 +34,7 @@ class KhAuthMiddleware:
 			)
 
 		except InvalidToken as e :
-			return await jsonErrorHandler(request, BadRequest(e))(scope, receive, send)
+			return await jsonErrorHandler(request, BadRequest(str(e)))(scope, receive, send)
 
 		except HttpError as e :
 			if isinstance(e, Unauthorized) and self.auth_required :

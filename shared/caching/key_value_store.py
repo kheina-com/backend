@@ -78,7 +78,10 @@ class KeyValueStore :
 			__clear_cache__(self._cache, time)
 
 		with ThreadPoolExecutor() as threadpool :
-			return await get_event_loop().run_in_executor(threadpool, partial(self._get, key, type))
+			try :
+				return await get_event_loop().run_in_executor(threadpool, partial(self._get, key, type))
+			except aerospike.exception.RecordNotFound :
+				raise aerospike.exception.RecordNotFound(f'Record not found: {(self._namespace, self._set, key)}')
 
 
 	def _get_many(self: 'KeyValueStore', k: Iterable[KeyType]) :

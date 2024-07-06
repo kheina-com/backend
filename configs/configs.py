@@ -2,13 +2,13 @@ from re import Match, Pattern
 from re import compile as re_compile
 from typing import Dict, List, Optional, Tuple, Type, Union
 
-from avrofastapi.schema import convert_schema
-from avrofastapi.serialization import AvroDeserializer, AvroSerializer, Schema, parse_avro_schema
 from cache import AsyncLRU
 from patreon import API as PatreonApi
 from pydantic import BaseModel
 
 from avro_schema_repository.schema_repository import SchemaRepository
+from avrofastapi.schema import convert_schema
+from avrofastapi.serialization import AvroDeserializer, AvroSerializer, Schema, parse_avro_schema
 from shared.auth import KhUser
 from shared.base64 import b64decode
 from shared.caching import AerospikeCache
@@ -40,25 +40,27 @@ PropValidators: Dict[CssProperty, Pattern] = {
 class Configs(SqlInterface) :
 
 	UserConfigFingerprint: bytes
-	Serializers: Dict[str, Tuple[AvroSerializer, bytes]]
-	SerializerTypeMap: Dict[BannerStore, Type[BaseModel]] = {
+	Serializers: Dict[ConfigType, Tuple[AvroSerializer, bytes]]
+	SerializerTypeMap: Dict[ConfigType, Type[BaseModel]] = {
 		ConfigType.banner: BannerStore,
 		ConfigType.costs: CostsStore,
 	}
 
-	async def startup(self) :
-		self.Serializers = {
+	async def startup(self) -> bool :
+		Configs.Serializers = {
 			ConfigType.banner: (AvroSerializer(BannerStore), await repo.addSchema(convert_schema(BannerStore))),
 			ConfigType.costs: (AvroSerializer(CostsStore), await repo.addSchema(convert_schema(CostsStore))),
 		}
 		self.UserConfigFingerprint = await repo.addSchema(convert_schema(UserConfig))
 		assert self.Serializers.keys() == set(ConfigType.__members__.values()), 'Did you forget to add serializers for a config?'
 		assert self.SerializerTypeMap.keys() == set(ConfigType.__members__.values()), 'Did you forget to add serializers for a config?'
+		return True
 
-
+	
 	@AsyncLRU(maxsize=32)
+	@staticmethod
 	async def getSchema(fingerprint: bytes) -> Schema:
-		return parse_avro_schema(await repo.getSchema(fingerprint))
+		return parse_avro_schema((await repo.getSchema(fingerprint)).decode())
 
 
 	@HttpErrorHandler('retrieving patreon campaign info')
@@ -66,7 +68,9 @@ class Configs(SqlInterface) :
 	def getFunding(self) -> int :
 		if environment.is_local() :
 			return 1500
-		return PatreonClient.fetch_campaign().data()[0].attribute('campaign_pledge_sum')
+
+		campaign = PatreonClient.fetch_campaign()
+		return campaign.data()[0].attribute('campaign_pledge_sum') # type: ignore
 
 
 	@HttpErrorHandler('retrieving config')
@@ -102,7 +106,7 @@ class Configs(SqlInterface) :
 			(%s, %s, %s)
 			ON CONFLICT ON CONSTRAINT configs_pkey DO 
 				UPDATE SET
-					updated_on = now(),
+					updated = now(),
 					bytes = %s,
 					updated_by = %s;
 			""",
@@ -178,7 +182,7 @@ class Configs(SqlInterface) :
 			(%s, %s, %s)
 			ON CONFLICT ON CONSTRAINT configs_pkey DO 
 				UPDATE SET
-					updated_on = now(),
+					updated = now(),
 					bytes = %s,
 					updated_by = %s;
 			""",

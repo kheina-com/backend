@@ -1,8 +1,9 @@
 from enum import Enum, unique
 from typing import Dict, List, Literal, Optional, Set, Union
 
-from avrofastapi.schema import AvroInt
 from pydantic import BaseModel, ConstrainedStr, conbytes, constr
+
+from avrofastapi.schema import AvroInt
 
 
 UserConfigKeyFormat: str = 'user.{user_id}'
@@ -17,9 +18,9 @@ class CostsStore(BaseModel) :
 
 
 @unique
-class ConfigType(str, Enum) :
-	banner: str = 'banner'
-	costs: str = 'costs'
+class ConfigType(str, Enum) : # str so literals work in requests
+	banner = 'banner'
+	costs = 'costs'
 
 
 class UpdateBannerRequest(BaseModel) :
@@ -54,50 +55,50 @@ class BlockingBehavior(Enum) :
 
 
 class CssProperty(Enum) :
-	background_attachment: str = 'background_attachment'
-	background_position: str = 'background_position'
-	background_repeat: str = 'background_repeat'
-	background_size: str = 'background_size'
+	background_attachment = 'background_attachment'
+	background_position = 'background_position'
+	background_repeat = 'background_repeat'
+	background_size = 'background_size'
 
-	transition: str = 'transition'
-	fadetime: str = 'fadetime'
-	warning: str = 'warning'
-	error: str = 'error'
-	valid: str = 'valid'
-	general: str = 'general'
-	mature: str = 'mature'
-	explicit: str = 'explicit'
-	icolor: str = 'icolor'
-	bg0color: str = 'bg0color'
-	bg1color: str = 'bg1color'
-	bg2color: str = 'bg2color'
-	bg3color: str = 'bg3color'
-	blockquote: str = 'blockquote'
-	textcolor: str = 'textcolor'
-	bordercolor: str = 'bordercolor'
-	linecolor: str = 'linecolor'
-	borderhover: str = 'borderhover'
-	subtle: str = 'subtle'
-	shadowcolor: str = 'shadowcolor'
-	activeshadowcolor: str = 'activeshadowcolor'
-	screen_cover: str = 'screen_cover'
-	border_size: str = 'border_size'
-	border_radius: str = 'border_radius'
-	wave_color: str = 'wave_color'
-	stripe_color: str = 'stripe_color'
-	main: str = 'main'
-	pink: str = 'pink'
-	yellow: str = 'yellow'
-	green: str = 'green'
-	blue: str = 'blue'
-	orange: str = 'orange'
-	red: str = 'red'
-	cyan: str = 'cyan'
-	violet: str = 'violet'
-	bright: str = 'bright'
-	funding: str = 'funding'
-	notification_text: str = 'notification_text'
-	notification_bg: str = 'notification_bg'
+	transition = 'transition'
+	fadetime = 'fadetime'
+	warning = 'warning'
+	error = 'error'
+	valid = 'valid'
+	general = 'general'
+	mature = 'mature'
+	explicit = 'explicit'
+	icolor = 'icolor'
+	bg0color = 'bg0color'
+	bg1color = 'bg1color'
+	bg2color = 'bg2color'
+	bg3color = 'bg3color'
+	blockquote = 'blockquote'
+	textcolor = 'textcolor'
+	bordercolor = 'bordercolor'
+	linecolor = 'linecolor'
+	borderhover = 'borderhover'
+	subtle = 'subtle'
+	shadowcolor = 'shadowcolor'
+	activeshadowcolor = 'activeshadowcolor'
+	screen_cover = 'screen_cover'
+	border_size = 'border_size'
+	border_radius = 'border_radius'
+	wave_color = 'wave_color'
+	stripe_color = 'stripe_color'
+	main = 'main'
+	pink = 'pink'
+	yellow = 'yellow'
+	green = 'green'
+	blue = 'blue'
+	orange = 'orange'
+	red = 'red'
+	cyan = 'cyan'
+	violet = 'violet'
+	bright = 'bright'
+	funding = 'funding'
+	notification_text = 'notification_text'
+	notification_bg = 'notification_bg'
 
 
 class UserConfig(BaseModel) :

@@ -24,10 +24,10 @@ async def shutdown() :
 
 ################################################## INTERNAL ##################################################
 
-@app.get('/i1/set/{set_id}')
-async def i1Read(req: Request, set_id: SetId) -> InternalSet :
-	await req.user.verify_scope(Scope.internal)
-	return await sets._get_set(SetId(set_id))
+# @app.get('/i1/set/{set_id}')
+# async def i1Read(req: Request, set_id: SetId) -> InternalSet :
+# 	await req.user.verify_scope(Scope.internal)
+# 	return await sets._get_set(SetId(set_id))
 
 
 ##################################################  PUBLIC  ##################################################

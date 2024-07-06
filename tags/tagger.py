@@ -42,7 +42,7 @@ class Tagger(Tags) :
 						ON tags.tag_id = tag_post.tag_id
 					INNER JOIN kheina.public.posts
 						ON tag_post.post_id = posts.post_id
-							AND posts.privacy_id = privacy_to_id('public')
+							AND posts.privacy = privacy_to_id('public')
 				WHERE tags.tag = %s;
 				""",
 				(tag,),
@@ -420,8 +420,8 @@ class Tagger(Tags) :
 					posts.post_id
 				FROM kheina.public.posts
 				WHERE posts.uploader = %s
-					AND posts.privacy_id = privacy_to_id('public')
-				ORDER BY posts.created_on DESC NULLS LAST
+					AND posts.privacy = privacy_to_id('public')
+				ORDER BY posts.created DESC NULLS LAST
 				LIMIT %s
 			)
 			SELECT tag_classes.class, array_agg(tags.tag)

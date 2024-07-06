@@ -1,8 +1,9 @@
 from enum import Enum, unique
 from typing import Dict, List, Literal, Optional, Set, Union
 
-from avrofastapi.schema import AvroInt
 from pydantic import BaseModel, conbytes, validator
+
+from avrofastapi.schema import AvroInt
 
 from ._shared import PostId, _post_id_converter
 

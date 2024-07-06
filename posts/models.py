@@ -2,21 +2,13 @@ from datetime import datetime
 from enum import Enum, unique
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, Field, validator
 
 from shared.base64 import b64encode
 from shared.config.constants import environment
 from shared.config.repo import short_hash
-from shared.models._shared import PostId, UserPortable, _post_id_converter
-
-
-@unique
-class Privacy(Enum) :
-	public = 'public'
-	unlisted = 'unlisted'
-	private = 'private'
-	unpublished = 'unpublished'
-	draft = 'draft'
+from shared.models._shared import PostId, Privacy, UserPortable, _post_id_converter
+from shared.sql.query import Table
 
 
 @unique
@@ -47,8 +39,8 @@ class Score(BaseModel) :
 
 
 class PostSize(BaseModel) :
-	width: int
-	height: int
+	width: int  = -1
+	height: int = -1
 
 
 class VoteRequest(BaseModel) :
@@ -84,8 +76,8 @@ class GetUserPostsRequest(BaseModel) :
 
 
 class MediaType(BaseModel) :
-	file_type: str
-	mime_type: str
+	file_type: str = ""
+	mime_type: str = ""
 
 
 @unique
@@ -103,8 +95,12 @@ class TagGroups(Dict[TagGroupPortable, List[str]]) :
 
 
 def _thumbhash_converter(value: Any) -> Any :
-	if value and not isinstance(value, str) :
-		return b64encode(value)
+	if value :
+		if isinstance(value, memoryview) :
+			value = bytes(value)
+
+		if isinstance(value, bytes) :
+			return b64encode(value)
 
 	return value
 
@@ -139,26 +135,28 @@ class SearchResults(BaseModel) :
 
 
 class InternalPost(BaseModel) :
+	__table_name__: Table = Table('kheina.public.posts')
 	_thumbhash_converter = validator('thumbhash', pre=True, always=True, allow_reuse=True)(_thumbhash_converter)
 
 	class Config:
+		validate_assignment = True
 		json_encoders = {
 			bytes: lambda x: b64encode(x).decode(),
 		}
 
-	post_id: int
-	title: Optional[str]
-	description: Optional[str]
-	user_id: int
-	rating: Rating
-	parent: Optional[int]
-	privacy: Privacy
-	created: datetime
-	updated: datetime
-	filename: Optional[str]
-	media_type: Optional[MediaType]
-	size: Optional[PostSize]
-	thumbhash: Optional[str]
+	post_id:     int           = Field(description='orm:"pk"')
+	title:       Optional[str] = None
+	description: Optional[str] = None
+	user_id:     int           = Field(description='orm:"col[uploader]"')
+	rating:      int
+	parent:      Optional[int] = None
+	privacy:     int
+	created:     Optional[datetime] = Field(description='orm:"default"')
+	updated:     Optional[datetime] = Field(description='orm:"default"')
+	filename:    Optional[str]      = None
+	media_type:  Optional[int]      = None
+	size:        Optional[PostSize] = Field(description='orm:"map[width:width,height:height]"')
+	thumbhash:   Optional[str]      = None
 
 
 class InternalScore(BaseModel) :

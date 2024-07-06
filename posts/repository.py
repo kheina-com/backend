@@ -12,6 +12,7 @@ from shared.auth import KhUser, Scope
 from shared.caching import AerospikeCache, ArgsCache, SimpleCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
+from shared.maps import privacy_map
 from shared.models.user import InternalUser, UserPortable, UserPrivacy, Verified
 from shared.sql import SqlInterface
 from shared.sql.query import Field, Join, JoinType, Operator, Order, Query, Table, Value, Where
@@ -31,51 +32,6 @@ PostKVS: KeyValueStore = KeyValueStore('kheina', 'posts')
 users = Users()
 tagger = Tags()
 
-
-# this steals the idea of a map from kh_common.map.Map, probably use that when types are figured out in a generic way
-class PrivacyMap(SqlInterface, Dict[Union[int, Privacy], Union[Privacy, int]]) :
-
-	def __missing__(self, key: Union[int, str, Privacy]) -> Union[int, Privacy] :
-		if isinstance(key, int) :
-			d1: Tuple[str] = self.query(f"""
-				SELECT type
-				FROM kheina.public.privacy
-				WHERE privacy.privacy_id = %s
-				LIMIT 1;
-				""",
-				(key,),
-				fetch_one=True,
-			)
-			p = Privacy(value=d1[0])
-			id = key
-
-			self[id] = p
-			self[p] = id
-
-			# key is the id, return privacy
-			return p
-
-		else :
-			d2: Tuple[int] = self.query(f"""
-				SELECT privacy_id
-				FROM kheina.public.privacy
-				WHERE privacy.type = %s
-				LIMIT 1;
-				""",
-				(key,),
-				fetch_one=True,
-			)
-			p = Privacy(key)
-			id = d2[0]
-
-			self[id] = p
-			self[p] = id
-
-			# key is privacy, return the id
-			return id
-
-
-privacy_map: PrivacyMap = PrivacyMap()
 
 class RatingMap(SqlInterface, Dict[Union[int, Rating], Union[Rating, int]]) :
 
@@ -124,7 +80,10 @@ rating_map: RatingMap = RatingMap()
 
 class MediaTypeMap(SqlInterface, dict) :
 
-	def __missing__(self, key: int) -> MediaType :
+	def __missing__(self, key: Optional[int]) -> Optional[MediaType] :
+		if key is None :
+			return None
+
 		data: Tuple[str, str] = self.query(f"""
 			SELECT file_type, mime_type
 			FROM kheina.public.media_type
@@ -159,15 +118,15 @@ class Posts(SqlInterface) :
 					post_id=row[0],
 					title=row[1],
 					description=row[2],
-					rating=rating_map[row[3]], # type: ignore
+					rating=row[3],
 					parent=row[4],
 					created=row[5],
 					updated=row[6],
 					filename=row[7],
-					media_type=media_type_map[row[8]],
+					media_type=row[8],
 					size=PostSize(width=row[9], height=row[10]) if row[9] and row[10] else None,
 					user_id=row[11],
-					privacy=privacy_map[row[12]], # type: ignore
+					privacy=row[12],
 					thumbhash=row[13], # type: ignore
 				)
 				posts.append(post)
@@ -183,14 +142,14 @@ class Posts(SqlInterface) :
 			Field('posts', 'description'),
 			Field('posts', 'rating'),
 			Field('posts', 'parent'),
-			Field('posts', 'created_on'),
-			Field('posts', 'updated_on'),
+			Field('posts', 'created'),
+			Field('posts', 'updated'),
 			Field('posts', 'filename'),
-			Field('posts', 'media_type_id'),
+			Field('posts', 'media_type'),
 			Field('posts', 'width'),
 			Field('posts', 'height'),
 			Field('posts', 'uploader'),
-			Field('posts', 'privacy_id'),
+			Field('posts', 'privacy'),
 			Field('posts', 'thumbhash'),
 		)
 
@@ -206,14 +165,14 @@ class Posts(SqlInterface) :
 				posts.description,
 				posts.rating,
 				posts.parent,
-				posts.created_on,
-				posts.updated_on,
+				posts.created,
+				posts.updated,
 				posts.filename,
-				posts.media_type_id,
+				posts.media_type,
 				posts.width,
 				posts.height,
 				posts.uploader,
-				posts.privacy_id,
+				posts.privacy,
 				posts.thumbhash
 			FROM kheina.public.posts
 			WHERE posts.post_id = %s;
@@ -244,13 +203,13 @@ class Posts(SqlInterface) :
 			description=ipost.description,
 			user=await upl_portable,
 			score=await score,
-			rating=ipost.rating,
-			parent=ipost.parent, # type: ignore
-			privacy=ipost.privacy,
+			rating=rating_map[ipost.rating],    # type: ignore
+			parent=ipost.parent,                # type: ignore
+			privacy=privacy_map[ipost.privacy], # type: ignore
 			created=ipost.created,
 			updated=ipost.updated,
 			filename=ipost.filename,
-			media_type=ipost.media_type,
+			media_type=media_type_map[ipost.media_type],
 			size=ipost.size,
 			blocked=await blocked,
 			thumbhash=ipost.thumbhash,
@@ -394,7 +353,7 @@ class Posts(SqlInterface) :
 		:return: boolean - True if the user has permission, otherwise False
 		"""
 
-		if ipost.privacy == UserPrivacy.public :
+		if ipost.privacy == Privacy.public :
 			return True
 
 		if not await user.authenticated(raise_error=False) :
@@ -459,7 +418,7 @@ class Posts(SqlInterface) :
 					WHERE post_votes.user_id = %s
 						AND post_votes.post_id = %s;
 
-				SELECT COUNT(post_votes.upvote), SUM(post_votes.upvote::int), posts.created_on
+				SELECT COUNT(post_votes.upvote), SUM(post_votes.upvote::int), posts.created
 				FROM kheina.public.posts
 					LEFT JOIN kheina.public.post_votes
 						ON post_votes.post_id = posts.post_id
@@ -531,10 +490,10 @@ class Posts(SqlInterface) :
 				users.user_id,
 				users.display_name,
 				users.handle,
-				users.privacy_id,
+				users.privacy,
 				users.icon,
 				users.website,
-				users.created_on,
+				users.created,
 				users.description,
 				users.banner,
 				users.admin,
@@ -567,6 +526,8 @@ class Posts(SqlInterface) :
 
 			elif datum[11] :
 				verified = Verified.artist
+
+			print('==> priv:', datum[3], 'mapped:', privacy_map[datum[3]], 'map:', privacy_map)
 
 			user: InternalUser = InternalUser(
 				user_id = datum[0],
@@ -711,13 +672,13 @@ class Posts(SqlInterface) :
 				description=post.description,
 				user=uploaders[post.user_id].portable,
 				score=scores[post_id],
-				rating=post.rating,
-				parent=post.parent, # type: ignore
-				privacy=post.privacy,
+				rating=rating_map[post.rating],    # type: ignore
+				parent=post.parent,                # type: ignore
+				privacy=privacy_map[post.privacy], # type: ignore
 				created=post.created,
 				updated=post.updated,
 				filename=post.filename,
-				media_type=post.media_type,
+				media_type=media_type_map[post.media_type],
 				size=post.size,
 				# only the first call retrieves blocked info, all the rest should be cached and not actually await
 				blocked=await is_post_blocked(user, uploaders[post.user_id].internal, tags[post_id]),

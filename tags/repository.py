@@ -60,7 +60,7 @@ class Tags(SqlInterface) :
 					ON tags.tag_id = tag_post.tag_id
 				INNER JOIN kheina.public.posts
 					ON tag_post.post_id = posts.post_id
-						AND posts.privacy_id = privacy_to_id('public')
+						AND posts.privacy = privacy_to_id('public')
 			WHERE tags.tag = %s;
 			""",
 			(tag,),

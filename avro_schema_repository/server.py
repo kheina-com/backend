@@ -1,7 +1,7 @@
-from avrofastapi.schema import AvroSchema
 from models import SaveResponse
 from schema_repository import SchemaRepository
 
+from avrofastapi.schema import AvroSchema
 from shared.server import Request, ServerApp
 
 

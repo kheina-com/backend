@@ -3,8 +3,9 @@ from datetime import datetime
 from enum import Enum, unique
 from typing import Any, Dict, Optional
 
-from avrofastapi.schema import AvroInt
 from pydantic import BaseModel, validator
+
+from avrofastapi.schema import AvroInt
 
 
 class LoginRequest(BaseModel) :

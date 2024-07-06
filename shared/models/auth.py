@@ -28,9 +28,9 @@ class Scope(IntEnum) :
 
 
 class KhUser(NamedTuple) :
-	user_id: int
-	token: AuthToken
-	scope: Set[Scope]
+	user_id: int = -1
+	token: Optional[AuthToken] = None
+	scope: Set[Scope] = set()
 
 	def __hash__(self) -> int :
 		return hash(f'{self.user_id}{self.scope}')

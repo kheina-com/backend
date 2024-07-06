@@ -10,13 +10,13 @@ from uuid import UUID, uuid4
 import ujson as json
 from argon2 import PasswordHasher as Argon2
 from argon2.exceptions import VerifyMismatchError
-from avrofastapi.models import RefId
-from avrofastapi.serialization import AvroDeserializer, AvroSerializer
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from psycopg2 import Binary
 from psycopg2.errors import UniqueViolation
 
+from avrofastapi.models import RefId
+from avrofastapi.serialization import AvroDeserializer, AvroSerializer
 from shared import logging
 from shared.base64 import b64decode, b64encode
 from shared.caching.key_value_store import KeyValueStore

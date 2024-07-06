@@ -3,10 +3,10 @@ from enum import Enum, unique
 from typing import Any, Dict, Optional, Union
 from uuid import UUID
 
-from avrofastapi.models import RefId
-from avrofastapi.schema import AvroInt
 from pydantic import BaseModel, validator
 
+from avrofastapi.models import RefId
+from avrofastapi.schema import AvroInt
 from shared.base64 import b64decode
 
 

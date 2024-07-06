@@ -8,7 +8,7 @@ from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
 from shared.models.user import Badge, InternalUser, User, UserPrivacy, Verified
 from shared.sql import SqlInterface
 
-from .repository import FollowKVS, UserKVS, Users
+from .repository import FollowKVS, UserKVS, Users, privacy_map
 
 
 class Users(Users) :
@@ -77,7 +77,7 @@ class Users(Users) :
 			iuser.name = name
 
 		if privacy is not None :
-			updates.append('privacy_id = privacy_to_id(%s)')
+			updates.append('privacy = privacy_to_id(%s)')
 			params.append(privacy.name)
 			iuser.privacy = privacy
 
@@ -116,10 +116,10 @@ class Users(Users) :
 			SELECT
 				users.display_name,
 				users.handle,
-				users.privacy_id,
+				users.privacy,
 				users.icon,
 				users.website,
-				users.created_on,
+				users.created,
 				users.description,
 				users.banner,
 				users.mod,
@@ -132,10 +132,10 @@ class Users(Users) :
 			GROUP BY
 				users.handle,
 				users.display_name,
-				users.privacy_id,
+				users.privacy,
 				users.icon,
 				users.website,
-				users.created_on,
+				users.created,
 				users.description,
 				users.banner,
 				users.mod,
@@ -149,7 +149,7 @@ class Users(Users) :
 			User(
 				name = row[0],
 				handle = row[1],
-				privacy = self._get_privacy_map()[row[2]],
+				privacy = privacy_map[row[2]],
 				icon = row[3],
 				banner = row[7],
 				website = row[4],

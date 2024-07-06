@@ -29,7 +29,7 @@ class SetNeighbors(BaseModel) :
 	the central index post around which the neighbors exist in the set
 	"""
 
-	before: List[Optional[Post]]
+	before: List[Post]
 	"""
 	neighbors before the index are arranged in descending order such that the first item in the list is always index - 1 where index is PostNeighbors.index
 
@@ -37,7 +37,7 @@ class SetNeighbors(BaseModel) :
 	before: [index - 1, index - 2, index - 3, ...]
 	"""
 
-	after: List[Optional[Post]]
+	after: List[Post]
 	"""
 	neighbors after the index are arranged in ascending order such that the first item in the list is always index + 1 where index is PostNeighbors.index
 
@@ -81,8 +81,8 @@ class InternalSet(BaseModel) :
 	count: int
 	title: Optional[str]
 	description: Optional[str]
-	privacy: UserPrivacy
+	privacy: int
 	created: datetime
 	updated: datetime
-	first: Optional[PostId]
-	last: Optional[PostId]
+	first: Optional[PostId] = None
+	last: Optional[PostId]  = None

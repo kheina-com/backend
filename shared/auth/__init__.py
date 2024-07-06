@@ -96,14 +96,14 @@ async def v1token(token: str) -> AuthToken :
 
 
 	token_info = ensure_future(KVS.get_async(guid.bytes, TokenMetadata))
-	public_key = await _fetchPublicKey(key_id, algorithm)
 
 	try :
+		public_key = await _fetchPublicKey(key_id, algorithm)
 		public_key.verify(b64decode(signature), content.encode())
 
 	except :
+		token_info.cancel()
 		raise Unauthorized('Key validation failed.')
-
 
 	try :
 		token_info = await token_info

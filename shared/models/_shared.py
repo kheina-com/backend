@@ -4,7 +4,7 @@ from functools import lru_cache
 from re import Pattern
 from re import compile as re_compile
 from secrets import token_bytes
-from typing import Any, List, Optional, Type, Union
+from typing import Any, List, Literal, Optional, Type, Union
 
 from pydantic import BaseModel, validator
 from pydantic_core import core_schema
@@ -21,6 +21,13 @@ Example: PostId is used by both user and post models
 
 ################################################## MANY ##################################################
 
+@unique
+class Privacy(Enum) :
+	public = 'public'
+	unlisted = 'unlisted'
+	private = 'private'
+	unpublished = 'unpublished'
+	draft = 'draft'
 
 
 ################################################## POST ##################################################
@@ -117,10 +124,7 @@ def _post_id_converter(value) :
 
 ################################################## USER ##################################################
 
-@unique
-class UserPrivacy(Enum) :
-	public = 'public'
-	private = 'private'
+UserPrivacy = Literal[Privacy.public, Privacy.private]
 
 
 @unique
