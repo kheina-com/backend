@@ -228,16 +228,16 @@ class Uploader(SqlInterface, B2Interface) :
 
 	@HttpErrorHandler('creating new post')
 	async def createPost(self: 'Uploader', user: KhUser) -> Dict[str, Union[str, int]] :
-		with self.transaction() as transaction :
+		async with self.transaction() as transaction :
 			post_id: int
 
 			while True :
 				post_id = int_from_bytes(token_bytes(6))
-				data = transaction.query("SELECT count(1) FROM kheina.public.posts WHERE post_id = %s;", (post_id,), fetch_one=True)
+				data = await transaction.query_async("SELECT count(1) FROM kheina.public.posts WHERE post_id = %s;", (post_id,), fetch_one=True)
 				if not data[0] :
 					break
 
-			data: List[str] = transaction.query("""
+			data: List[str] = await transaction.query_async("""
 				INSERT INTO kheina.public.posts
 				(post_id, uploader, privacy)
 				VALUES
@@ -311,7 +311,7 @@ class Uploader(SqlInterface, B2Interface) :
 		internal_post_id: int
 		post_id: PostId
 
-		with self.transaction() as transaction :
+		async with self.transaction() as transaction :
 			while True :
 				internal_post_id = int_from_bytes(token_bytes(6))
 				d: Tuple[int] = await transaction.query_async("SELECT count(1) FROM kheina.public.posts WHERE post_id = %s;", (internal_post_id,), fetch_one=True)
@@ -435,8 +435,8 @@ class Uploader(SqlInterface, B2Interface) :
 			thumbhash = self.thumbhash(image)
 
 		try :
-			with self.transaction() as transaction :
-				data: List[str] = transaction.query("""
+			async with self.transaction() as transaction :
+				data: List[str] = await transaction.query_async("""
 					SELECT posts.filename from kheina.public.posts
 					WHERE posts.post_id = %s
 						AND uploader = %s;
@@ -458,7 +458,7 @@ class Uploader(SqlInterface, B2Interface) :
 						fullsize_image = self.get_image_data(image, compress = False)
 
 					# optimize
-					upd: Tuple[datetime, int] = transaction.query("""
+					upd: Tuple[datetime, int] = await transaction.query_async("""
 						UPDATE kheina.public.posts
 							SET updated = NOW(),
 								media_type = media_mime_type_to_id(%s),
@@ -590,10 +590,10 @@ class Uploader(SqlInterface, B2Interface) :
 		if not params :
 			raise BadRequest('no params were provided.')
 
-		with self.transaction() as t :
+		async with self.transaction() as t :
 			return_cols: List[str] = ['created', 'updated']
 
-			data = t.query(
+			data = await t.query_async(
 				query + f"""
 				WHERE uploader = %s
 					AND post_id = %s
@@ -635,7 +635,7 @@ class Uploader(SqlInterface, B2Interface) :
 		if privacy == Privacy.unpublished :
 			raise BadRequest('post privacy cannot be updated to unpublished.')
 
-		with transaction or self.transaction() as t :
+		async with transaction or self.transaction() as t :
 			data = await t.query_async("""
 				SELECT privacy.type
 				FROM kheina.public.posts

@@ -406,3 +406,6 @@ class Query :
 	def returning(self: Self, *returning: str) -> Self :
 		self._returning = tuple(map(__sanitize__, returning))
 		return self
+
+	def on_conflict(self: Self) -> Self :
+		raise NotImplementedError('not yet')

@@ -151,11 +151,11 @@ class InternalPost(BaseModel) :
 	rating:      int
 	parent:      Optional[int] = None
 	privacy:     int
-	created:     Optional[datetime] = Field(description='orm:"default"')
-	updated:     Optional[datetime] = Field(description='orm:"default"')
+	created:     datetime
+	updated:     datetime
 	filename:    Optional[str]      = None
 	media_type:  Optional[int]      = None
-	size:        Optional[PostSize] = Field(description='orm:"map[width:width,height:height]"')
+	size:        Optional[PostSize] = Field(None, description='orm:"map[width:width,height:height]"')
 	thumbhash:   Optional[str]      = None
 
 

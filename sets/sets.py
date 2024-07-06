@@ -267,16 +267,7 @@ class Sets(Sets) :
 		if not Sets._verify_authorized(user, iset) :
 			raise NotFound(SetNotFound.format(set_id=set_id))
 
-		await self.query_async("""
-			DELETE FROM kheina.public.set_post
-			WHERE set_id = %s;
-			DELETE FROM kheina.public.sets
-			WHERE set_id = %s;
-			""",
-			(set_id.int(), set_id.int()),
-			commit=True,
-		)
-
+		await self.delete(iset)
 		await SetKVS.remove_async(set_id)
 
 

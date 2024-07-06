@@ -4,6 +4,9 @@ RENAME created_on TO created;
 ALTER TABLE kheina.public.posts
 RENAME updated_on TO updated;
 
+ALTER TABLE kheina.public.post_votes
+RENAME created_on TO created;
+
 ALTER TABLE kheina.public.posts
 RENAME privacy_id TO privacy;
 
@@ -15,3 +18,9 @@ RENAME created_on TO created;
 
 ALTER TABLE kheina.public.users
 RENAME privacy_id TO privacy;
+
+ALTER TABLE kheina.public.configs
+RENAME created_on TO created;
+
+ALTER TABLE kheina.public.configs
+RENAME updated_on TO updated;

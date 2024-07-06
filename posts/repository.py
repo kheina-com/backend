@@ -1,7 +1,7 @@
 from asyncio import Task, ensure_future
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from shared.datetime import datetime
 from math import ceil
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Self, Set, Tuple, Union
 
@@ -158,33 +158,21 @@ class Posts(SqlInterface) :
 
 	@AerospikeCache('kheina', 'posts', '{post_id}', _kvs=PostKVS)
 	async def _get_post(self: Self, post_id: PostId) -> InternalPost :
-		data = await self.query_async("""
-			SELECT
-				posts.post_id,
-				posts.title,
-				posts.description,
-				posts.rating,
-				posts.parent,
-				posts.created,
-				posts.updated,
-				posts.filename,
-				posts.media_type,
-				posts.width,
-				posts.height,
-				posts.uploader,
-				posts.privacy,
-				posts.thumbhash
-			FROM kheina.public.posts
-			WHERE posts.post_id = %s;
-			""",
-			(post_id.int(),),
-			fetch_one=True,
+		ipost: InternalPost = InternalPost(
+			post_id=post_id.int(),
+			user_id=1,
+			rating=1,
+			privacy=1,
+			created=datetime.zero(),
+			updated=datetime.zero(),
+			size=None,
 		)
 
-		if not data :
-			raise NotFound(f'no data was found for the provided post id: {post_id}.')
+		try :
+			return await self.select(ipost)
 
-		return self.parse_response([data])[0]
+		except KeyError :
+			raise NotFound(f'no data was found for the provided post id: {post_id}.')
 
 
 	async def post(self: Self, ipost: InternalPost, user: KhUser) -> Post :
@@ -406,7 +394,7 @@ class Posts(SqlInterface) :
 
 	async def _vote(self: Self, user: KhUser, post_id: PostId, upvote: Optional[bool]) -> Score :
 		self._validateVote(upvote)
-		with self.transaction() as transaction :
+		async with self.transaction() as transaction :
 			data: Tuple[int, int, datetime] = await transaction.query_async("""
 				INSERT INTO kheina.public.post_votes
 				(user_id, post_id, upvote)
@@ -526,8 +514,6 @@ class Posts(SqlInterface) :
 
 			elif datum[11] :
 				verified = Verified.artist
-
-			print('==> priv:', datum[3], 'mapped:', privacy_map[datum[3]], 'map:', privacy_map)
 
 			user: InternalUser = InternalUser(
 				user_id = datum[0],

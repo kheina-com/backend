@@ -1,10 +1,10 @@
-from asyncio import get_event_loop
+from asyncio import get_event_loop, Lock
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, is_dataclass
 from enum import Enum
 from functools import lru_cache, partial
 from types import TracebackType
-from typing import Any, Callable, Dict, List, Optional, Self, Tuple, Type, Union
+from typing import Any, Callable, Dict, Hashable, List, Optional, Self, Tuple, Type, Union
 from re import compile
 
 from psycopg2 import Binary
@@ -19,6 +19,7 @@ from ..config.credentials import fetch
 from ..logging import Logger, getLogger
 from ..timing import Timer
 from .query import Insert, Operator, Query, Table, Value, Field, Where, Update
+from random import randbytes
 
 
 _orm_regex = compile(r'orm:"([^\n]*?)(?<!\\)"')
@@ -35,31 +36,178 @@ class FieldAttributes :
 	ignore:      Optional[bool]                    = None
 
 
-class SqlInterface :
+# TODO: introduce a concept of waiting for a connection, though tbh that shouldn't really be an issue I don't think
+class Conn :
 
-	db: Dict[str, str] = { }
+	def __init__(self, pool: 'ConnectionPool') -> None :
+		self.conn: Connection; self.key:  Hashable
+		self.conn, self.key = pool._get_conn()
 
-	def __init__(self: 'SqlInterface', long_query_metric: float = 1, conversions: Dict[type, Callable] = { }) -> None :
-		self.logger: Logger = getLogger()
-		self._long_query = long_query_metric
-		self._conversions: Dict[type, Callable] = {
-			tuple: list,
-			bytes: Binary,
-			Enum: lambda x : x.name,
-			**conversions,
-		}
-		SqlInterface.db = fetch('db', Dict[str, str])
+		self.pool: ConnectionPool = pool
+
+		self.commit   = self.conn.commit
+		self.rollback = self.conn.rollback
 
 
-	def _sql_connect(self: 'SqlInterface') -> Connection :
+	def cursor(self: Self) -> Cursor :
+		for _ in range(3) :
+			try :
+				return self.conn.cursor()
+
+			except (ConnectionException, InterfaceError) as e :
+				self.pool.logger.warning('connection to db was severed, attempting to reconnect.', exc_info=e)
+				self.pool.destroy(self.key)
+				self.conn, self.key = self.pool._get_conn()
+
+		raise ConnectionException('failed to reconnect to db.')
+
+
+	async def cursor_async(self: Self) -> Cursor :
+		for _ in range(3) :
+			try :
+				return self.conn.cursor()
+
+			except (ConnectionException, InterfaceError) as e :
+				self.pool.logger.warning('connection to db was severed, attempting to reconnect.', exc_info=e)
+				await self.pool.destroy_async(self.key)
+				self.conn, self.key = self.pool._get_conn()
+
+		raise ConnectionException('failed to reconnect to db.')
+
+
+	def __enter__(self: Self) -> Self :
+		self.conn.__enter__()
+		return self
+
+
+	async def __aenter__(self: Self) -> Self :
+		return self.__enter__()
+
+
+	def __exit__(self: Self, exc_type: Optional[Type[BaseException]], exc_obj: Optional[BaseException], exc_tb: Optional[TracebackType]) :
+		if any([exc_type, exc_obj, exc_tb]) :
+			self.conn.rollback() # rollback so we know that the connection is free to return to the pool
+
+		self.conn.__exit__(exc_type, exc_obj, exc_tb)
+		self.pool._free(self.key)
+
+
+	async def __aexit__(self: Self, exc_type: Optional[Type[BaseException]], exc_obj: Optional[BaseException], exc_tb: Optional[TracebackType]) :
+		if any([exc_type, exc_obj, exc_tb]) :
+			self.conn.rollback() # rollback so we know that the connection is free to return to the pool
+
+		self.conn.__exit__(exc_type, exc_obj, exc_tb)
+		await self.pool._free_async(self.key)
+
+
+class ConnectionPool :
+
+	lock: Lock
+	db:   Dict[str, str]
+
+	def __init__(self) :
+		self.used:      Dict[Hashable, Connection] = { }
+		self.available: List[Connection]           = []
+		self.logger:    Logger                     = getLogger()
+		self.total:     int                        = 0
+
+		if getattr(ConnectionPool, 'db', None) is None :
+			ConnectionPool.db = fetch('db', Dict[str, str])
+
+		if getattr(ConnectionPool, 'lock', None) is None :
+			ConnectionPool.lock = Lock()
+
+
+	def _sql_connect(self: Self) -> Connection :
 		try :
-			conn: Connection = dbConnect(**SqlInterface.db) # type: ignore
+			conn: Connection = dbConnect(**ConnectionPool.db) # type: ignore
 			self.logger.info('connected to database.')
 			return conn
 
 		except Exception as e :
 			self.logger.critical(f'failed to connect to database!', exc_info=e)
 			raise
+
+
+	def _id(self: Self) -> Hashable :
+		while True :
+			key: bytes = randbytes(8)
+			if key not in self.used :
+				return key			
+
+
+	def _free(self: Self, key: Hashable) -> None :
+		if key in self.used :
+			self.available.append(self.used.pop(key))
+		self.logger.info(f'ConnectionPool.free ==> available: {len(self.available)}, used: {len(self.used)}, total:, {self.total}')
+
+
+	def _get_conn(self: Self) -> Tuple[Connection, Hashable] :
+		conn: Connection
+		try :
+			conn = self.available.pop()
+
+		except IndexError as e :
+			conn = self._sql_connect()
+			self.total += 1
+
+		key: Hashable = self._id()
+		self.used[key] = conn
+		assert len(self.available) + len(self.used) == self.total
+		self.logger.info(f'ConnectionPool.conn ==> available: {len(self.available)}, used: {len(self.used)}, total:, {self.total}')
+		return conn, key
+
+
+	async def _free_async(self: Self, key: Hashable) -> None :
+		async with self.lock :
+			return self._free(key)
+
+
+	def conn(self: Self) -> Conn :
+		return Conn(self)
+
+
+	async def conn_async(self: Self) -> Conn :
+		async with self.lock :
+			return self.conn()
+
+
+	def destroy(self: Self, key: Hashable) -> None :
+		if key not in self.used :
+			return
+
+		try :
+			self.used[key].close()
+
+		except :
+			pass
+
+		finally :
+			del self.used[key]
+			self.total -= 1
+
+
+	async def destroy_async(self: Self, key: Hashable) -> None :
+		async with self.lock :
+			return self.destroy(key)
+
+
+class SqlInterface :
+
+	pool: ConnectionPool
+
+	def __init__(self: 'SqlInterface', long_query_metric: float = 1, conversions: Dict[type, Callable] = { }) -> None :
+		self.logger: Logger = getLogger()
+		self._long_query = long_query_metric	
+		self._conversions: Dict[type, Callable] = {
+			tuple: list,
+			bytes: Binary,
+			Enum: lambda x : x.name,
+			**conversions,
+		}
+
+		if getattr(SqlInterface, 'pool', None) is None :
+			SqlInterface.pool = ConnectionPool()
 
 
 	def _convert_item(self: 'SqlInterface', item: Any) -> Any :
@@ -70,13 +218,12 @@ class SqlInterface :
 
 
 	def query(self: 'SqlInterface', sql: Union[str, Query], params:tuple=(), commit:bool=False, fetch_one:bool=False, fetch_all:bool=False, maxretry:int=2) -> Any :
-		conn = self._sql_connect()
-
 		if isinstance(sql, Query) :
 			sql, params = sql.build()
 
 		params = tuple(map(self._convert_item, params))
 
+		conn: Conn = SqlInterface.pool.conn()
 		with conn as conn :
 			try :
 				with conn.cursor() as cur :
@@ -102,7 +249,7 @@ class SqlInterface :
 			except (ConnectionException, InterfaceError) as e :
 				if maxretry > 1 :
 					self.logger.warning('connection to db was severed, attempting to reconnect.', exc_info=e)
-					self._sql_connect()
+					# self._sql_connect()
 					return self.query(sql, params, commit, fetch_one, fetch_all, maxretry - 1)
 
 				else :
@@ -135,7 +282,7 @@ class SqlInterface :
 
 
 	@staticmethod
-	def _table_name(model: BaseModel) -> Table :
+	def _table_name(model: Union[BaseModel, Type[BaseModel]]) -> Table :
 		if not hasattr(model, '__table_name__') :
 			raise AttributeError('model must be defined with the __table_name__ attribute')
 
@@ -188,7 +335,7 @@ class SqlInterface :
 		return attributes
 
 
-	async def insert(self: Self, model: BaseModel) -> BaseModel :
+	async def insert[T: BaseModel](self: Self, model: T) -> T :
 		"""
 		inserts a model into the database table defined by __table_name__.
 
@@ -270,8 +417,9 @@ class SqlInterface :
 
 
 	@staticmethod
-	def _assign_field_values(model: BaseModel, data: Tuple[Any, ...]) -> BaseModel :
+	def _assign_field_values[T: BaseModel](model: Type[T], data: Tuple[Any, ...]) -> T :
 		i = 0
+		d: dict = { }
 		for key, field in model.__fields__.items() :
 			attrs = SqlInterface._orm_attr_parser(field)
 			if attrs.ignore :
@@ -281,45 +429,30 @@ class SqlInterface :
 				unset = True
 
 				for m in attrs.map :
-					val = getattr(model, key)
-
-					if val is None :
-						val = field.type_()
-
-					v2 = val
+					v2 = val = d.get(key, { })
 
 					for k in m[0] :
 						v = v2
-						v2 = getattr(v, k)
-						if v2 is None and v.__annotations__[k] :
-							anno: type = v.__annotations__[k]
-
-							if getattr(anno, '__origin__', None) is Union and len(anno.__args__) == 2 and type(None) in anno.__args__ :
-								anno = anno.__args__[0 if anno.__args__.index(type(None)) else 1]
-
-							if issubclass(anno, BaseModel) or is_dataclass(anno) :
-								v2 = anno()
-
-							setattr(v, k, v2)
+						v2 = v.get(k)
 
 					if data[i] :
 						unset = False
 
-					setattr(v, k, data[i])
-					setattr(model, key, val)
+					v[k] = data[i]
+					d[key] = val
 					i += 1
 
 				if unset :
-					setattr(model, key, field.default)
+					d[key] = field.default
 
 			else :
-				setattr(model, key, data[i])
+				d[key] = data[i]
 				i += 1
 
-		return model
+		return model.parse_obj(d)
 
 
-	async def select(self: Self, model: BaseModel) -> BaseModel :
+	async def select[T: BaseModel](self: Self, model: T) -> T :
 		"""
 		fetches a model from the database table defined by __table_name__ using the populated field indicated by the pk
 
@@ -360,10 +493,10 @@ class SqlInterface :
 		if not data :
 			raise KeyError('value does not exist in database')
 
-		return SqlInterface._assign_field_values(model, data)
+		return SqlInterface._assign_field_values(type(model), data)
 
 
-	async def update(self: Self, model: BaseModel) -> BaseModel :
+	async def update[T: BaseModel](self: Self, model: T) -> T :
 		"""
 		updates a model in the database table defined by __table_name__.
 
@@ -480,39 +613,57 @@ class SqlInterface :
 		await self.query_async(query, commit=True)
 
 
+	async def where[T: BaseModel](self: Self, model: Type[T], *where: Where) -> List[T] :
+		table = self._table_name(model)
+		query = Query(table).where(*where)
+		_, t  = str(table).rsplit('.', 1)
+
+		for _, field in model.__fields__.items() :
+			attrs = SqlInterface._orm_attr_parser(field)
+			if attrs.ignore :
+				continue
+
+			if attrs.map :
+				for m in attrs.map :
+					query.select(Field(t, m[1]))
+
+			else :
+				query.select(Field(t, attrs.column or field.name))
+
+		data: List[Tuple[Any, ...]] = await self.query_async(query, fetch_all=True)
+
+		return [SqlInterface._assign_field_values(model, row) for row in data]
+
+
 class Transaction :
 
 	def __init__(self: 'Transaction', sql: SqlInterface) :
-		self._sql: SqlInterface = sql
-		self.cur: Optional[Cursor] = None
-		self.conn: Optional[Connection] = None
-		self.nested: bool = False
+		self._sql:   SqlInterface     = sql
+		self.cur:    Optional[Cursor] = None
+		self.conn:   Optional[Conn]   = None
+		self.nested: bool             = False
 
 
-	def __enter__(self: 'Transaction') :
+	async def __aenter__(self: 'Transaction') :
 		if self.conn :
 			self.nested = True
 
-		self.conn = self.conn or self._sql._sql_connect().__enter__()
+		if not self.conn :
+			conn: Conn = await self._sql.pool.conn_async()
+			self.conn = conn
 
-		for _ in range(2) :
-			try :
-				self.cur = self.cur or self.conn.cursor().__enter__()
-				return self
+		if not self.cur :
+			self.cur = (await self.conn.cursor_async()).__enter__()
 
-			except (ConnectionException, InterfaceError) as e :
-				self._sql.logger.warning('connection to db was severed, attempting to reconnect.', exc_info=e)
-				# self._sql._sql_connect()
-
-		raise ConnectionException('failed to reconnect to db.')
+		return self
 
 
-	def __exit__(self: 'Transaction', exc_type: Optional[Type[BaseException]], exc_obj: Optional[BaseException], exc_tb: Optional[TracebackType]) :
+	async def __aexit__(self: 'Transaction', exc_type: Optional[Type[BaseException]], exc_obj: Optional[BaseException], exc_tb: Optional[TracebackType]) :
 		if not self.nested :
 			if self.cur :
 				self.cur.__exit__(exc_type, exc_obj, exc_tb)
 			if self.conn :
-				self.conn.__exit__(exc_type, exc_obj, exc_tb)
+				await self.conn.__aexit__(exc_type, exc_obj, exc_tb)
 
 
 	def commit(self: 'Transaction') :

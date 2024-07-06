@@ -96,7 +96,6 @@ class Tagger(Tags) :
 	async def tag(self: Self, user: KhUser, itag: InternalTag) -> Tag :
 		owner: Task[Optional[UserPortable]] = ensure_future(self._tag_owner(user, itag))
 		tag_count: Task[int] = ensure_future(self.tagCount(itag.name))
-		print("==> itag:", itag)
 		return Tag(
 			tag=itag.name,
 			owner=await owner,

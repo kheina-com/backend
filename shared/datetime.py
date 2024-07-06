@@ -13,3 +13,8 @@ class datetime(pydatetime) :
 	@classmethod
 	def now(cls, timezone: timezone = timezone.utc) :
 		return super().now(timezone)
+
+
+	@classmethod
+	def zero(cls, timezone: timezone = timezone.utc) :
+		return cls.fromtimestamp(0, timezone)

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, conint, conlist, constr, validator
+from pydantic import BaseModel, Field, conint, conlist, constr, validator
 
 from posts.models import Post, PostIdValidator, _post_id_converter
 from shared.models._shared import PostId, SetId, SetIdValidator, UserPortable, UserPrivacy
@@ -66,7 +66,7 @@ class UpdateSetRequest(BaseModel) :
 
 class AddPostToSetRequest(BaseModel) :
 	_post_id_validator = PostIdValidator
-	_set_id_validator = SetIdValidator
+	_set_id_validator = SetIdValidator 
 
 	post_id: PostId
 	set_id: SetId
@@ -76,13 +76,16 @@ class AddPostToSetRequest(BaseModel) :
 class InternalSet(BaseModel) :
 	_post_id_converter = validator('first', 'last', pre=True, always=True, allow_reuse=True)(_post_id_converter)
 
-	set_id: int
+	class Config:
+		validate_assignment = True
+
+	set_id: int = Field(description='orm:"pk"')
 	owner: int
-	count: int
+	count: int = Field(description='orm:"-"')
 	title: Optional[str]
 	description: Optional[str]
 	privacy: int
 	created: datetime
 	updated: datetime
-	first: Optional[PostId] = None
-	last: Optional[PostId]  = None
+	first: Optional[PostId] = Field(None, description='orm:"-"')
+	last: Optional[PostId]  = Field(None, description='orm:"-"')
