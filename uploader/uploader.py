@@ -15,7 +15,7 @@ from exiftool import ExifToolAlpha as ExifTool
 from wand.image import Image
 
 from posts.models import InternalPost, MediaType, Post, PostId, PostSize, Privacy, Rating
-from posts.repository import Posts, VoteKVS, privacy_map, rating_map
+from posts.repository import PostKVS, Posts, VoteKVS, privacy_map, rating_map
 from posts.scoring import confidence
 from posts.scoring import controversial as calc_cont
 from posts.scoring import hot as calc_hot
@@ -34,7 +34,6 @@ from users.repository import UserKVS, Users
 from .models import Coordinates
 
 
-KVS: KeyValueStore = KeyValueStore('kheina', 'posts')
 CountKVS: KeyValueStore = KeyValueStore('kheina', 'tag_count')
 UnpublishedPrivacies: Set[Privacy] = { Privacy.unpublished, Privacy.draft }
 posts = Posts()
@@ -202,7 +201,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 	async def kvs_get(self: 'Uploader', post_id: PostId) -> Optional[InternalPost] :
 		try :
-			return await KVS.get_async(post_id)
+			return await PostKVS.get_async(post_id)
 
 		except aerospike.exception.RecordNotFound :
 			return None
@@ -344,7 +343,7 @@ class Uploader(SqlInterface, B2Interface) :
 			transaction.commit()
 
 		post.post_id = post_id.int()
-		KVS.put(post_id, post)
+		PostKVS.put(post_id, post)
 
 		return {
 			'post_id': post_id,
@@ -535,7 +534,7 @@ class Uploader(SqlInterface, B2Interface) :
 				post.filename = filename
 				post.thumbhash = thumbhash # type: ignore
 
-				KVS.put(post_id, post)
+				PostKVS.put(post_id, post)
 
 			return {
 				'post_id': post_id,
@@ -561,74 +560,27 @@ class Uploader(SqlInterface, B2Interface) :
 		self._validateTitle(title)
 		self._validateDescription(description)
 
-		query = """
-			UPDATE kheina.public.posts
-			SET updated = NOW()
-			"""
-
-		columns: List[str] = []
-		params: List[Any] = []
+		update: bool         = False
+		post:   InternalPost = await posts._get_post(post_id)
 
 		if title is not None :
-			query += """,
-			title = %s"""
-			columns.append('title')
-			params.append(title or None)
+			update = True
+			post.title = title or None
 
 		if description is not None :
-			query += """,
-			description = %s"""
-			columns.append('description')
-			params.append(description or None)
+			update = True
+			post.description = description or None
 
 		if rating :
-			query += """,
-			rating = rating_to_id(%s)"""
-			columns.append('rating')
-			params.append(rating)
+			update = True
+			r = rating_map[rating]
+			assert isinstance(r, int)
+			post.rating = r
 
-		if not params :
+		if not update :
 			raise BadRequest('no params were provided.')
 
-		async with self.transaction() as t :
-			return_cols: List[str] = ['created', 'updated']
-
-			data = await t.query_async(
-				query + f"""
-				WHERE uploader = %s
-					AND post_id = %s
-				RETURNING {','.join(return_cols)};
-				""",
-				tuple(params + [user.user_id, post_id.int()]),
-				fetch_one=True,
-			)
-
-			if privacy :
-				await self._update_privacy(user, post_id, privacy, transaction=t, commit=True)
-
-			else :
-				t.commit()
-
-		post: Optional[InternalPost] = await self.kvs_get(post_id)
-		if post :
-			# post is populated in cache, so we can safely update it
-
-			if privacy :
-				p = privacy_map[privacy]
-				assert isinstance(p, int)
-				post.privacy = p
-
-			if rating :
-				r = rating_map[rating]
-				assert isinstance(r, int)
-				post.rating = r
-
-			post = InternalPost.parse_obj({
-				**post.dict(),
-				**dict(zip(columns + ['created', 'updated'], params + list(data))),
-			})
-
-			KVS.put(post_id, post)
+		await PostKVS.put_async(post_id, await self.update(post))
 
 
 	async def _update_privacy(self: 'Uploader', user: KhUser, post_id: PostId, privacy: Privacy, transaction: Optional[Transaction] = None, commit: bool = True) -> bool :
@@ -738,9 +690,9 @@ class Uploader(SqlInterface, B2Interface) :
 	async def updatePrivacy(self: 'Uploader', user: KhUser, post_id: PostId, privacy: Privacy) :
 		success = await self._update_privacy(user, post_id, privacy)
 
-		if await KVS.exists_async(post_id) :
+		if await PostKVS.exists_async(post_id) :
 			# we need the created and updated values set by db, so just remove
-			ensure_future(KVS.remove_async(post_id))
+			ensure_future(PostKVS.remove_async(post_id))
 
 		return success
 

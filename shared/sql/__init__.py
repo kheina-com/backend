@@ -1,11 +1,14 @@
-from asyncio import get_event_loop, Lock
+from asyncio import get_event_loop
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, is_dataclass
 from enum import Enum
 from functools import lru_cache, partial
+from logging import DEBUG
+from random import randbytes
+from re import compile
+from threading import Lock
 from types import TracebackType
 from typing import Any, Callable, Dict, Hashable, List, Optional, Self, Tuple, Type, Union
-from re import compile
 
 from psycopg2 import Binary
 from psycopg2 import connect as dbConnect
@@ -14,12 +17,12 @@ from psycopg2.extensions import connection as Connection
 from psycopg2.extensions import cursor as Cursor
 from pydantic import BaseModel
 from pydantic.fields import ModelField
+from typing_extensions import deprecated
 
 from ..config.credentials import fetch
 from ..logging import Logger, getLogger
 from ..timing import Timer
-from .query import Insert, Operator, Query, Table, Value, Field, Where, Update
-from random import randbytes
+from .query import Field, Insert, Operator, Query, Table, Update, Value, Where
 
 
 _orm_regex = compile(r'orm:"([^\n]*?)(?<!\\)"')
@@ -36,11 +39,10 @@ class FieldAttributes :
 	ignore:      Optional[bool]                    = None
 
 
-# TODO: introduce a concept of waiting for a connection, though tbh that shouldn't really be an issue I don't think
 class Conn :
 
 	def __init__(self, pool: 'ConnectionPool') -> None :
-		self.conn: Connection; self.key:  Hashable
+		self.conn: Connection; self.key: Hashable
 		self.conn, self.key = pool._get_conn()
 
 		self.pool: ConnectionPool = pool
@@ -100,16 +102,20 @@ class Conn :
 		await self.pool._free_async(self.key)
 
 
+# TODO: introduce a concept of waiting for a connection, though tbh that shouldn't
+# really be an issue I don't think
+# TODO: add connection culling so that if the total number of connections aren't
+# being used very often, they can be closed and resources reclaimed
 class ConnectionPool :
 
-	lock: Lock
-	db:   Dict[str, str]
+	total:     int
+	lock:      Lock
+	db:        Dict[str, str]
+	available: List[Connection]           = []
+	used:      Dict[Hashable, Connection] = { }
 
 	def __init__(self) :
-		self.used:      Dict[Hashable, Connection] = { }
-		self.available: List[Connection]           = []
-		self.logger:    Logger                     = getLogger()
-		self.total:     int                        = 0
+		self.logger: Logger = getLogger(level=DEBUG)
 
 		if getattr(ConnectionPool, 'db', None) is None :
 			ConnectionPool.db = fetch('db', Dict[str, str])
@@ -117,11 +123,16 @@ class ConnectionPool :
 		if getattr(ConnectionPool, 'lock', None) is None :
 			ConnectionPool.lock = Lock()
 
+		if getattr(ConnectionPool, 'total', None) is None :
+			ConnectionPool.total = 0
+
 
 	def _sql_connect(self: Self) -> Connection :
+		assert len(self.available) == 0
+		assert len(self.used) == ConnectionPool.total
 		try :
 			conn: Connection = dbConnect(**ConnectionPool.db) # type: ignore
-			self.logger.info('connected to database.')
+			self.logger.debug(f'connected to database.   ==> available: {len(self.available)}, used: {len(self.used)}, total: {ConnectionPool.total}')
 			return conn
 
 		except Exception as e :
@@ -137,9 +148,10 @@ class ConnectionPool :
 
 
 	def _free(self: Self, key: Hashable) -> None :
-		if key in self.used :
-			self.available.append(self.used.pop(key))
-		self.logger.info(f'ConnectionPool.free ==> available: {len(self.available)}, used: {len(self.used)}, total:, {self.total}')
+		with self.lock :
+			if key in self.used :
+				self.available.append(self.used.pop(key))
+			self.logger.debug(f'ConnectionPool._free     ==> available: {len(self.available)}, used: {len(self.used)}, total: {ConnectionPool.total}')
 
 
 	def _get_conn(self: Self) -> Tuple[Connection, Hashable] :
@@ -147,49 +159,61 @@ class ConnectionPool :
 		try :
 			conn = self.available.pop()
 
-		except IndexError as e :
+		except IndexError :
 			conn = self._sql_connect()
-			self.total += 1
+			ConnectionPool.total += 1
 
 		key: Hashable = self._id()
 		self.used[key] = conn
-		assert len(self.available) + len(self.used) == self.total
-		self.logger.info(f'ConnectionPool.conn ==> available: {len(self.available)}, used: {len(self.used)}, total:, {self.total}')
+		assert len(self.available) + len(self.used) == ConnectionPool.total
+		self.logger.debug(f'ConnectionPool._get_conn ==> available: {len(self.available)}, used: {len(self.used)}, total: {ConnectionPool.total}')
 		return conn, key
 
 
 	async def _free_async(self: Self, key: Hashable) -> None :
-		async with self.lock :
-			return self._free(key)
+		return self._free(key)
 
 
 	def conn(self: Self) -> Conn :
-		return Conn(self)
+		with self.lock :
+			return Conn(self)
 
 
 	async def conn_async(self: Self) -> Conn :
-		async with self.lock :
-			return self.conn()
+		return self.conn()
 
 
 	def destroy(self: Self, key: Hashable) -> None :
 		if key not in self.used :
 			return
 
-		try :
-			self.used[key].close()
+		with self.lock :
+			try :
+				self.used[key].close()
 
-		except :
-			pass
+			except :
+				pass
 
-		finally :
-			del self.used[key]
-			self.total -= 1
+			finally :
+				del self.used[key]
+				ConnectionPool.total -= 1
 
 
 	async def destroy_async(self: Self, key: Hashable) -> None :
-		async with self.lock :
-			return self.destroy(key)
+		return self.destroy(key)
+
+
+	def close_all(self: Self) -> None :
+		with self.lock :
+			while self.available :
+				self.available.pop().close()
+				ConnectionPool.total -= 1
+
+			while self.used :
+				key = next(self.used.keys().__iter__())
+				self.destroy(key)
+
+		assert len(self.available) == len(self.used) == ConnectionPool.total == 0, f'available: {len(self.available)}, used: {len(self.used)}, total: {ConnectionPool.total}'
 
 
 class SqlInterface :
@@ -217,6 +241,7 @@ class SqlInterface :
 		return item
 
 
+	@deprecated('use query_async instead')
 	def query(self: 'SqlInterface', sql: Union[str, Query], params:tuple=(), commit:bool=False, fetch_one:bool=False, fetch_all:bool=False, maxretry:int=2) -> Any :
 		if isinstance(sql, Query) :
 			sql, params = sql.build()

@@ -34,7 +34,7 @@ class LogHandler(logging.Handler) :
 
 	logging_available = not environment.is_local()
 
-	def __init__(self, name: str, *args, structs:List[type]=[dict, list, tuple], **kwargs:Dict[str, Any]) -> None :
+	def __init__(self, name: str, *args, structs:List[type]=[dict, list, tuple], **kwargs: Any) -> None :
 		logging.Handler.__init__(self, *args, **kwargs)
 		self._structs = tuple(structs)
 		try :
@@ -91,8 +91,15 @@ def getLogger(name: Union[str, None]=None, level:int=logging.INFO, filter:Callab
 	for loggerName in disable :
 		logging.getLogger(loggerName).propagate = False
 	logging.root.setLevel(logging.NOTSET)
-	handler: LogHandler = LogHandler(name, level=level) # type: ignore
-	handler.addFilter(filter)
-	logging.root.handlers.clear()
-	logging.root.addHandler(handler)
+
+	# TODO: check for names and add a handler for each name
+	if len(logging.root.handlers) == 1 and type(logging.root.handlers[0]) is LogHandler :
+		logging.root.handlers[0].level = min(logging.root.handlers[0].level, level)
+
+	else :
+		handler: LogHandler = LogHandler(name, level=level)
+		handler.addFilter(filter)
+		logging.root.handlers.clear()
+		logging.root.addHandler(handler)
+
 	return logging.getLogger(name)

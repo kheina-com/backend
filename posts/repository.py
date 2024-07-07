@@ -1,7 +1,6 @@
 from asyncio import Task, ensure_future
 from collections import defaultdict
 from dataclasses import dataclass
-from shared.datetime import datetime
 from math import ceil
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Self, Set, Tuple, Union
 
@@ -11,6 +10,7 @@ from sets.models import InternalSet
 from shared.auth import KhUser, Scope
 from shared.caching import AerospikeCache, ArgsCache, SimpleCache
 from shared.caching.key_value_store import KeyValueStore
+from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
 from shared.maps import privacy_map
 from shared.models.user import InternalUser, UserPortable, UserPrivacy, Verified

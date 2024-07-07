@@ -2,6 +2,7 @@ from asyncio import Task, ensure_future, wait
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Self, Tuple
 
+import aerospike
 from psycopg2.errors import NotNullViolation, UniqueViolation
 
 from posts.models import InternalPost, PostId, Privacy
@@ -122,7 +123,11 @@ class Tagger(Tags) :
 			for tag in set(tags) - existing :  # increment tags that didn't already exist
 				self._increment_tag_count(tag)
 
-		TagKVS.remove(f'post.{post_id}')
+		try :
+			await TagKVS.remove_async(f'post.{post_id}')
+
+		except aerospike.exception.RecordNotFound :
+			pass
 
 
 	@HttpErrorHandler('removing tags from post')

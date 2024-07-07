@@ -12,6 +12,7 @@ from ..models.auth import KhUser
 _conversions: Dict[type, Callable] = {
 	datetime: str,
 	Decimal: float,
+	float: float,
 	tuple: lambda x : list(map(json_stream, filter(None, x))),
 	filter: lambda x : list(map(json_stream, filter(None, x))),
 	set: lambda x : list(map(json_stream, filter(None, x))),
@@ -39,4 +40,6 @@ def json_stream(item: Any) -> Any :
 	for cls in type(item).__mro__ :
 		if cls in _conversions :
 			return _conversions[cls](item)
+	if hasattr(item, 'dict') :
+		return json_stream(item.dict())
 	return item

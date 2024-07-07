@@ -12,6 +12,7 @@ from shared.exceptions.handler import jsonErrorHandler
 from shared.server.middleware import CustomHeaderMiddleware, HeadersToSet
 from shared.server.middleware.auth import KhAuthMiddleware
 from shared.server.middleware.cors import KhCorsMiddleware
+from shared.sql import ConnectionPool
 from tags.router import app as tags
 from uploader.router import app as uploader
 from users.router import app as users
@@ -86,3 +87,7 @@ app.include_router(sets)
 app.include_router(tags)
 app.include_router(uploader)
 app.include_router(users)
+
+@app.on_event('shutdown')
+def shutdown() :
+	ConnectionPool().close_all()
