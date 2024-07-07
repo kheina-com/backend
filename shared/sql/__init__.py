@@ -21,7 +21,7 @@ from typing_extensions import deprecated
 
 from ..config.credentials import fetch
 from ..logging import Logger, getLogger
-from ..timing import Timer
+from ..timing import Timer, timed
 from .query import Field, Insert, Operator, Query, Table, Update, Value, Where
 
 
@@ -241,6 +241,7 @@ class SqlInterface :
 		return item
 
 
+	@timed
 	@deprecated('use query_async instead')
 	def query(self: 'SqlInterface', sql: Union[str, Query], params:tuple=(), commit:bool=False, fetch_one:bool=False, fetch_all:bool=False, maxretry:int=2) -> Any :
 		if isinstance(sql, Query) :

@@ -35,7 +35,7 @@ class LogHandler(logging.Handler) :
 	logging_available = not environment.is_local()
 
 	def __init__(self, name: str, *args, structs:List[type]=[dict, list, tuple], **kwargs: Any) -> None :
-		logging.Handler.__init__(self, *args, **kwargs)
+		super().__init__(*args, **kwargs)
 		self._structs = tuple(structs)
 		try :
 			if not LogHandler.logging_available :

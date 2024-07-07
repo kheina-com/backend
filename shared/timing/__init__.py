@@ -1,12 +1,11 @@
-from dataclasses import dataclass
 from enum import Enum
-from functools import wraps
+from functools import partial, wraps
+from inspect import iscoroutinefunction
+from logging import getLogger
 from sys import _getframe
 from time import time
 from types import FrameType
-from typing import Any, Callable, Coroutine, Dict, Hashable, List, Optional, Self
-from inspect import iscoroutinefunction
-from shared.logging import getLogger
+from typing import Any, Callable, Coroutine, Dict, Hashable, Optional, Self, Union
 
 
 class TimeUnit(Enum) :
@@ -101,23 +100,22 @@ class Time(float) :
 class Execution :
 
 	def __init__(self) -> None :
-		self.timers: List[Time]                  = []
+		self.total:  Time                        = Time()
+		self.count:  int                         = 0
 		self.nested: Dict[Hashable, 'Execution'] = { }
 
 
 	def __repr__(self: Self) -> str :
-		return f'Execution(timers={self.timers}, nested={self.nested})'
+		return f'Execution(total={self.total}, count={self.count}, nested={self.nested})'
+
+
+	def record(self: Self, time: float) :
+		self.total = Time(self.total + time)
+		self.count += 1
 
 
 	def dict(self: Self) -> dict :
-		ret = { }
-
-		if len(self.timers) == 1 :
-			ret['timer'] = self.timers[0]
-
-		else :
-			ret['timers'] = self.timers
-
+		ret: Dict[Hashable, Any] = { 'total': self.total, 'count': self.count }
 		ret.update(self.nested)
 		return ret
 
@@ -125,22 +123,20 @@ class Execution :
 EXEC: str = '__timed_execution__'
 
 
-def timed(root: bool = False) -> Callable :
+def timed(root: Union[bool, Callable] = False) -> Callable :
 	"""
 	times the passed function.
 	
 	if root = True, timing values are logged on completion.
 	if root = False, timing values are stored in the root's callstack and logged upon the root's completion.
-
-	async functions must be called with timing.ensure_future rather than asyncio.ensure_future to pass the stacktrace.
 	"""
 
-	def get_parent(frame: Optional[FrameType] = None) -> Optional[Execution] :
-		if not frame :
-			frame = _getframe().f_back
+	if getattr(timed, 'logger', None) is None :
+		l = getLogger('stats')
+		timed.logger = lambda n, x : l.info({ n: x.dict() })
 
-		assert frame
 
+	def get_parent(frame: Optional[FrameType]) -> Optional[Execution] :
 		while frame :
 			if EXEC in frame.f_locals :
 				parent: Optional[Execution] = frame.f_locals[EXEC]
@@ -159,8 +155,7 @@ def timed(root: bool = False) -> Callable :
 		start:     Callable[[Optional[Execution]], float]
 		completed: Callable[[float], None]
 
-		name   = f'{func.__module__}.{func.__qualname__}'
-		logger = getLogger('stats')
+		name = f'{func.__module__}.{func.__qualname__}'
 
 		if root :
 			def s(_: Optional[Execution]) -> float :
@@ -175,9 +170,8 @@ def timed(root: bool = False) -> Callable :
 				assert frame
 				exec: Optional[Execution] = frame.f_locals[EXEC]
 				assert exec
-				exec.timers.append(Time(time() - start))
-				print('exec:', exec)
-				logger.info({ name: exec })
+				exec.record(time() - start)
+				timed.logger(name, exec)
 
 			start     = s
 			completed = c
@@ -204,8 +198,8 @@ def timed(root: bool = False) -> Callable :
 				assert frame
 				if EXEC in frame.f_locals :
 					exec: Execution = frame.f_locals[EXEC]
-					exec.timers.append(Time(time() - start))
-			
+					exec.record(time() - start)
+
 			start     = s
 			completed = c
 
@@ -237,9 +231,12 @@ def timed(root: bool = False) -> Callable :
 		func, root = root, timed.__defaults__[0] # type: ignore
 		return decorator(func)
 
-	elif isinstance(root, bool) :
+	elif isinstance(root, bool) :		
 		return decorator
 
 	else :
 		raise TypeError(
 			'Expected first argument to be a bool, a callable, or None')
+
+timed.root = timed(True)
+timed.logger: Callable[[str, Execution], None] = None
