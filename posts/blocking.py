@@ -5,6 +5,7 @@ from configs.models import UserConfig
 from shared.auth import KhUser
 from shared.caching import AerospikeCache, ArgsCache, SimpleCache
 from shared.models.user import InternalUser
+from shared.timing import timed
 
 
 configs = Configs()
@@ -105,6 +106,7 @@ async def fetch_block_tree(user: KhUser) -> Tuple[BlockTree, UserConfig] :
 	return tree, user_config
 
 
+@timed
 async def is_post_blocked(user: KhUser, uploader: InternalUser, tags: Iterable[str]) -> bool :
 	block_tree, user_config = await fetch_block_tree(user)
 

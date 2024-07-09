@@ -59,7 +59,7 @@ class Tagger(Tags) :
 
 	def _increment_tag_count(self, tag: str) -> None :
 		self._populate_tag_cache(tag)
-		KeyValueStore._client.increment(
+		KeyValueStore._client.increment( # type: ignore
 			(CountKVS._namespace, CountKVS._set, tag),
 			'data',
 			1,
@@ -74,7 +74,7 @@ class Tagger(Tags) :
 
 	def _decrement_tag_count(self, tag: str) -> None :
 		self._populate_tag_cache(tag)
-		KeyValueStore._client.increment(
+		KeyValueStore._client.increment( # type: ignore
 			(CountKVS._namespace, CountKVS._set, tag),
 			'data',
 			-1,
@@ -109,7 +109,7 @@ class Tagger(Tags) :
 
 
 	@HttpErrorHandler('adding tags to post')
-	async def addTags(self, user: KhUser, post_id: PostId, tags: Tuple[str]) :
+	async def addTags(self, user: KhUser, post_id: PostId, tags: Tuple[str, ...]) :
 		await self.query_async("""
 			CALL kheina.public.add_tags(%s, %s, %s);
 			""",
@@ -131,7 +131,7 @@ class Tagger(Tags) :
 
 
 	@HttpErrorHandler('removing tags from post')
-	async def removeTags(self, user: KhUser, post_id: PostId, tags: Tuple[str]) :
+	async def removeTags(self, user: KhUser, post_id: PostId, tags: Tuple[str, ...]) :
 		await self.query_async("""
 			CALL kheina.public.remove_tags(%s, %s, %s);
 			""",
@@ -192,7 +192,15 @@ class Tagger(Tags) :
 		UniqueViolation: (Conflict, 'A tag with that name already exists.'),
 		UniqueViolation: (NotNullViolation, 'The tag group you entered could not be found or does not exist.'),
 	})
-	async def updateTag(self, user: KhUser, tag: str, name: str, group: TagGroupPortable, owner: str, description: str, deprecated: bool = None) :
+	async def updateTag(self,
+		user: KhUser,
+		tag: str,
+		name: Optional[str],
+		group: Optional[TagGroupPortable],
+		owner: Optional[str],
+		description: Optional[str],
+		deprecated: Optional[bool] = None,
+	) :
 		if not any([name, group, owner, description, deprecated is not None]) :
 			raise BadRequest('no params were provided.')
 
@@ -237,7 +245,7 @@ class Tagger(Tags) :
 			SET {','.join(query)}
 			WHERE tags.tag = %s
 			""",
-			params + [tag],
+			tuple(params + [tag]),
 			commit=True,
 		)
 
@@ -302,11 +310,11 @@ class Tagger(Tags) :
 
 	@HttpErrorHandler('fetching tags by post')
 	async def fetchTagsByPost(self, user: KhUser, post_id: PostId) -> TagGroups :
-		post: Task[InternalPost] = ensure_future(posts._get_post(post_id))
+		post_task: Task[InternalPost] = ensure_future(posts._get_post(post_id))
 		tags: Task[TagGroups] = ensure_future(self._fetch_tags_by_post(post_id))
 
 		try :
-			post: InternalPost = await post
+			post: InternalPost = await post_task
 
 		except NotFound :
 			raise NotFound("the provided post does not exist or you don't have access to it.", post_id=post_id)
@@ -356,7 +364,7 @@ class Tagger(Tags) :
 
 
 	@HttpErrorHandler('looking up tags')
-	async def tagLookup(self, user: KhUser, tag: Optional[str] = None) -> Task[Tag] :
+	async def tagLookup(self, user: KhUser, tag: Optional[str] = None) -> List[Tag] :
 		tag = tag or ''
 
 		tags: List[Task[Tag]] = []
@@ -446,6 +454,9 @@ class Tagger(Tags) :
 		tags = defaultdict(lambda : defaultdict(lambda : 0))
 
 		for group, tag_list in data :
+			if not group :
+				continue
+
 			for tag in tag_list :
 				tags[group][tag] += 1
 

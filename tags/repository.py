@@ -10,6 +10,7 @@ from shared.caching import AerospikeCache, SimpleCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadRequest, Conflict, Forbidden, HttpErrorHandler, NotFound
 from shared.sql import SqlInterface
+from shared.timing import timed
 from shared.utilities import flatten
 
 from .models import InternalTag, Tag, TagGroupPortable, TagGroups
@@ -24,6 +25,7 @@ TagKVS: KeyValueStore = KeyValueStore('kheina', 'tags')
 class Tags(SqlInterface) :
 
 	# TODO: figure out a way that we can increase this TTL (updating inheritance won't be reflected in cache)
+	@timed.link
 	@AerospikeCache('kheina', 'tags', 'post.{post_id}', TTL_minutes=1, _kvs=TagKVS)
 	async def _fetch_tags_by_post(self, post_id: PostId) -> TagGroups :
 		data = await self.query_async("""

@@ -5,6 +5,7 @@ from fastapi.responses import UJSONResponse
 
 from posts.models import PostId
 from shared.server import NoContentResponse, Request, ServerApp
+from shared.timing import timed
 
 from .models import CreateRequest, IconRequest, PrivacyRequest, UpdateRequest
 from .uploader import Uploader
@@ -17,12 +18,8 @@ app = APIRouter(
 uploader = Uploader()
 
 
-@app.on_event('shutdown')
-async def shutdown() :
-	uploader.close()
-
-
-@app.post('/create_post')
+@app.put('/post')
+@timed.root
 async def v1CreatePost(req: Request, body: CreateRequest) :
 	"""
 	only auth required
@@ -43,6 +40,7 @@ async def v1CreatePost(req: Request, body: CreateRequest) :
 
 
 @app.post('/image')
+@timed.root
 async def v1UploadImage(req: Request, file: UploadFile = File(None), post_id: PostId = Form(None), web_resize: Optional[int] = Form(None)) :
 	"""
 	FORMDATA: {
@@ -60,7 +58,18 @@ async def v1UploadImage(req: Request, file: UploadFile = File(None), post_id: Po
 		detail.append({
 			'loc': [
 				'body',
-				'file'
+				'file',
+			],
+			'msg': 'field required',
+			'type': 'value_error.missing',
+		})
+
+	if not file.filename :
+		detail.append({
+			'loc': [
+				'body',
+				'file',
+				'filename',
 			],
 			'msg': 'field required',
 			'type': 'value_error.missing',
@@ -70,7 +79,7 @@ async def v1UploadImage(req: Request, file: UploadFile = File(None), post_id: Po
 		detail.append({
 			'loc': [
 				'body',
-				'post_id'
+				'post_id',
 			],
 			'msg': 'field required',
 			'type': 'value_error.missing',
@@ -78,6 +87,8 @@ async def v1UploadImage(req: Request, file: UploadFile = File(None), post_id: Po
 
 	if detail :
 		return UJSONResponse({ 'detail': detail }, status_code=422)
+
+	assert file.filename
 
 	return await uploader.uploadImage(
 		user=req.user,
@@ -88,7 +99,8 @@ async def v1UploadImage(req: Request, file: UploadFile = File(None), post_id: Po
 	)
 
 
-@app.post('/update_post')
+@app.patch('/post')
+@timed.root
 async def v1UpdatePost(req: Request, body: UpdateRequest) :
 	"""
 	{
@@ -110,7 +122,8 @@ async def v1UpdatePost(req: Request, body: UpdateRequest) :
 		return NoContentResponse
 
 
-@app.post('/update_privacy')
+@app.patch('/privacy')
+@timed.root
 async def v1UpdatePrivacy(req: Request, body: PrivacyRequest) :
 	"""
 	{
@@ -125,6 +138,7 @@ async def v1UpdatePrivacy(req: Request, body: PrivacyRequest) :
 
 
 @app.post('/set_icon')
+@timed.root
 async def v1SetIcon(req: Request, body: IconRequest) :
 	await req.user.authenticated()
 	await uploader.setIcon(req.user, body.post_id, body.coordinates)
@@ -132,6 +146,7 @@ async def v1SetIcon(req: Request, body: IconRequest) :
 
 
 @app.post('/set_banner')
+@timed.root
 async def v1SetBanner(req: Request, body: IconRequest) :
 	await req.user.authenticated()
 	await uploader.setBanner(req.user, body.post_id, body.coordinates)

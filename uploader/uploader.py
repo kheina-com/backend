@@ -26,6 +26,7 @@ from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadGateway, BadRequest, Forbidden, HttpErrorHandler, InternalServerError, NotFound
 from shared.models.user import InternalUser
 from shared.sql import SqlInterface, Transaction
+from shared.timing import timed
 from shared.utilities import flatten, int_from_bytes
 from tags.models import TagGroups
 from tags.repository import Tags
@@ -226,11 +227,12 @@ class Uploader(SqlInterface, B2Interface) :
 
 
 	@HttpErrorHandler('creating new post')
+	@timed
 	async def createPost(self: 'Uploader', user: KhUser) -> Dict[str, Union[str, int]] :
 		async with self.transaction() as transaction :
 			post_id: int
 
-			while True :
+			for _ in range(100) :
 				post_id = int_from_bytes(token_bytes(6))
 				data = await transaction.query_async("SELECT count(1) FROM kheina.public.posts WHERE post_id = %s;", (post_id,), fetch_one=True)
 				if not data[0] :
@@ -259,50 +261,36 @@ class Uploader(SqlInterface, B2Interface) :
 		}
 
 
-	async def createPostWithFields(self: 'Uploader', user: KhUser, reply_to: PostId, title: str, description: str, privacy: Privacy, rating: Rating) :
-		columns: List[str] = ['post_id', 'uploader']
-		values: List[str] = ['%s', '%s']
-		params: List[Any] = [user.user_id]
+	@HttpErrorHandler('creating populated post')
+	@timed
+	async def createPostWithFields(self: 'Uploader', user: KhUser, reply_to: Optional[PostId], title: Optional[str], description: Optional[str], privacy: Optional[Privacy], rating: Optional[Rating]) -> Post :
 		explicit = rating_map[Rating.explicit]
-		public = privacy_map[Privacy.public]
+		draft = privacy_map[Privacy.draft]
 		assert isinstance(explicit, int)
-		assert isinstance(public, int)
+		assert isinstance(draft, int)
 
 		post: InternalPost = InternalPost(
-			post_id=reply_to.int(),
+			post_id=0,
 			user_id=user.user_id,
 			rating=explicit,
-			privacy=public,
+			privacy=draft,
 			created=datetime.now(),
 			updated=datetime.now(),
 			size=None,
 		)
 
 		if reply_to :
-			internal_reply_to: int = reply_to.int()
-			columns.append('parent')
-			values.append('%s')
-			params.append(internal_reply_to)
 			post.parent = reply_to.int()
 
 		if title :
 			self._validateTitle(title)
-			columns.append('title')
-			values.append('%s')
-			params.append(title)
 			post.title = title
 
 		if description :
 			self._validateDescription(description)
-			columns.append('description')
-			values.append('%s')
-			params.append(description)
 			post.description = description
 
 		if rating :
-			columns.append('rating')
-			values.append('rating_to_id(%s)')
-			params.append(rating)
 			r = rating_map[rating]
 			assert isinstance(r, int)
 			post.rating = r
@@ -311,28 +299,16 @@ class Uploader(SqlInterface, B2Interface) :
 		post_id: PostId
 
 		async with self.transaction() as transaction :
-			while True :
+			for _ in range(100) :
 				internal_post_id = int_from_bytes(token_bytes(6))
 				d: Tuple[int] = await transaction.query_async("SELECT count(1) FROM kheina.public.posts WHERE post_id = %s;", (internal_post_id,), fetch_one=True)
 				if not d[0] :
 					break
 
-			return_cols: List[str] = ['created', 'updated']
+			post.post_id = internal_post_id
+			post_id      = PostId(post.post_id)
 
-			data: Tuple[datetime, datetime] = await transaction.query_async(f"""
-				INSERT INTO kheina.public.posts
-				(privacy, {','.join(columns)})
-				VALUES
-				(privacy_to_id('draft'), {','.join(values)})
-				RETURNING {','.join(return_cols)};
-				""",
-				tuple([internal_post_id] + params),
-				fetch_one=True,
-			)
-
-			post_id = PostId(internal_post_id)
-			post.created = data[0]
-			post.updated = data[1]
+			post = await transaction.insert(post)
 
 			if privacy :
 				await self._update_privacy(user, post_id, privacy, transaction=transaction, commit=False)
@@ -342,14 +318,12 @@ class Uploader(SqlInterface, B2Interface) :
 
 			transaction.commit()
 
-		post.post_id = post_id.int()
-		PostKVS.put(post_id, post)
+		await PostKVS.put_async(post_id, post)
 
-		return {
-			'post_id': post_id,
-		}
+		return await posts.post(post, user)
 
 
+	@timed
 	def convert_image(self: 'Uploader', image: Image, size: int) -> Image :
 		long_side = 0 if image.size[0] > image.size[1] else 1
 		ratio = size / image.size[long_side]
@@ -361,6 +335,7 @@ class Uploader(SqlInterface, B2Interface) :
 		return image
 
 
+	@timed
 	def thumbhash(self: 'Uploader', image: Image) -> bytes :
 		long_side = 0 if image.size[0] > image.size[1] else 1
 		size = 100
@@ -378,6 +353,7 @@ class Uploader(SqlInterface, B2Interface) :
 		return b64decode(hash.strip(b'\n\r= ')).rstrip(b'\x00')
 
 
+	@timed
 	def get_image_data(self: 'Uploader', image: Image, compress: bool = True) -> bytes :
 		if compress :
 			image.compression_quality = self.output_quality
@@ -387,6 +363,7 @@ class Uploader(SqlInterface, B2Interface) :
 		return image_data.getvalue()
 
 
+	@timed
 	async def uploadImage(
 		self: 'Uploader',
 		user: KhUser,
@@ -394,7 +371,7 @@ class Uploader(SqlInterface, B2Interface) :
 		filename: str,
 		post_id: PostId,
 		emoji_name: Optional[str] = None,
-		web_resize: int = 0,
+		web_resize: Optional[int] = None,
 	) -> Dict[str, Union[Optional[str], int, Dict[str, str]]] :
 		# validate it's an actual photo
 		with Image(blob=file_data) as image :
@@ -428,6 +405,8 @@ class Uploader(SqlInterface, B2Interface) :
 
 			if dot_index and filename[dot_index + 1:].lower() in self.mime_types :
 				filename = filename[:dot_index] + '-web' + filename[dot_index:]
+
+		post = await posts._get_post(post_id)
 
 		# thumbhash
 		with Image(file=open(file_on_disk, 'rb')) as image :
@@ -487,8 +466,7 @@ class Uploader(SqlInterface, B2Interface) :
 					)
 
 				if old_filename :
-					if not await self.b2_delete_file_async(f'{post_id}/{old_filename}') :
-						self.logger.error(f'failed to delete old image: {post_id}/{old_filename}')
+					await self.b2_delete_file_async(f'{post_id}/{old_filename}')
 
 				url: str = f'{post_id}/{filename}'
 
@@ -525,16 +503,12 @@ class Uploader(SqlInterface, B2Interface) :
 
 				transaction.commit()
 
-			post: Optional[InternalPost] = await self.kvs_get(post_id)
-			if post :
-				# post is populated in cache, so we can safely update it
-				post.updated = updated
-				post.media_type = media_type
-				post.size = image_size
-				post.filename = filename
-				post.thumbhash = thumbhash # type: ignore
-
-				PostKVS.put(post_id, post)
+			post.updated    = updated
+			post.media_type = media_type
+			post.size       = image_size
+			post.filename   = filename
+			post.thumbhash  = thumbhash
+			await PostKVS.put_async(post_id, post)
 
 			return {
 				'post_id': post_id,
@@ -548,6 +522,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 
 	@HttpErrorHandler('updating post metadata')
+	@timed
 	async def updatePostMetadata(
 		self: 'Uploader',
 		user: KhUser,
@@ -562,6 +537,9 @@ class Uploader(SqlInterface, B2Interface) :
 
 		update: bool         = False
 		post:   InternalPost = await posts._get_post(post_id)
+
+		if post.user_id != user.user_id :
+			raise Forbidden('You are not allowed to modify this resource.')
 
 		if title is not None :
 			update = True
@@ -583,11 +561,15 @@ class Uploader(SqlInterface, B2Interface) :
 		await PostKVS.put_async(post_id, await self.update(post))
 
 
+	@timed
 	async def _update_privacy(self: 'Uploader', user: KhUser, post_id: PostId, privacy: Privacy, transaction: Optional[Transaction] = None, commit: bool = True) -> bool :
 		if privacy == Privacy.unpublished :
 			raise BadRequest('post privacy cannot be updated to unpublished.')
 
-		async with transaction or self.transaction() as t :
+		if not transaction :
+			transaction = self.transaction()
+
+		async with transaction as t :
 			data = await t.query_async("""
 				SELECT privacy.type
 				FROM kheina.public.posts
@@ -687,6 +669,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 
 	@HttpErrorHandler('updating post privacy')
+	@timed
 	async def updatePrivacy(self: 'Uploader', user: KhUser, post_id: PostId, privacy: Privacy) :
 		success = await self._update_privacy(user, post_id, privacy)
 
@@ -698,6 +681,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 
 	@HttpErrorHandler('setting user icon')
+	@timed
 	async def setIcon(self: 'Uploader', user: KhUser, post_id: PostId, coordinates: Coordinates) :
 		if coordinates.width != coordinates.height :
 			raise BadRequest(f'icons must be square. width({coordinates.width}) != height({coordinates.height})')
@@ -752,6 +736,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 
 	@HttpErrorHandler('setting user banner')
+	@timed
 	async def setBanner(self: 'Uploader', user: KhUser, post_id: PostId, coordinates: Coordinates) :
 		if round(coordinates.width / 3) != coordinates.height :
 			raise BadRequest(f'banners must be a 3x:1 rectangle. round(width / 3)({round(coordinates.width / 3)}) != height({coordinates.height})')
@@ -807,6 +792,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 
 	@HttpErrorHandler('removing post')
+	@timed
 	async def deletePost(self: 'Uploader', user: KhUser, post_id: PostId) -> None :
 		ipost: InternalPost = await posts._get_post(post_id)
 

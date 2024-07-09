@@ -9,6 +9,7 @@ from shared.config.constants import environment
 from shared.config.repo import short_hash
 from shared.models._shared import PostId, Privacy, UserPortable, _post_id_converter
 from shared.sql.query import Table
+from shared.datetime import datetime as dt
 
 
 @unique
@@ -39,8 +40,8 @@ class Score(BaseModel) :
 
 
 class PostSize(BaseModel) :
-	width: int  = -1
-	height: int = -1
+	width: int
+	height: int
 
 
 class VoteRequest(BaseModel) :
@@ -151,8 +152,8 @@ class InternalPost(BaseModel) :
 	rating:      int
 	parent:      Optional[int] = None
 	privacy:     int
-	created:     datetime
-	updated:     datetime
+	created:     datetime           = Field(dt.zero(), description='orm:"default:now()"')
+	updated:     datetime           = Field(dt.zero(), description='orm:"default:now()"')
 	filename:    Optional[str]      = None
 	media_type:  Optional[int]      = None
 	size:        Optional[PostSize] = Field(None, description='orm:"map[width:width,height:height]"')

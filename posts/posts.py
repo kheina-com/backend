@@ -11,6 +11,7 @@ from shared.caching import AerospikeCache, ArgsCache, SimpleCache
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
 from shared.sql.query import Field, Join, JoinType, Operator, Order, Query, Table, Value, Where
+from shared.timing import timed
 
 from .models import InternalPost, MediaType, Post, PostId, PostSize, PostSort, Privacy, Rating, Score, SearchResults
 from .repository import Posts, privacy_map, rating_map, users  # type: ignore
@@ -532,7 +533,7 @@ class Posts(Posts) :
 			total = ensure_future(self.post_count('_'))
 
 		iposts: List[InternalPost] = await self._fetch_posts(sort, t, count, page)
-		posts: List[Post] = await self.posts(iposts, user)
+		posts:  List[Post]         = await self.posts(iposts, user)
 
 		return SearchResults(
 			posts = posts,
@@ -543,6 +544,7 @@ class Posts(Posts) :
 
 
 	@HttpErrorHandler('retrieving post')
+	@timed
 	async def getPost(self, user: KhUser, post_id: PostId) -> Post :
 		post: InternalPost = await self._get_post(post_id)
 

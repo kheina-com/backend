@@ -1,6 +1,7 @@
+from asyncio.coroutines import _is_coroutine  # type: ignore
 from enum import Enum
-from functools import partial, wraps
-from inspect import iscoroutinefunction
+from functools import wraps
+from inspect import Parameter, iscoroutinefunction, signature
 from logging import getLogger
 from sys import _getframe
 from time import time
@@ -99,14 +100,23 @@ class Time(float) :
 
 class Execution :
 
-	def __init__(self) -> None :
-		self.total:  Time                        = Time()
-		self.count:  int                         = 0
-		self.nested: Dict[Hashable, 'Execution'] = { }
+	def __init__(self, name: Optional[str] = None) -> None :
+		self.total:  Time                   = Time()
+		self.count:  int                    = 0
+		self.nested: Dict[str, 'Execution'] = { }
+		self._name:  Optional[str]          = name
 
 
 	def __repr__(self: Self) -> str :
-		return f'Execution(total={self.total}, count={self.count}, nested={self.nested})'
+		return (
+			'Execution(total=' +
+			str(self.total) +
+			', count=' +
+			str(self.count) +
+			', nested=' +
+			str(self.nested) +
+			')'
+		)
 
 
 	def record(self: Self, time: float) :
@@ -115,12 +125,25 @@ class Execution :
 
 
 	def dict(self: Self) -> dict :
-		ret: Dict[Hashable, Any] = { 'total': self.total, 'count': self.count }
-		ret.update(self.nested)
+		ret: Dict[str, Any] = { 'total': self.total, 'count': self.count }
+		ret.update({ k: v.dict() for k, v in self.nested.items() })
 		return ret
 
 
 EXEC: str = '__timed_execution__'
+
+def _get_parent(frame: Optional[FrameType]) -> Optional[Execution] :
+	while frame :
+		if EXEC in frame.f_locals :
+			parent: Optional[Execution] = frame.f_locals[EXEC]
+			del frame
+
+			if not parent :
+				break
+
+			return parent
+
+		frame = frame.f_back
 
 
 def timed(root: Union[bool, Callable] = False) -> Callable :
@@ -135,23 +158,7 @@ def timed(root: Union[bool, Callable] = False) -> Callable :
 		l = getLogger('stats')
 		timed.logger = lambda n, x : l.info({ n: x.dict() })
 
-
-	def get_parent(frame: Optional[FrameType]) -> Optional[Execution] :
-		while frame :
-			if EXEC in frame.f_locals :
-				parent: Optional[Execution] = frame.f_locals[EXEC]
-				del frame
-
-				if not parent :
-					break
-
-				return parent
-
-			frame = frame.f_back
-
-
 	def decorator(func: Callable) -> Callable :
-
 		start:     Callable[[Optional[Execution]], float]
 		completed: Callable[[float], None]
 
@@ -161,7 +168,7 @@ def timed(root: Union[bool, Callable] = False) -> Callable :
 			def s(_: Optional[Execution]) -> float :
 				frame = _getframe().f_back
 				assert frame
-				frame.f_locals[EXEC] = Execution()
+				frame.f_locals[EXEC] = Execution(name)
 
 				return time()
 
@@ -178,14 +185,17 @@ def timed(root: Union[bool, Callable] = False) -> Callable :
 
 		else :
 			def s(parent: Optional[Execution]) -> float :
+				# print(f'==>    exec: {name}')
 				if not parent :
 					return time()
+
+				# print(f'===> got parent: {name} -> {parent._name}')
 
 				if name in parent.nested :
 					exec = parent.nested[name]
 
 				else :
-					exec = parent.nested[name] = Execution()
+					exec = parent.nested[name] = Execution(name)
 
 				frame = _getframe().f_back
 				assert frame
@@ -206,23 +216,50 @@ def timed(root: Union[bool, Callable] = False) -> Callable :
 		if iscoroutinefunction(func) :
 			@wraps(func)
 			def wrapper(*args: Any, **kwargs: Any) -> Coroutine[Any, Any, Any] :
-				parent = get_parent(_getframe())
+				parent = _get_parent(_getframe())
 
 				async def coro() -> Any :
-					s:    float = start(parent)
-					data: Any   = await func(*args, **kwargs)
-					completed(s)
-					return data
+					s: float = start(parent)
+
+					try :
+						return await func(*args, **kwargs)
+
+					except :
+						raise
+
+					finally :
+						completed(s)
 
 				return coro()
+
+			# this is necessary to mark wrapper as an async function
+			wrapper._is_coroutine = _is_coroutine # type: ignore
 
 		else :
 			@wraps(func)
 			def wrapper(*args: Any, **kwargs: Any) -> Any :
-				s:    float = start(get_parent(_getframe()))
-				data: Any   = func(*args, **kwargs)
-				completed(s)
-				return data
+				s: float = start(_get_parent(_getframe()))
+
+				try :
+					return func(*args, **kwargs)
+
+				except :
+					raise
+
+				finally :
+					completed(s)
+
+		# sig = signature(func)
+		# dec_params = [p for p in sig.parameters.values() if p.kind is Parameter.POSITIONAL_OR_KEYWORD]
+
+		# wrapper.__annotations__ = func.__annotations__
+		# wrapper.__signature__ = sig.replace(parameters=dec_params)
+		# wrapper.__name__ = func.__name__
+		# wrapper.__doc__ = func.__doc__
+		# wrapper.__wrapped__ = func
+		# wrapper.__qualname__ = func.__qualname__
+		# wrapper.__kwdefaults__ = getattr(func, '__kwdefaults__', None)
+		# wrapper.__dict__.update(func.__dict__)
 
 		return wrapper
 
@@ -240,3 +277,37 @@ def timed(root: Union[bool, Callable] = False) -> Callable :
 
 timed.root = timed(True)
 timed.logger: Callable[[str, Execution], None] = None
+
+
+def link(func: Callable) -> Callable :
+	# assert iscoroutinefunction(func)
+
+	# @wraps(func)
+	def wrapper(*args: Any, **kwargs: Any) -> Coroutine[Any, Any, Any] :
+		parent = _get_parent(_getframe())
+
+		async def coro() -> Any :
+			if parent :
+				locals()[EXEC] = parent
+				# print(f'===> set parent: {func.__module__}.{func.__qualname__} -> {parent._name}')
+
+			return await func(*args, **kwargs)
+
+		return coro()
+
+	sig = signature(func)
+	dec_params = [p for p in sig.parameters.values() if p.kind is Parameter.POSITIONAL_OR_KEYWORD]
+
+	wrapper.__annotations__ = func.__annotations__
+	wrapper.__signature__ = sig.replace(parameters=dec_params)
+	wrapper.__name__ = func.__name__
+	wrapper.__doc__ = func.__doc__
+	wrapper.__wrapped__ = func
+	wrapper.__qualname__ = func.__qualname__
+	wrapper.__kwdefaults__ = getattr(func, '__kwdefaults__', None)
+	wrapper.__dict__.update(func.__dict__)
+	wrapper._is_coroutine = _is_coroutine
+
+	return wrapper
+
+timed.link = link

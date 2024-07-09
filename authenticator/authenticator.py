@@ -12,7 +12,6 @@ from argon2 import PasswordHasher as Argon2
 from argon2.exceptions import VerifyMismatchError
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from psycopg2 import Binary
 from psycopg2.errors import UniqueViolation
 
 from avrofastapi.models import RefId
@@ -24,11 +23,12 @@ from shared.config.credentials import fetch
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, Conflict, HttpError, InternalServerError, NotFound, Unauthorized
 from shared.hashing import Hashable
+from shared.models import InternalUser
 from shared.models.auth import AuthState, Scope, TokenMetadata
 from shared.sql import SqlInterface
 from shared.utilities.json import json_stream
 
-from .models import AuthAlgorithm, BotCreateResponse, BotLogin, BotType, LoginResponse, PublicKeyResponse, TokenResponse
+from .models import AuthAlgorithm, BotCreateResponse, BotLogin, LoginResponse, PublicKeyResponse, TokenResponse
 
 
 """
@@ -279,11 +279,6 @@ class Authenticator(SqlInterface, Hashable) :
 		)
 
 
-	def close(self) :
-		self._conn.close()
-		return self._conn.closed
-
-
 	def login(self, email: str, password: str, token_data:Dict[str, Any]={ }) -> LoginResponse :
 		"""
 		returns user data on success otherwise raises Unauthorized
@@ -368,39 +363,28 @@ class Authenticator(SqlInterface, Hashable) :
 		)
 
 
-	async def createBot(self, bot_type: BotType, requester: int) -> BotCreateResponse :
-		if type(bot_type) != BotType :
-			# this should never run, thanks to pydantic/fastapi. just being extra careful.
-			raise BadRequest('bot_type must be a BotType value.')
-
-		user_id: Optional[int] = None
-
-		if bot_type != BotType.internal :
-			user_id = requester
-
+	async def createBot(self, user_id: int) -> BotCreateResponse :
 		# now we can create the BotLogin object that will be returned to the user
 		password: bytes = token_bytes(64)
 		secret: int = randbelow(len(self._secrets))
 		password_hash: bytes = self._argon2.hash(password + self._secrets[secret]).encode()
 
 		try :
-			data = await self.query_async("""
+			data: Tuple[int] = await self.query_async("""
 				INSERT INTO kheina.auth.bot_login
-				(user_id, password, secret, bot_type_id, created_by)
+				(user_id, password, secret, created_by)
 				VALUES
-				(%s, %s, %s, %s, %s)
+				(%s, %s, %s, %s)
 				ON CONFLICT (user_id) WHERE user_id IS NOT NULL DO
 					UPDATE SET
 						user_id = %s,
 						password = %s,
-						secret = %s,
-						bot_type_id = %s
+						secret = %s
 					WHERE bot_login.user_id = %s
 				RETURNING bot_id;
-				""",
-				(
-					user_id, password_hash, secret, bot_type.value, requester,
-					user_id, password_hash, secret, bot_type.value, requester,
+				""", (
+					user_id, password_hash, secret, user_id,
+					user_id, password_hash, secret, user_id,
 				),
 				commit=True,
 				fetch_one=True,
@@ -426,18 +410,16 @@ class Authenticator(SqlInterface, Hashable) :
 	async def botLogin(self, token: str) -> LoginResponse :
 		bot_login: BotLogin = BotLoginDeserializer(b64decode(token)) # type: ignore
 
-		user_id: Optional[int]
+		user_id: int
 		password_hash: str
 		secret: int
-		bot_type: BotType
 
 		try :
-			data: Tuple[int, memoryview, int, int] = await self.query_async("""
+			data: Tuple[int, memoryview, int] = await self.query_async("""
 				SELECT
 					bot_login.user_id,
 					bot_login.password,
-					bot_login.secret,Binary
-					bot_login.bot_type_id
+					bot_login.secret
 				FROM kheina.auth.bot_login
 				WHERE bot_id = %s;
 				""",
@@ -448,10 +430,8 @@ class Authenticator(SqlInterface, Hashable) :
 			if not data :
 				raise Unauthorized('bot login failed.')
 
-			bot_type_id: int
-			user_id, pw, secret, bot_type_id = data
+			user_id, pw, secret = data
 			password_hash = pw.tobytes().decode()
-			bot_type = BotType(bot_type_id)
 
 			if user_id != bot_login.user_id :
 				raise Unauthorized('login failed.')
@@ -481,14 +461,21 @@ class Authenticator(SqlInterface, Hashable) :
 			self.logger.exception({ 'refid': refid })
 			raise InternalServerError('an error occurred during bot verification.', logdata={ 'refid': refid })
 
-		user_id: int = user_id or 0
+		iuser = await self.select(InternalUser(
+			user_id=user_id,
+			name='',
+			handle='',
+			privacy=-1,
+			created=datetime.zero(),
+		)) # type: ignore
 
 		return LoginResponse(
 			user_id=user_id,
-			handle='',  # TODO: if user_id is not None, populate handle
+			name=iuser.name,
+			handle=iuser.handle,
 			mod=False,
-			token=self.generate_token(user_id, { 'scope': [Scope.internal if bot_type == BotType.internal else Scope.bot] }),
-		) # type: ignore
+			token=self.generate_token(user_id, { 'scope': [Scope.bot] }),
+		)
 
 
 	def changePassword(self, email: str, old_password: str, new_password: str) :
@@ -571,7 +558,6 @@ class Authenticator(SqlInterface, Hashable) :
 				commit=True,
 				fetch_one=True,
 			)
-
 
 			return LoginResponse(
 				user_id=data[0],

@@ -1,7 +1,8 @@
 from enum import Enum, unique
 from typing import Dict, List, Literal, Optional, Set, Union
+from shared.models import PostId
 
-from pydantic import BaseModel, ConstrainedStr, conbytes, constr
+from pydantic import BaseModel, conbytes
 
 from avrofastapi.schema import AvroInt
 
@@ -18,7 +19,7 @@ class CostsStore(BaseModel) :
 
 
 @unique
-class ConfigType(str, Enum) : # str so literals work in requests
+class ConfigType(str, Enum) : # str so literals work
 	banner = 'banner'
 	costs = 'costs'
 
@@ -33,7 +34,7 @@ class UpdateCostsRequest(BaseModel) :
 	value: CostsStore
 
 
-UpdateConfigRequest: type = Union[UpdateBannerRequest, UpdateCostsRequest]
+UpdateConfigRequest = Union[UpdateBannerRequest, UpdateCostsRequest]
 
 
 class SaveSchemaResponse(BaseModel) :
@@ -50,8 +51,8 @@ class BannerResponse(BannerStore) :
 
 
 class BlockingBehavior(Enum) :
-	hide: str = 'hide'
-	omit: str = 'omit'
+	hide = 'hide'
+	omit = 'omit'
 
 
 class CssProperty(Enum) :
@@ -107,9 +108,6 @@ class UserConfig(BaseModel) :
 	blocked_users: Optional[List[int]] = None
 	wallpaper: Optional[conbytes(min_length=8, max_length=8)] = None
 	css_properties: Optional[Dict[str, Union[CssProperty, AvroInt, str]]] = None
-
-
-PostId: ConstrainedStr = constr(regex=r'^[a-zA-Z0-9_-]{8}$')
 
 
 class UserConfigRequest(BaseModel) :

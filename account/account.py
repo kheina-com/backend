@@ -13,7 +13,7 @@ from shared.models.user import User
 from shared.server import Request
 from shared.sql import SqlInterface
 
-from .models import LoginResponse, TokenResponse
+from authenticator.models import LoginResponse, TokenResponse
 
 
 auth = Authenticator()
@@ -44,10 +44,10 @@ class Account(SqlInterface, Hashable) :
 
 
 	def _validateEmail(self: 'Account', email: str) :
-		email = Account.EmailRegex.search(email)
-		if not email :
+		e = Account.EmailRegex.search(email)
+		if not e :
 			raise BadRequest('the given email is invalid.')
-		return email.groupdict()
+		return e.groupdict()
 
 
 	def _validatePassword(self: 'Account', password: str) :
@@ -60,14 +60,17 @@ class Account(SqlInterface, Hashable) :
 			raise BadRequest(f'the provided handle: {handle}, is invalid. handles must be at least 5 characters in length.')
 
 
-	async def fetchUserByEmail(self: 'Account', email: str) -> User :
-		data = await self.query_async()
+	# async def fetchUserByEmail(self: 'Account', email: str) -> User :
+	# 	data = await self.query_async()
 
 
 	@HttpErrorHandler('logging in user', exclusions=['self', 'password', 'request'])
 	async def login(self: 'Account', email: str, password: str, request: Request) -> LoginResponse :
 		self._validateEmail(email)
 		self._validatePassword(password)
+
+		if not request.client :
+			raise BadRequest('how')
 
 		token_data = {
 			'email': email,

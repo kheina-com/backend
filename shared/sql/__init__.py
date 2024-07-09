@@ -8,7 +8,7 @@ from random import randbytes
 from re import compile
 from threading import Lock
 from types import TracebackType
-from typing import Any, Callable, Dict, Hashable, List, Optional, Self, Tuple, Type, Union
+from typing import Any, Awaitable, Callable, Dict, Hashable, List, Optional, Self, Tuple, Type, Union
 
 from psycopg2 import Binary
 from psycopg2 import connect as dbConnect
@@ -23,6 +23,7 @@ from ..config.credentials import fetch
 from ..logging import Logger, getLogger
 from ..timing import Timer, timed
 from .query import Field, Insert, Operator, Query, Table, Update, Value, Where
+from typing import Protocol
 
 
 _orm_regex = compile(r'orm:"([^\n]*?)(?<!\\)"')
@@ -32,6 +33,11 @@ _orm_attr_regex = compile(r'(col|map|pk|gen|default)(?:\[([\s\S]*?)\])?')
 @dataclass
 class FieldAttributes :
 	map:         List[Tuple[Tuple[str, ...], str]] = field(default_factory=lambda : [])
+	"""
+	list of paths to columns.
+	first entry of each list member is the route to the field within the model.
+	second entry is the column that field belongs to within the database.
+	"""
 	column:      Optional[str]                     = None
 	primary_key: Optional[bool]                    = None
 	generated:   Optional[bool]                    = None
@@ -115,7 +121,7 @@ class ConnectionPool :
 	used:      Dict[Hashable, Connection] = { }
 
 	def __init__(self) :
-		self.logger: Logger = getLogger(level=DEBUG)
+		self.logger: Logger = getLogger()
 
 		if getattr(ConnectionPool, 'db', None) is None :
 			ConnectionPool.db = fetch('db', Dict[str, str])
@@ -204,16 +210,26 @@ class ConnectionPool :
 
 
 	def close_all(self: Self) -> None :
+		print('closing connection pool...', end='')
 		with self.lock :
 			while self.available :
 				self.available.pop().close()
 				ConnectionPool.total -= 1
+				print('.', end='')
 
 			while self.used :
 				key = next(self.used.keys().__iter__())
 				self.destroy(key)
+				print('.', end='')
+
+		print('done.')
 
 		assert len(self.available) == len(self.used) == ConnectionPool.total == 0, f'available: {len(self.available)}, used: {len(self.used)}, total: {ConnectionPool.total}'
+
+
+
+class AwaitableQuery(Protocol):
+    def __call__(self, sql: Query, params:tuple=(), fetch_one: bool = False, fetch_all: bool = False) -> Awaitable[Any] : ...
 
 
 class SqlInterface :
@@ -292,6 +308,7 @@ class SqlInterface :
 				raise
 
 
+	@timed
 	async def query_async(self: 'SqlInterface', sql: Union[str, Query], params:tuple=(), commit:bool=False, fetch_one:bool=False, fetch_all:bool=False, maxretry:int=2) -> Any :
 		with ThreadPoolExecutor() as threadpool :
 			return await get_event_loop().run_in_executor(threadpool, partial(self.query, sql, params, commit, fetch_one, fetch_all, maxretry))
@@ -314,7 +331,7 @@ class SqlInterface :
 
 		table_name = getattr(model, '__table_name__')
 		if not isinstance(table_name, Table) :
-			raise AttributeError('model __table_name__ attribute must be sql.Table type')
+			table_name = Table(table_name)
 
 		return table_name
 
@@ -361,7 +378,7 @@ class SqlInterface :
 		return attributes
 
 
-	async def insert[T: BaseModel](self: Self, model: T) -> T :
+	async def insert[T: BaseModel](self: Self, model: T, query: Optional[AwaitableQuery] = None) -> T :
 		"""
 		inserts a model into the database table defined by __table_name__.
 
@@ -396,7 +413,7 @@ class SqlInterface :
 						for k in m[0] :
 							param = getattr(param, k)
 
-					if attrs.default is not None and param is None :
+					if attrs.default is not None and param == field.default :
 						ret.append(m[1])
 						paths.append(tuple([key, *m[0]]))
 
@@ -405,7 +422,7 @@ class SqlInterface :
 						vals.append(Value(param))
 
 			else :
-				if attrs.default is not None and d[key] is None :
+				if attrs.default is not None and d[key] == field.default :
 					ret.append(attrs.column or field.name)
 					paths.append((key,))
 
@@ -413,33 +430,31 @@ class SqlInterface :
 					cols.append(attrs.column or field.name)
 					vals.append(Value(d[key]))
 
-		query: Query = Query(table).insert(Insert(*cols).values(*vals))
+		sql: Query = Query(table).insert(Insert(*cols).values(*vals))
 
 		if ret :
-			query.returning(*ret)
+			sql.returning(*ret)
 
-		data: Tuple[Any, ...] = await self.query_async(query, commit=True, fetch_one=bool(ret))
+		if not query :
+			query = partial(self.query_async, commit=True)
+
+		assert query
+		data: Tuple[Any, ...] = await query(sql, fetch_one=bool(ret))
 
 		for i, path in enumerate(paths) :
-			v2 = model
+			v2 = d
 
 			for k in path :
 				v = v2
-				v2 = getattr(v, k)
-				if v2 is None and v.__annotations__[k] :
-					anno: type = v.__annotations__[k]
+				if k in v :
+					v2 = v[k]
 
-					if getattr(anno, '__origin__', None) is Union and len(anno.__args__) == 2 and type(None) in anno.__args__ :
-						anno = anno.__args__[0 if anno.__args__.index(type(None)) else 1]
+				else :
+					v2 = v[k] = { }
 
-					if issubclass(anno, BaseModel) or is_dataclass(anno) :
-						v2 = anno()
+			v[k] = data[i]
 
-					setattr(v, k, v2)
-
-			setattr(v, k, data[i])
-
-		return model
+		return model.parse_obj(d)
 
 
 	@staticmethod
@@ -452,20 +467,24 @@ class SqlInterface :
 				continue
 
 			if attrs.map :
-				unset = True
+				unset: bool = True
 
 				for m in attrs.map :
-					v2 = val = d.get(key, { })
+					v2 = d.get(key, { })
 
 					for k in m[0] :
 						v = v2
-						v2 = v.get(k)
+						if k in v :
+							v2 = v[k]
+
+						else :
+							v2 = v[k] = { }
 
 					if data[i] :
 						unset = False
 
 					v[k] = data[i]
-					d[key] = val
+					d[key] = v
 					i += 1
 
 				if unset :
@@ -478,7 +497,7 @@ class SqlInterface :
 		return model.parse_obj(d)
 
 
-	async def select[T: BaseModel](self: Self, model: T) -> T :
+	async def select[T: BaseModel](self: Self, model: T, query: Optional[AwaitableQuery] = None) -> T :
 		"""
 		fetches a model from the database table defined by __table_name__ using the populated field indicated by the pk
 
@@ -489,7 +508,7 @@ class SqlInterface :
 		"""
 		table = self._table_name(model)
 		d     = model.dict()
-		query = Query(table)
+		sql   = Query(table)
 		_, t  = str(table).rsplit('.', 1)
 		pk    = 0
 
@@ -500,21 +519,26 @@ class SqlInterface :
 
 			if attrs.map :
 				for m in attrs.map :
-					query.select(Field(t, m[1]))
+					sql.select(Field(t, m[1]))
 
 			else :
-				query.select(Field(t, attrs.column or field.name))
+				sql.select(Field(t, attrs.column or field.name))
 
 			if attrs.primary_key :
 				pk += 1
-				query.where(Where(
+				sql.where(Where(
 					Field(t, attrs.column or field.name),
 					Operator.equal,
 					Value(d[key]),
 				))
 
 		assert pk > 0
-		data: Tuple[Any, ...] = await self.query_async(query, fetch_one=True)
+
+		if not query :
+			query = partial(self.query_async, commit=False)
+
+		assert query
+		data: Tuple[Any, ...] = await query(sql, fetch_one=True)
 
 		if not data :
 			raise KeyError('value does not exist in database')
@@ -522,7 +546,7 @@ class SqlInterface :
 		return SqlInterface._assign_field_values(type(model), data)
 
 
-	async def update[T: BaseModel](self: Self, model: T) -> T :
+	async def update[T: BaseModel](self: Self, model: T, query: Optional[AwaitableQuery] = None) -> T :
 		"""
 		updates a model in the database table defined by __table_name__.
 
@@ -533,7 +557,7 @@ class SqlInterface :
 			map[subtype.field:column,field:column2] - maps a subtype's field to columns. separate nested fields by periods.
 		"""
 		table: Table                 = self._table_name(model)
-		query: Query                 = Query(table)
+		sql:   Query                 = Query(table)
 		d:     Dict[str, Any]        = model.dict()
 		paths: List[Tuple[str, ...]] = []
 		vals:  List[Value]           = []
@@ -550,11 +574,12 @@ class SqlInterface :
 			
 			if attrs.primary_key :
 				pk += 1
-				query.where(Where(
+				sql.where(Where(
 					Field(t, attrs.column or field.name),
 					Operator.equal,
 					Value(d[key]),
 				))
+				continue
 
 			if attrs.generated :
 				ret.append(attrs.column or field.name)
@@ -567,7 +592,7 @@ class SqlInterface :
 
 					if param :
 						for k in m[0] :
-							param = getattr(param, k)
+							param = getattr(param, k, None)
 
 					cols.append(m[1])
 					vals.append(Value(param))
@@ -577,40 +602,39 @@ class SqlInterface :
 				vals.append(Value(d[key]))
 
 		for i in range(len(cols)) :
-			query.update(Update(
+			sql.update(Update(
 				cols[i],
 				vals[i],
 			))
 
 		if ret :
-			query.returning(*ret)
+			sql.returning(*ret)
 
 		assert pk > 0
-		data: Tuple[Any, ...] = await self.query_async(query, commit=True, fetch_one=bool(ret))
+
+		if not query :
+			query = partial(self.query_async, commit=True)
+
+		assert query
+		data: Tuple[Any, ...] = await query(sql, fetch_one=bool(ret))
 
 		for i, path in enumerate(paths) :
-			v2 = model
+			v2 = d
 
 			for k in path :
 				v = v2
-				v2 = getattr(v, k)
-				if v2 is None and v.__annotations__[k] :
-					anno: type = v.__annotations__[k]
+				if k in v :
+					v2 = v[k]
 
-					if getattr(anno, '__origin__', None) is Union and len(anno.__args__) == 2 and type(None) in anno.__args__ :
-						anno = anno.__args__[0 if anno.__args__.index(type(None)) else 1]
+				else :
+					v2 = v[k] = { }
 
-					if issubclass(anno, BaseModel) or is_dataclass(anno) :
-						v2 = anno()
+			v[k] = data[i]
 
-					setattr(v, k, v2)
-
-			setattr(v, k, data[i])
-
-		return model
+		return model.parse_obj(d)
 
 
-	async def delete(self: Self, model: BaseModel) -> None :
+	async def delete(self: Self, model: BaseModel, query: Optional[AwaitableQuery] = None) -> None :
 		"""
 		deletes a model from the database table defined by __table_name__ using the populated field indicated by the pk
 
@@ -621,7 +645,7 @@ class SqlInterface :
 		"""
 		table = self._table_name(model)
 		d     = model.dict()
-		query = Query(table).delete()
+		sql   = Query(table).delete()
 		_, t  = str(table).rsplit('.', 1)
 		pk    = 0
 
@@ -629,19 +653,24 @@ class SqlInterface :
 			attrs = SqlInterface._orm_attr_parser(field)
 			if attrs.primary_key :
 				pk += 1
-				query.where(Where(
+				sql.where(Where(
 					Field(t, attrs.column or field.name),
 					Operator.equal,
 					Value(d[key]),
 				))
 
 		assert pk > 0
-		await self.query_async(query, commit=True)
+
+		if not query :
+			query = partial(self.query_async, commit=True)
+
+		assert query
+		await query(sql)
 
 
-	async def where[T: BaseModel](self: Self, model: Type[T], *where: Where) -> List[T] :
+	async def where[T: BaseModel](self: Self, model: Type[T], *where: Where, query: Optional[AwaitableQuery] = None) -> List[T] :
 		table = self._table_name(model)
-		query = Query(table).where(*where)
+		sql   = Query(table).where(*where)
 		_, t  = str(table).rsplit('.', 1)
 
 		for _, field in model.__fields__.items() :
@@ -651,12 +680,16 @@ class SqlInterface :
 
 			if attrs.map :
 				for m in attrs.map :
-					query.select(Field(t, m[1]))
+					sql.select(Field(t, m[1]))
 
 			else :
-				query.select(Field(t, attrs.column or field.name))
+				sql.select(Field(t, attrs.column or field.name))
 
-		data: List[Tuple[Any, ...]] = await self.query_async(query, fetch_all=True)
+		if not query :
+			query = partial(self.query_async, commit=False)
+
+		assert query
+		data: List[Tuple[Any, ...]] = await query(sql, fetch_all=True)
 
 		return [SqlInterface._assign_field_values(model, row) for row in data]
 
@@ -667,14 +700,20 @@ class Transaction :
 		self._sql:   SqlInterface     = sql
 		self.cur:    Optional[Cursor] = None
 		self.conn:   Optional[Conn]   = None
-		self.nested: bool             = False
+		self.nested: int              = 0
+
+		self.insert = partial(self._sql.insert, query=self.query_async)
+		self.select = partial(self._sql.select, query=self.query_async)
+		self.update = partial(self._sql.update, query=self.query_async)
+		self.delete = partial(self._sql.delete, query=self.query_async)
+		self.where  = partial(self._sql.where, query=self.query_async)
 
 
 	async def __aenter__(self: 'Transaction') :
 		if self.conn :
-			self.nested = True
+			self.nested += 1
 
-		if not self.conn :
+		else :
 			conn: Conn = await self._sql.pool.conn_async()
 			self.conn = conn
 
@@ -690,6 +729,9 @@ class Transaction :
 				self.cur.__exit__(exc_type, exc_obj, exc_tb)
 			if self.conn :
 				await self.conn.__aexit__(exc_type, exc_obj, exc_tb)
+
+		else :
+			self.nested -= 1
 
 
 	def commit(self: 'Transaction') :

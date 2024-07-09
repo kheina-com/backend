@@ -1,13 +1,14 @@
-from asyncio import Task, ensure_future
-from typing import Dict, List, Optional, Self, Tuple
+from typing import Dict, List, Optional, Self, Tuple, Union
 
 from shared.auth import KhUser
 from shared.caching import AerospikeCache, SimpleCache
 from shared.caching.key_value_store import KeyValueStore
-from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
+from shared.exceptions.http_error import BadRequest, NotFound
 from shared.maps import privacy_map
+from shared.models import Privacy
 from shared.models.user import Badge, InternalUser, User, UserPortable, UserPrivacy, Verified
 from shared.sql import SqlInterface
+from shared.timing import timed
 
 
 UserKVS: KeyValueStore = KeyValueStore('kheina', 'users', local_TTL=60)
@@ -35,21 +36,38 @@ badge_map: BadgeMap = BadgeMap()
 
 class Users(SqlInterface) :
 
-	def _cleanText(self: Self, text: str) -> Optional[str] :
+	def _clean_text(self: Self, text: str) -> Optional[str] :
 		text = text.strip()
 		return text if text else None
 
 
-	def _validateDescription(self: Self, description: str) :
+	def _validate_description(self: Self, description: str) -> Optional[str] :
 		if len(description) > 10000 :
 			raise BadRequest('the given description is over the 10,000 character limit.', description=description)
-		return self._cleanText(description)
+		return self._clean_text(description)
 
 
-	def _validateText(self: Self, text: str) :
+	def _validate_website(self: Self, text: str) -> Optional[str] :
 		if len(text) > 100 :
 			raise BadRequest('the given value is over the 100 character limit.', text=text)
-		return self._cleanText(text)
+
+		return self._clean_text(text)
+
+
+	def _validate_name(self: Self, text: str) -> str :
+		name = self._validate_website(text)
+
+		if not name :
+			raise BadRequest('the given value cannot be empty or consist only of whitespace.', text=text)
+
+		return name
+
+
+	@staticmethod
+	def _validate_privacy(p: Optional[Union[Privacy, int]]) -> UserPrivacy :
+		assert isinstance(p, Privacy), 'privacy value must of the Privacy type'
+		assert p == Privacy.public or p == Privacy.private, 'privacy value must be public or private'
+		return p
 
 
 	@SimpleCache(600)
@@ -68,6 +86,7 @@ class Users(SqlInterface) :
 		return { badge: id for id, badge in self._get_badge_map().items() }
 
 
+	@timed.link
 	@AerospikeCache('kheina', 'users', '{user_id}', _kvs=UserKVS)
 	async def _get_user(self: Self, user_id: int) -> InternalUser :
 		data = await self.query_async("""
@@ -114,7 +133,7 @@ class Users(SqlInterface) :
 			user_id = data[0],
 			name = data[1],
 			handle = data[2],
-			privacy = privacy_map[data[3]], # type: ignore
+			privacy = data[3],
 			icon = data[4],
 			website = data[5],
 			created = data[6],
@@ -148,6 +167,7 @@ class Users(SqlInterface) :
 		return await self._get_user(user_id)
 
 
+	@timed
 	@AerospikeCache('kheina', 'following', '{user_id}|{target}', _kvs=FollowKVS)
 	async def following(self: Self, user_id: int, target: int) -> bool :
 		"""
@@ -177,20 +197,21 @@ class Users(SqlInterface) :
 			following = await self.following(user.user_id, iuser.user_id)
 
 		return User(
-			name = iuser.name,
-			handle = iuser.handle,
-			privacy = iuser.privacy,
-			icon = iuser.icon,
-			banner = iuser.banner,
-			website = iuser.website,
-			created = iuser.created,
+			name        = iuser.name,
+			handle      = iuser.handle,
+			privacy     = self._validate_privacy(privacy_map[iuser.privacy]),
+			icon        = iuser.icon,
+			banner      = iuser.banner,
+			website     = iuser.website,
+			created     = iuser.created,
 			description = iuser.description,
-			verified = iuser.verified,
-			following = following,
-			badges = iuser.badges,
+			verified    = iuser.verified,
+			following   = following,
+			badges      = iuser.badges,
 		)
 
 
+	@timed.link
 	async def portable(self: Self, user: KhUser, iuser: InternalUser) -> UserPortable :
 		following: Optional[bool] = None
 
@@ -198,10 +219,10 @@ class Users(SqlInterface) :
 			following = await self.following(user.user_id, iuser.user_id)
 
 		return UserPortable(
-			name = iuser.name,
-			handle = iuser.handle,
-			privacy = iuser.privacy,
-			icon = iuser.icon,
-			verified = iuser.verified,
+			name      = iuser.name,
+			handle    = iuser.handle,
+			privacy   = self._validate_privacy(privacy_map[iuser.privacy]),
+			icon      = iuser.icon,
+			verified  = iuser.verified,
 			following = following,
 		)

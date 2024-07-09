@@ -6,7 +6,7 @@ from ...config.repo import short_hash
 
 
 HeadersToSet: Dict[str, str] = {
-	'kh-hash': short_hash,
+	'kh-hash': str(short_hash),
 }
 
 

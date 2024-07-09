@@ -16,6 +16,7 @@ from shared.maps import privacy_map
 from shared.models.user import InternalUser, UserPortable, UserPrivacy, Verified
 from shared.sql import SqlInterface
 from shared.sql.query import Field, Join, JoinType, Operator, Order, Query, Table, Value, Where
+from shared.timing import timed
 from shared.utilities import flatten
 from tags.models import TagGroups
 from tags.repository import Tags
@@ -35,6 +36,7 @@ tagger = Tags()
 
 class RatingMap(SqlInterface, Dict[Union[int, Rating], Union[Rating, int]]) :
 
+	@timed
 	def __missing__(self, key: Union[int, str, Rating]) -> Union[int, Rating] :
 		if isinstance(key, int) :
 			d1: Tuple[str] = self.query(f"""
@@ -80,6 +82,7 @@ rating_map: RatingMap = RatingMap()
 
 class MediaTypeMap(SqlInterface, dict) :
 
+	@timed
 	def __missing__(self, key: Optional[int]) -> Optional[MediaType] :
 		if key is None :
 			return None
@@ -156,13 +159,14 @@ class Posts(SqlInterface) :
 		return self.parse_response
 
 
+	@timed
 	@AerospikeCache('kheina', 'posts', '{post_id}', _kvs=PostKVS)
 	async def _get_post(self: Self, post_id: PostId) -> InternalPost :
 		ipost: InternalPost = InternalPost(
 			post_id=post_id.int(),
-			user_id=1,
-			rating=1,
-			privacy=1,
+			user_id=-1,
+			rating=-1,
+			privacy=-1,
 			created=datetime.zero(),
 			updated=datetime.zero(),
 			size=None,
@@ -175,6 +179,7 @@ class Posts(SqlInterface) :
 			raise NotFound(f'no data was found for the provided post id: {post_id}.')
 
 
+	@timed
 	async def post(self: Self, ipost: InternalPost, user: KhUser) -> Post :
 		post_id: PostId = PostId(ipost.post_id)
 		upl: Task[InternalUser] = ensure_future(users._get_user(ipost.user_id))
@@ -204,6 +209,7 @@ class Posts(SqlInterface) :
 		)
 
 
+	@timed.link
 	@AerospikeCache('kheina', 'score', '{post_id}', _kvs=ScoreKVS)
 	async def _get_score(self: Self, post_id: PostId) -> Optional[InternalScore] :
 		data: List[int] = await self.query_async("""
@@ -261,6 +267,7 @@ class Posts(SqlInterface) :
 		return scores
 
 
+	@timed.link
 	@AerospikeCache('kheina', 'votes', '{user_id}|{post_id}', _kvs=VoteKVS)
 	async def _get_vote(self: Self, user_id: int, post_id: PostId) -> int :
 		data: Optional[Tuple[bool]] = await self.query_async("""
@@ -309,6 +316,7 @@ class Posts(SqlInterface) :
 		return votes
 
 
+	@timed
 	async def getScore(self: Self, user: KhUser, post_id: PostId) -> Optional[Score] :
 		score_task: Task[Optional[InternalScore]] = ensure_future(self._get_score(post_id))
 		vote: Task[int] = ensure_future(self._get_vote(user.user_id, post_id))
@@ -519,7 +527,7 @@ class Posts(SqlInterface) :
 				user_id = datum[0],
 				name = datum[1],
 				handle = datum[2],
-				privacy = privacy_map[datum[3]], # type: ignore
+				privacy = datum[3],
 				icon = datum[4],
 				website = datum[5],
 				created = datum[6],
@@ -534,6 +542,7 @@ class Posts(SqlInterface) :
 		return users
 
 
+	@timed
 	async def _uploaders(self: Self, iposts: List[InternalPost], user: KhUser) -> Dict[int, UserCombined] :
 		"""
 		returns populated user objects for every uploader id provided
@@ -558,7 +567,7 @@ class Posts(SqlInterface) :
 				portable=UserPortable(
 					name=iuser.name,
 					handle=iuser.handle,
-					privacy=iuser.privacy,
+					privacy=users._validate_privacy(privacy_map[iuser.privacy]),
 					icon=iuser.icon,
 					verified=iuser.verified,
 					following=following[user_id],
@@ -568,6 +577,7 @@ class Posts(SqlInterface) :
 		}
 
 
+	@timed
 	async def _scores(self: Self, iposts: List[InternalPost], user: KhUser) -> Dict[PostId, Optional[Score]] :
 		"""
 		returns populated score objects for every post id provided

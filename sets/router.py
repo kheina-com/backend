@@ -32,7 +32,7 @@ async def shutdown() :
 
 ##################################################  PUBLIC  ##################################################
 
-@app.put('/')
+@app.put('')
 async def v1Create(req: Request, body: CreateSetRequest) -> Set :
 	await req.user.authenticated()
 	return await sets.create_set(req.user, body.title, body.privacy, body.description)

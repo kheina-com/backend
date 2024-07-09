@@ -88,25 +88,6 @@ class BotLogin(BaseModel) :
 	secret: AvroInt
 
 
-class BotType(int, Enum) :
-	"""
-	this enum maps to a db type.
-	"""
-	internal: int = 1
-	bot: int = 2
-
-
-class BotCreateRequest(BaseModel) :
-	bot_type: BotType
-	user_id: int
-
-	@validator('bot_type', pre=True, always=True)
-	def _bot_type_validator(value: Union[str, BotType]) -> BotType : # type: ignore
-		if isinstance(value, str) :
-			return BotType[value]
-		return value
-
-
 class BotCreateResponse(BaseModel) :
 	token: str
 

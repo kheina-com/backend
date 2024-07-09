@@ -1,6 +1,6 @@
 from asyncio import ensure_future
 from html import escape
-from typing import List, Optional
+from typing import List
 from urllib.parse import quote
 
 from fastapi import APIRouter
@@ -9,7 +9,8 @@ from shared.backblaze import B2Interface
 from shared.config.constants import environment
 from shared.exceptions.http_error import UnprocessableEntity
 from shared.models.auth import Scope
-from shared.server import Request, Response, ServerApp
+from shared.server import Request, Response
+from shared.timing import timed
 from users.users import Users
 
 from .models import BaseFetchRequest, FetchCommentsRequest, FetchPostsRequest, GetUserPostsRequest, InternalPost, InternalScore, Post, PostId, RssDateFormat, RssDescription, RssFeed, RssItem, RssMedia, RssTitle, Score, SearchResults, TimelineRequest, VoteRequest
@@ -57,40 +58,47 @@ users = Users()
 
 ##################################################  PUBLIC  ##################################################
 @postRouter.post('/vote', responses={ 200: { 'model': Score } })
+@timed.root
 async def v1Vote(req: Request, body: VoteRequest) -> Score :
 	await req.user.authenticated(Scope.user)
 	vote = True if body.vote > 0 else False if body.vote < 0 else None
 	return await posts.vote(req.user, body.post_id, vote)
 
 
-@postsRouter.post('/', responses={ 200: { 'model': SearchResults } })
+@postsRouter.post('', responses={ 200: { 'model': SearchResults } })
+@timed.root
 async def v1FetchPosts(req: Request, body: FetchPostsRequest) -> SearchResults :
 	return await posts.fetchPosts(req.user, body.sort, body.tags, body.count, body.page)
 
 
 @postRouter.post('/comments', responses={ 200: { 'model': List[Post] } })
+@timed.root
 async def v1FetchComments(req: Request, body: FetchCommentsRequest) -> List[Post] :
 	return await posts.fetchComments(req.user, body.post_id, body.sort, body.count, body.page)
 
 
 @postsRouter.post('/user', responses={ 200: { 'model': List[Post] } })
+@timed.root
 async def v1FetchUserPosts(req: Request, body: GetUserPostsRequest) -> SearchResults :
 	return await posts.fetchUserPosts(req.user, body.handle, body.count, body.page)
 
 
 @postsRouter.post('/mine', responses={ 200: { 'model': List[Post] } })
+@timed.root
 async def v1FetchMyPosts(req: Request, body: BaseFetchRequest) -> List[Post] :
 	await req.user.authenticated()
 	return await posts.fetchOwnPosts(req.user, body.sort, body.count, body.page)
 
 
 @postsRouter.get('/drafts', responses={ 200: { 'model': List[Post] } })
+@timed.root
 async def v1FetchDrafts(req: Request) -> List[Post] :
 	await req.user.authenticated()
 	return await posts.fetchDrafts(req.user)
 
 
 @postsRouter.post('/timeline', responses={ 200: { 'model': List[Post] } })
+@timed.root
 async def v1TimelinePosts(req: Request, body: TimelineRequest) -> List[Post] :
 	await req.user.authenticated()
 	return await posts.timelinePosts(req.user, body.count, body.page)
@@ -108,6 +116,7 @@ async def get_post_media(post: Post) -> str :
 
 
 @postsRouter.get('/feed.rss', response_model=str)
+@timed.root
 async def v1Rss(req: Request) -> Response :
 	await req.user.authenticated(Scope.user)
 
@@ -146,7 +155,9 @@ async def v1Rss(req: Request) -> Response :
 		),
 	)
 
+
 @postRouter.get('/{post_id}', responses={ 200: { 'model': Post } })
+@timed.root
 async def v1Post(req: Request, post_id: PostId) -> Post :
 	try :
 		# fastapi doesn't parse to PostId automatically, only str
@@ -161,11 +172,6 @@ app = APIRouter(
 	prefix='/v1',
 	tags=['posts'],
 )
-
-
-@app.on_event('shutdown')
-async def shutdown() :
-	posts.close()
 
 app.include_router(postRouter)
 app.include_router(postsRouter)

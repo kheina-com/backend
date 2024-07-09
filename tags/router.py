@@ -6,6 +6,7 @@ from posts.models import PostId
 from shared.auth import Scope
 from shared.exceptions.http_error import Forbidden
 from shared.server import Request
+from shared.timing import timed
 
 from .models import InheritRequest, InternalTag, LookupRequest, RemoveInheritance, Tag, TagGroupPortable, TagGroups, TagsRequest, UpdateRequest
 from .tagger import Tagger
@@ -29,6 +30,7 @@ tagger = Tagger()
 
 ##################################################  PUBLIC  ##################################################
 @tagsRouter.post('/add', status_code=204)
+@timed.root
 async def v1AddTags(req: Request, body: TagsRequest) :
 	await req.user.authenticated()
 	await tagger.addTags(
@@ -39,6 +41,7 @@ async def v1AddTags(req: Request, body: TagsRequest) :
 
 
 @tagsRouter.post('/remove', status_code=204)
+@timed.root
 async def v1RemoveTags(req: Request, body: TagsRequest) :
 	await req.user.authenticated()
 	await tagger.removeTags(
@@ -49,16 +52,18 @@ async def v1RemoveTags(req: Request, body: TagsRequest) :
 
 
 @tagRouter.post('/inherit', status_code=204)
+@timed.root
 async def v1InheritTag(req: Request, body: InheritRequest) :
 	await tagger.inheritTag(
 		req.user,
 		body.parent_tag,
 		body.child_tag,
-		body.deprecate,
+		body.deprecate or False,
 	)
 
 
 @tagRouter.post('/remove_inheritance', status_code=204)
+@timed.root
 async def v1RemoveInheritance(req: Request, body: RemoveInheritance) :
 	await tagger.removeInheritance(
 		req.user,
@@ -68,22 +73,26 @@ async def v1RemoveInheritance(req: Request, body: RemoveInheritance) :
 
 
 @tagsRouter.post('/lookup', response_model=List[Tag])
+@timed.root
 async def v1LookUpTags(req: Request, body: LookupRequest) :
 	return await tagger.tagLookup(req.user, body.tag)
 
 
 @tagsRouter.get('/user/{handle}', response_model=List[Tag])
+@timed.root
 async def v1FetchUserTags(req: Request, handle: str) :
 	return await tagger.fetchTagsByUser(req.user, handle)
 
 
 @tagsRouter.get('/frequently_used', response_model=TagGroups)
+@timed.root
 async def v1FrequentlyUsed(req: Request) :
 	await req.user.authenticated()
 	return await tagger.frequentlyUsed(req.user)
 
 
 @tagRouter.patch('/{tag}', status_code=204)
+@timed.root
 async def v1UpdateTag(req: Request, tag: str, body: UpdateRequest) :
 	await req.user.authenticated()
 
@@ -102,12 +111,14 @@ async def v1UpdateTag(req: Request, tag: str, body: UpdateRequest) :
 
 
 @tagsRouter.get('/{post_id}', response_model=TagGroups)
+@timed.root
 async def v1FetchTags(req: Request, post_id: PostId) :
 	# fastapi does not ensure that postids are in the correct form, so do it manually
 	return await tagger.fetchTagsByPost(req.user, PostId(post_id))
 
 
 @tagRouter.get('/{tag}', response_model=Tag)
+@timed.root
 async def v1FetchTag(req: Request, tag: str) :
 	return await tagger.fetchTag(req.user, tag)
 

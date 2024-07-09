@@ -41,3 +41,9 @@ VALUES
 ('environment'),
 ('franchise'),
 ('misc');
+
+INSERT INTO auth.bot_type
+(bot_type)
+VALUES
+('internal'),
+('bot');

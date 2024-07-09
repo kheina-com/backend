@@ -6,7 +6,7 @@ from re import compile as re_compile
 from secrets import token_bytes
 from typing import Any, List, Literal, Optional, Type, Union
 
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, Field, validator
 from pydantic_core import core_schema
 
 from ..base64 import b64decode, b64encode
@@ -177,19 +177,23 @@ class User(BaseModel) :
 
 
 class InternalUser(BaseModel) :
+	__table_name__ = 'kheina.public.users'
 	_post_id_converter = validator('icon', 'banner', pre=True, always=True, allow_reuse=True)(_post_id_converter)
 
-	user_id: int
-	name: str
-	handle: str
-	privacy: UserPrivacy
-	icon: Optional[PostId]
-	banner: Optional[PostId]
-	website: Optional[str]
-	created: datetime
+	class Config:
+		validate_assignment = True
+
+	user_id:     int = Field(description='orm:"pk"')
+	name:        str = Field(description='orm:"col[display_name]"')
+	handle:      str
+	privacy:     int
+	icon:        Optional[PostId] = Field(None, description='orm:"-"')
+	banner:      Optional[PostId] = Field(None, description='orm:"-"')
+	website:     Optional[str]
+	created:     datetime = Field(description='orm:"gen"')
 	description: Optional[str]
-	verified: Optional[Verified]
-	badges: List[Badge]
+	verified:    Optional[Verified] = Field(description='orm:"-"')
+	badges:      List[Badge]        = Field([], description='orm:"-"')
 
 
 ################################################## SETS ##################################################

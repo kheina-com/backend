@@ -7,6 +7,8 @@ from math import sqrt
 from time import time
 from typing import Any, Callable, Dict, Hashable, Iterable, Optional, Set, Tuple
 
+from ..timing import timed
+
 from ..utilities import __clear_cache__
 from .key_value_store import KeyValueStore
 
@@ -229,6 +231,7 @@ def AerospikeCache(
 
 		if iscoroutinefunction(func) :
 			@wraps(func)
+			@timed
 			async def wrapper(*args: Tuple[Hashable], **kwargs: Dict[str, Hashable]) -> Any : # type: ignore
 				key: str = key_format.format(**{ **kw, **dict(zip(arg_spec, args)), **kwargs })
 

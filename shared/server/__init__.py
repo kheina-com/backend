@@ -89,7 +89,7 @@ def ServerApp(
 
 	if allowed_hosts :
 		from starlette.middleware.trustedhost import TrustedHostMiddleware
-		app.add_middleware(TrustedHostMiddleware, allowed_hosts=set(allowed_hosts))
+		app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(allowed_hosts))
 
 	if auth :
 		from ..server.middleware.auth import KhAuthMiddleware

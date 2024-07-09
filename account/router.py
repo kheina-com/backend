@@ -4,10 +4,12 @@ from fastapi.responses import Response
 from shared.auth import Scope
 from shared.config.constants import environment
 from shared.datetime import datetime
+from shared.exceptions.http_error import BadRequest
 from shared.server import Request
 
 from .account import Account, auth
-from .models import BotCreateResponse, BotLoginRequest, BotType, ChangeHandle, ChangePasswordRequest, CreateAccountRequest, FinalizeAccountRequest, LoginRequest, LoginResponse
+from .models import ChangeHandle, CreateAccountRequest, FinalizeAccountRequest
+from authenticator.models import BotCreateResponse, BotLoginRequest, ChangePasswordRequest, LoginRequest, LoginResponse
 
 
 app = APIRouter(
@@ -47,6 +49,9 @@ async def v1CreateAccount(body: CreateAccountRequest) :
 
 @app.post('/finalize', response_model=LoginResponse)
 async def v1FinalizeAccount(req: Request, body: FinalizeAccountRequest) :
+	if not req.client :
+		raise BadRequest('how')
+
 	auth = await account.finalizeAccount(body.name, body.handle, body.password, body.token, req.client.host)
 	response = Response(auth.json(), headers={ 'content-type': 'application/json' })
 
@@ -60,7 +65,7 @@ async def v1FinalizeAccount(req: Request, body: FinalizeAccountRequest) :
 @app.post('/change_password', status_code=204)
 async def v1ChangePassword(req: Request, body: ChangePasswordRequest) :
 	await req.user.verify_scope(Scope.user)
-	await account.changePassword(body.email, body.password, body.new_password)
+	await account.changePassword(body.email, body.old_password, body.new_password)
 
 
 @app.post('/change_handle', status_code=204)
@@ -69,16 +74,16 @@ async def v1ChangeHandle(req: Request, body: ChangeHandle) :
 	await account.changeHandle(req.user, body.handle)
 
 
-@app.post('/bot_login', response_model=LoginResponse)
-async def v1BotLogin(body: BotLoginRequest) :
+@app.post('/bot/login', response_model=LoginResponse)
+async def v1BotLogin(body: BotLoginRequest) -> LoginResponse :
 	# this endpoint does not require auth
-	return auth.botLogin(body.token)
+	return await auth.botLogin(body.token)
 
 
-@app.get('/bot_create', response_model=BotCreateResponse)
-async def v1BotCreate(req: Request) :
+@app.get('/bot/create', response_model=BotCreateResponse)
+async def v1BotCreate(req: Request) -> BotCreateResponse :
 	await req.user.verify_scope(Scope.user)
-	return auth.createBot(BotType.bot, req.user.user_id)
+	return await auth.createBot(req.user.user_id)
 
 
 # @app.get('/bot_internal', response_model=BotCreateResponse)

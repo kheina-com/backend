@@ -24,6 +24,7 @@ from .config.constants import environment
 from .config.credentials import fetch
 from .exceptions.base_error import BaseError
 from .logging import Logger, getLogger
+from .timing import timed
 
 
 class B2UploadError(BaseError) :
@@ -44,6 +45,7 @@ class FileResponse :
 		self.res.release_conn()
 
 
+	@timed
 	async def read(self: Self) :
 		with ThreadPoolExecutor() as threadpool :
 			return await get_event_loop().run_in_executor(threadpool, self.res.read)
@@ -203,12 +205,13 @@ class B2Interface :
 		)
 
 
+	@timed
 	async def upload_async(self: 'B2Interface', file_data: bytes, filename: str, content_type:Union[str, None]=None, sha1:Union[str, None]=None) -> None :
 		with ThreadPoolExecutor() as threadpool :
 			return await get_event_loop().run_in_executor(threadpool, partial(self.b2_upload, file_data, filename, content_type, sha1))
 
 
-	def b2_delete_file(self: 'B2Interface', filename: str) -> None :
+	def _delete_file(self: 'B2Interface', filename: str) -> None :
 		# files = None
 
 		for _ in range(self.b2_max_retries) :
@@ -223,9 +226,10 @@ class B2Interface :
 				self.logger.error('error encountered during b2 delete.', exc_info=e)
 
 
+	@timed
 	async def b2_delete_file_async(self: 'B2Interface', filename: str) -> None :
 		with ThreadPoolExecutor() as threadpool :
-			return await get_event_loop().run_in_executor(threadpool, partial(self.b2_delete_file, filename))
+			return await get_event_loop().run_in_executor(threadpool, partial(self._delete_file, filename))
 
 
 	# async def b2_upload_async(self: 'B2Interface', file_data: bytes, filename: str, content_type:Union[str, None]=None, sha1:Union[str, None]=None) -> Dict[str, Any] :
@@ -317,6 +321,7 @@ class B2Interface :
 			self.logger.error('error encountered during b2 get file info.', exc_info=e)
 
 
+	@timed
 	async def b2_get_file_info(self: 'B2Interface', filename: str) -> Optional[Object] :
 		with ThreadPoolExecutor() as threadpool :
 			return await get_event_loop().run_in_executor(threadpool, partial(self._get_file_info, filename))
@@ -356,6 +361,7 @@ class B2Interface :
 		raise FileNotFoundError('bruh')
 
 
+	@timed
 	async def b2_get_file(self: 'B2Interface', filename: str) -> FileResponse :
 		with ThreadPoolExecutor() as threadpool :
 			return await get_event_loop().run_in_executor(threadpool, partial(self._get_file, filename))

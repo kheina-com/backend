@@ -13,10 +13,14 @@ from shared.server.middleware import CustomHeaderMiddleware, HeadersToSet
 from shared.server.middleware.auth import KhAuthMiddleware
 from shared.server.middleware.cors import KhCorsMiddleware
 from shared.sql import ConnectionPool
+from shared.timing import timed
 from tags.router import app as tags
 from uploader.router import app as uploader
 from users.router import app as users
+import json
 
+
+timed.logger = lambda n, x : print('==>', n, json.dumps(x.dict(), indent=4))
 
 app = FastAPI()
 app.add_middleware(ExceptionMiddleware, handlers={ Exception: jsonErrorHandler }, debug=False)

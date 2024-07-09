@@ -41,7 +41,7 @@ class KhAuthMiddleware:
 				return await jsonErrorHandler(request, e)(scope, receive, send)
 
 			scope['user'] = KhUser(
-				user_id=None,
+				user_id=-1,
 				token=None,
 				scope={ Scope.default },
 			)
