@@ -1,16 +1,17 @@
 import logging
-from logging import Logger
+import json
+from sys import stderr, stdout
+from logging import Logger, getLevelName, INFO, ERROR
 from traceback import format_tb
 from types import ModuleType
-from typing import Any, Callable, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Self, TextIO
 
 from google.api_core.exceptions import RetryError
-from google.auth import compute_engine
-from google.cloud import logging as google_logging
 
 from .config.constants import environment
 from .config.repo import name as repo_name
 from .config.repo import short_hash
+from .datetime import datetime
 from .utilities import getFullyQualifiedClassName
 from .utilities.json import json_stream
 
@@ -18,16 +19,38 @@ from .utilities.json import json_stream
 class TerminalAgent :
 
 	def __init__(self) -> None :
-		import json
 		import time
 		self.time: ModuleType = time
-		self.json: ModuleType = json
 
-	def log_text(self, log: str, severity:str='INFO') -> None :
-		print('[' + self.time.asctime(self.time.localtime(self.time.time())) + ']', severity, '>', log)
+	def log_text(self, log: str, severity: int = INFO) -> None :
+		print('[' + self.time.asctime(self.time.localtime(self.time.time())) + ']', getLevelName(severity), '>', log)
 
-	def log_struct(self, log: Dict[str, Any], severity:str='INFO') -> None :
-		print('[' + self.time.asctime(self.time.localtime(self.time.time())) + ']', severity, '>', self.json.dumps(log, indent=4))
+	def log_struct(self, log: Dict[str, Any], severity: int = INFO) -> None :
+		print('[' + self.time.asctime(self.time.localtime(self.time.time())) + ']', getLevelName(severity), '>', json.dumps(log, indent=4))
+
+
+class GkeAgent :
+
+	def __init__(self, name: str) -> None :
+		self.name: str = name
+
+	def log_text(self: Self, log: str, severity: int = INFO) -> None :
+		return self.log_struct({ 'message': log }, severity=severity)
+
+	def log_struct(self: Self, log: Dict[str, Any], severity: int = INFO) -> None :
+		out: TextIO
+		if severity >= ERROR :
+			out = stderr
+
+		else :
+			out = stdout
+
+		print(json.dumps({
+			'logger': self.name,
+			'date': json_stream(datetime.now()),
+			'level': getLevelName(severity),
+			**log,
+		}), file=out)
 
 
 class LogHandler(logging.Handler) :
@@ -37,20 +60,16 @@ class LogHandler(logging.Handler) :
 	def __init__(self, name: str, *args, structs:List[type]=[dict, list, tuple], **kwargs: Any) -> None :
 		super().__init__(*args, **kwargs)
 		self._structs = tuple(structs)
-		try :
-			if not LogHandler.logging_available :
-				raise ValueError('logging unavailable.')
-			credentials = compute_engine.Credentials()
-			logging_client = google_logging.Client(credentials=credentials)
-			self.agent = logging_client.logger(name)
-		except :
-			LogHandler.logging_available = False
-			self.agent = TerminalAgent()
+		if LogHandler.logging_available :
+			self.agent = GkeAgent(name)
 
+		else :
+			self.agent = TerminalAgent()
 
 	def emit(self, record: logging.LogRecord) -> None :
 		if record.args and isinstance(record.msg, str) :
 			record.msg = record.msg % record.args
+
 		if record.exc_info :
 			e: BaseException = record.exc_info[1] # type: ignore
 			refid = getattr(e, 'refid', None)
@@ -62,11 +81,12 @@ class LogHandler(logging.Handler) :
 			}
 			if isinstance(record.msg, dict) :
 				errorinfo.update(json_stream(record.msg))
+
 			else :
 				errorinfo['message'] = record.msg
 
 			try :
-				self.agent.log_struct(errorinfo, severity=record.levelname)
+				self.agent.log_struct(errorinfo, severity=record.levelno)
 
 			except RetryError :
 				# we really, really do not want to fail-crash here.
@@ -76,9 +96,10 @@ class LogHandler(logging.Handler) :
 		else :
 			try :
 				if isinstance(record.msg, self._structs) :
-					self.agent.log_struct(json_stream(record.msg), severity=record.levelname)
+					self.agent.log_struct(json_stream(record.msg), severity=record.levelno)
+
 				else :
-					self.agent.log_text(str(record.msg), severity=record.levelname)
+					self.agent.log_text(str(record.msg), severity=record.levelno)
 
 			except RetryError :
 				# we really, really do not want to fail-crash here.
@@ -86,7 +107,7 @@ class LogHandler(logging.Handler) :
 				pass
 
 
-def getLogger(name: Union[str, None]=None, level:int=logging.INFO, filter:Callable=lambda x : x, disable:List[str]=[], **kwargs:Dict[str, Any]) -> Logger :
+def getLogger(name: Optional[str] = None, level: int = logging.INFO, filter: Callable = lambda x : x, disable: List[str]=[], **kwargs: Any) -> Logger :
 	name = name or f'{repo_name}.{short_hash}'
 	for loggerName in disable :
 		logging.getLogger(loggerName).propagate = False
