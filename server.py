@@ -1,3 +1,5 @@
+import json
+
 from fastapi import FastAPI
 from starlette.middleware.exceptions import ExceptionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -17,7 +19,6 @@ from shared.timing import timed
 from tags.router import app as tags
 from uploader.router import app as uploader
 from users.router import app as users
-import json
 
 
 timed.logger = lambda n, x : print('==>', n, json.dumps(x.dict(), indent=4))
@@ -32,7 +33,10 @@ app.add_middleware(
 	allowed_origins = {
 		'localhost',
 		'127.0.0.1',
+		'api.dev.fuzz.ly',
+		'api-dev.fuzz.ly',
 		'dev.fuzz.ly',
+		'api.fuzz.ly',
 		'fuzz.ly',
 	},
 	allowed_protocols = set(['http', 'https'] 
