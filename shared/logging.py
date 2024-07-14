@@ -47,8 +47,7 @@ class GkeAgent :
 
 		print(json.dumps({
 			'logger': self.name,
-			'date': json_stream(datetime.now()),
-			'level': getLevelName(severity),
+			'severity': getLevelName(severity),
 			**log,
 		}), file=out)
 

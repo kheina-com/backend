@@ -20,7 +20,8 @@ def __clear_cache__(cache: OrderedDict[Hashable, Tuple[float, Any]], t: Callable
 	try :
 		while True :
 			cache_key = next(cache.__iter__())
-			if cache[cache_key][0] >= now : break
+			if cache[cache_key][0] >= now :
+				break
 			del cache[cache_key]
 
 	except StopIteration :

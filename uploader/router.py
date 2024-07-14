@@ -4,7 +4,7 @@ from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import UJSONResponse
 
 from posts.models import PostId
-from shared.server import NoContentResponse, Request, ServerApp
+from shared.server import NoContentResponse, Request
 from shared.timing import timed
 
 from .models import CreateRequest, IconRequest, PrivacyRequest, UpdateRequest
