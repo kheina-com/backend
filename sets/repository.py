@@ -153,7 +153,7 @@ class Sets(SqlInterface, Hashable) :
 		:return: boolean - True if the user has permission, otherwise False
 		"""
 
-		if iset.privacy == Privacy.public :
+		if iset.privacy == await privacy_map.get(Privacy.public) :
 			return True
 
 		if not await user.authenticated(raise_error=False) :

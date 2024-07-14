@@ -342,7 +342,7 @@ class Posts(SqlInterface) :
 		:return: boolean - True if the user has permission, otherwise False
 		"""
 
-		if ipost.privacy == Privacy.public :
+		if ipost.privacy == await privacy_map.get(Privacy.public) :
 			return True
 
 		if not await user.authenticated(raise_error=False) :

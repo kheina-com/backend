@@ -21,7 +21,7 @@ from uploader.router import app as uploader
 from users.router import app as users
 
 
-timed.logger = lambda n, x : print('==>', n, json.dumps(x.dict(), indent=4))
+timed.logger = lambda n, x : print(json.dumps({ n: x.dict() }))
 
 app = FastAPI()
 app.add_middleware(ExceptionMiddleware, handlers={ Exception: jsonErrorHandler }, debug=False)

@@ -11,9 +11,10 @@ from shared.auth import KhUser, Scope
 from shared.caching import AerospikeCache, SimpleCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadRequest, Conflict, Forbidden, HttpErrorHandler, NotFound
-from shared.models.user import InternalUser, UserPortable
+from shared.models.user import UserPortable
 from shared.utilities import flatten
 from users.repository import Users
+from shared.maps import privacy_map
 
 from .models import InternalTag, Tag, TagGroupPortable, TagGroups
 from .repository import TagKVS, Tags
@@ -118,7 +119,7 @@ class Tagger(Tags) :
 		)
 
 		post: InternalPost = await posts._get_post(post_id)
-		if post.privacy == Privacy.public :
+		if post.privacy == await privacy_map.get(Privacy.public) :
 			existing = set(flatten(await self._fetch_tags_by_post(post_id)))
 			for tag in set(tags) - existing :  # increment tags that didn't already exist
 				self._increment_tag_count(tag)
@@ -140,7 +141,7 @@ class Tagger(Tags) :
 		)
 
 		post: InternalPost = await posts._get_post(post_id)
-		if post.privacy == Privacy.public :
+		if post.privacy == await privacy_map.get(Privacy.public) :
 			existing = set(flatten(await self._fetch_tags_by_post(post_id)))
 			for tag in set(tags) & existing :  # decrement only the tags that already existed
 				self._decrement_tag_count(tag)
