@@ -10,7 +10,7 @@ from typing import Dict, Optional, Self, Type, Union
 
 from minio import Minio
 from minio.datatypes import Object
-from urllib3.response import HTTPResponse
+from urllib3.response import BaseHTTPResponse
 
 from .config.constants import environment
 from .config.credentials import fetch
@@ -24,8 +24,8 @@ class B2UploadError(BaseError) :
 
 
 class FileResponse :
-	def __init__(self: 'FileResponse', res: HTTPResponse) :
-		self.res: HTTPResponse = res
+	def __init__(self: 'FileResponse', res: BaseHTTPResponse) :
+		self.res: BaseHTTPResponse = res
 
 
 	def __enter__(self: Self) -> Self :
@@ -324,7 +324,7 @@ class B2Interface :
 	def _get_file(self: 'B2Interface', filename: str) -> FileResponse :
 		try :
 			for _ in range(self.b2_max_retries) :
-				r: HTTPResponse = self.client.get_object(
+				r: BaseHTTPResponse = self.client.get_object(
 					self.bucket_name,
 					filename,
 				)

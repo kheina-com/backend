@@ -1,7 +1,7 @@
 from typing import Any
 
 import pytest
-from models import PostId
+from posts.models import PostId
 
 
 @pytest.mark.parametrize(

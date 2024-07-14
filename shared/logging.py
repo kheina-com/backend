@@ -6,12 +6,9 @@ from traceback import format_tb
 from types import ModuleType
 from typing import Any, Callable, Dict, List, Optional, Self, TextIO
 
-from google.api_core.exceptions import RetryError
-
 from .config.constants import environment
 from .config.repo import name as repo_name
 from .config.repo import short_hash
-from .datetime import datetime
 from .utilities import getFullyQualifiedClassName
 from .utilities.json import json_stream
 
@@ -87,7 +84,7 @@ class LogHandler(logging.Handler) :
 			try :
 				self.agent.log_struct(errorinfo, severity=record.levelno)
 
-			except RetryError :
+			except :
 				# we really, really do not want to fail-crash here.
 				# normally we would log this error and move on, but, well.
 				pass
@@ -100,7 +97,7 @@ class LogHandler(logging.Handler) :
 				else :
 					self.agent.log_text(str(record.msg), severity=record.levelno)
 
-			except RetryError :
+			except :
 				# we really, really do not want to fail-crash here.
 				# normally we would log this error and move on, but, well.
 				pass

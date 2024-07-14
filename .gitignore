@@ -7,7 +7,6 @@ credentials*
 .vscode
 
 # database files
-**/*.db
 sql.lock
 
 # images
@@ -18,32 +17,8 @@ sql.lock
 **/*.svg
 images
 
-# test files
-*test.*
-*test
-
 # python files
 **/__pycache__
 **/Pipfile
+.pytest_cache
 .venv
-
-# text files, except a requirements file, should it exist
-*.log
-*.txt
-*.out
-!requirements.txt
-
-# back ups of files hosted remotely
-**/backups
-
-# experimental things
-libparseform.so
-parseform.cpp
-parseform.py
-cf
-
-# grab template files
-!*template.*
-
-# grab ALL markdown files. These are all readmes, setups, and tutorials
-!**/*.md

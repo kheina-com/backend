@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: fuzzly-backend
-        image: us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend:a16223c
+        image: us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend:ec1143e
         env:
         - name: kh_aes
           valueFrom:
