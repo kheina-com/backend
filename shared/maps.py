@@ -11,7 +11,7 @@ class PrivacyMap(SqlInterface):
 	@AsyncLRU(maxsize=0)
 	async def get(self: Self, key: Union[int, str, Privacy]) -> Union[int, Privacy]:
 		if isinstance(key, int):
-			d1: Tuple[str] = self.query(
+			d1: Tuple[str] = await self.query_async(
 				"""
 				SELECT type
 				FROM kheina.public.privacy
@@ -21,13 +21,12 @@ class PrivacyMap(SqlInterface):
 				(key,),
 				fetch_one=True,
 			)
-			p = Privacy(value=d1[0])
 
 			# key is the id, return privacy
 			return Privacy(value=d1[0])
 
 		else:
-			d2: Tuple[int] = self.query(
+			d2: Tuple[int] = await self.query_async(
 				"""
 				SELECT privacy_id
 				FROM kheina.public.privacy

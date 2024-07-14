@@ -4,7 +4,7 @@ from re import IGNORECASE
 from re import compile as re_compile
 from secrets import randbelow, token_bytes
 from time import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Self, Tuple
 from uuid import UUID, uuid4
 
 import ujson as json
@@ -23,12 +23,14 @@ from shared.config.credentials import fetch
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, Conflict, HttpError, InternalServerError, NotFound, Unauthorized
 from shared.hashing import Hashable
-from shared.models import InternalUser
-from shared.models.auth import AuthState, Scope, TokenMetadata
+from shared.models.auth import AuthState, KhUser, Scope, TokenMetadata
 from shared.sql import SqlInterface
 from shared.utilities.json import json_stream
+from cache import AsyncLRU
 
-from .models import AuthAlgorithm, BotCreateResponse, BotLogin, LoginResponse, PublicKeyResponse, TokenResponse
+from shared.models import InternalUser
+
+from .models import AuthAlgorithm, BotCreateResponse, BotLogin, BotType, LoginResponse, PublicKeyResponse, TokenResponse
 
 
 """
@@ -84,14 +86,48 @@ Access method: heap
 """
 
 
+KVS: KeyValueStore = KeyValueStore('kheina', 'token')
 BotLoginSerializer: AvroSerializer = AvroSerializer(BotLogin)
 BotLoginDeserializer: AvroDeserializer = AvroDeserializer(BotLogin)
+
+
+class BotTypeMap(SqlInterface):
+	@AsyncLRU(maxsize=0)
+	async def get(self: Self, key: int) -> BotType :
+		data: Tuple[str] = await self.query_async(
+			"""
+			SELECT bot_type
+			FROM kheina.auth.bot_type
+			WHERE bot_type.bot_type_id = %s
+			LIMIT 1;
+			""",
+			(key,),
+			fetch_one=True,
+		)
+		# key is the id, return privacy
+		return BotType(value=data[0])
+
+	@AsyncLRU(maxsize=0)
+	async def get_id(self: Self, key: BotType) -> int :
+		data: Tuple[int] = await self.query_async(
+			"""
+			SELECT bot_type_id
+			FROM kheina.auth.bot_type
+			WHERE bot_type.bot_type = %s
+			LIMIT 1;
+			""",
+			(key,),
+			fetch_one=True,
+		)
+		# key is the id, return privacy
+		return data[0]
+
+bot_type_map: BotTypeMap = BotTypeMap()
 
 
 class Authenticator(SqlInterface, Hashable) :
 
 	EmailRegex = re_compile(r'^(?P<user>[A-Z0-9._%+-]+)@(?P<domain>[A-Z0-9.-]+\.[A-Z]{2,})$', flags=IGNORECASE)
-	KVS: KeyValueStore
 
 	def __init__(self) :
 		Hashable.__init__(self)
@@ -111,9 +147,6 @@ class Authenticator(SqlInterface, Hashable) :
 			'end': 0,
 			'id': 0,
 		}
-
-		if getattr(Authenticator, 'KVS', None) is None :
-			Authenticator.KVS = KeyValueStore('kheina', 'token')
 
 
 	def _validateEmail(self, email: str) -> Dict[str, str] :
@@ -139,7 +172,7 @@ class Authenticator(SqlInterface, Hashable) :
 		return int(self._key_refresh_interval * floor(timestamp / self._key_refresh_interval))
 
 
-	def generate_token(self, user_id: int, token_data: dict) -> TokenResponse :
+	async def generate_token(self, user_id: int, token_data: dict) -> TokenResponse :
 		issued = time()
 		expires = self._calc_timestamp(issued) + self._token_expires_interval
 
@@ -169,7 +202,7 @@ class Authenticator(SqlInterface, Hashable) :
 			signature = private_key.sign(public_key)
 
 			# insert the new key into db
-			data: Tuple[int, datetime, datetime] = self.query("""
+			data: Tuple[int, datetime, datetime] = await self.query_async("""
 				INSERT INTO kheina.auth.token_keys
 				(public_key, signature, algorithm)
 				VALUES
@@ -216,7 +249,7 @@ class Authenticator(SqlInterface, Hashable) :
 			algorithm=self._token_algorithm,
 			fingerprint=token_data.get('fp', '').encode(),
 		)
-		Authenticator.KVS.put(guid.bytes, token_info, self._token_expires_interval)
+		await KVS.put_async(guid.bytes, token_info, self._token_expires_interval)
 
 		version = self._token_version.encode()
 		content = b64encode(version) + b'.' + b64encode(load)
@@ -236,10 +269,10 @@ class Authenticator(SqlInterface, Hashable) :
 	async def logout(self, guid: RefId) :
 		# since this endpoint is behind user.authenticated, we already know that the
 		# token exists and all the information is correct. we just need to delete it.
-		await Authenticator.KVS.remove_async(guid)
+		await KVS.remove_async(guid)
 
 
-	def fetchPublicKey(self, key_id, algorithm: Optional[AuthAlgorithm] = None) -> PublicKeyResponse :
+	async def fetchPublicKey(self, key_id, algorithm: Optional[AuthAlgorithm] = None) -> PublicKeyResponse :
 		algo = algorithm.name if algorithm else self._token_algorithm
 		lookup_key = (algo, key_id)
 
@@ -249,7 +282,7 @@ class Authenticator(SqlInterface, Hashable) :
 				public_key = self._public_keyring[lookup_key]
 
 			else :
-				data = self.query("""
+				data: tuple[memoryview, memoryview, datetime, datetime] = await self.query_async("""
 					SELECT public_key, signature, issued, expires
 					FROM kheina.auth.token_keys
 					WHERE algorithm = %s AND key_id = %s;
@@ -271,7 +304,7 @@ class Authenticator(SqlInterface, Hashable) :
 		except HttpError :
 			raise
 
-		except :
+		except :  # noqa: E722
 			refid = uuid4().hex
 			self.logger.exception({ 'refid': refid })
 			raise InternalServerError('an error occurred while retrieving public key.', logdata={ 'refid': refid })
@@ -282,7 +315,7 @@ class Authenticator(SqlInterface, Hashable) :
 		)
 
 
-	def login(self, email: str, password: str, token_data:Dict[str, Any]={ }) -> LoginResponse :
+	async def login(self, email: str, password: str, token_data:Dict[str, Any]={ }) -> LoginResponse :
 		"""
 		returns user data on success otherwise raises Unauthorized
 		{
@@ -301,7 +334,7 @@ class Authenticator(SqlInterface, Hashable) :
 		try :
 			email_dict: Dict[str, str] = self._validateEmail(email)
 			email_hash = self._hash_email(email)
-			data = self.query("""
+			data: tuple[int, memoryview, int, str, str, bool] = await self.query_async("""
 				SELECT
 					user_login.user_id,
 					user_login.password,
@@ -321,15 +354,15 @@ class Authenticator(SqlInterface, Hashable) :
 			if not data :
 				raise Unauthorized('login failed.')
 
-			user_id, password_hash, secret, handle, name, mod = data
-			password_hash = password_hash.tobytes().decode()
+			user_id, pwhash, secret, handle, name, mod = data
+			password_hash = pwhash.tobytes().decode()
 
 			if not self._argon2.verify(password_hash, password.encode() + self._secrets[secret]) :
 				raise Unauthorized('login failed.')
 
 			if self._argon2.check_needs_rehash(password_hash) :
 				password_hash = self._argon2.hash(password.encode() + self._secrets[secret]).encode()
-				self.query("""
+				await self.query_async("""
 					UPDATE kheina.auth.user_login
 					SET password = %s
 					WHERE email_hash = %s;
@@ -344,7 +377,7 @@ class Authenticator(SqlInterface, Hashable) :
 			elif mod :
 				token_data['scope'] = Scope.mod.all_included_scopes()
 
-			token: TokenResponse = self.generate_token(user_id, token_data)
+			token: TokenResponse = await self.generate_token(user_id, token_data)
 
 		except VerifyMismatchError :
 			raise Unauthorized('login failed.')
@@ -352,7 +385,7 @@ class Authenticator(SqlInterface, Hashable) :
 		except HttpError :
 			raise
 
-		except :
+		except :  # noqa: E722
 			refid = uuid4().hex
 			self.logger.exception({ 'refid': refid })
 			raise InternalServerError('an error occurred during verification.', logdata={ 'refid': refid })
@@ -366,28 +399,38 @@ class Authenticator(SqlInterface, Hashable) :
 		)
 
 
-	async def createBot(self, user_id: int) -> BotCreateResponse :
+	async def createBot(self, user: KhUser, bot_type: BotType) -> BotCreateResponse :
+		if type(bot_type) != BotType :
+			# this should never run, thanks to pydantic/fastapi. just being extra careful.
+			raise BadRequest('bot_type must be a BotType value.')
+
+		user_id: Optional[int] = None
+
+		if bot_type != BotType.internal :
+			user_id = user.user_id
+
 		# now we can create the BotLogin object that will be returned to the user
 		password: bytes = token_bytes(64)
 		secret: int = randbelow(len(self._secrets))
 		password_hash: bytes = self._argon2.hash(password + self._secrets[secret]).encode()
 
 		try :
-			data: Tuple[int] = await self.query_async("""
+			data: tuple[int] = await self.query_async("""
 				INSERT INTO kheina.auth.bot_login
-				(user_id, password, secret, created_by)
+				(user_id, password, secret, bot_type_id, created_by)
 				VALUES
-				(%s, %s, %s, %s)
+				(%s, %s, %s, %s, %s)
 				ON CONFLICT (user_id) WHERE user_id IS NOT NULL DO
 					UPDATE SET
 						user_id = %s,
 						password = %s,
-						secret = %s
+						secret = %s,
+						bot_type_id = %s
 					WHERE bot_login.user_id = %s
 				RETURNING bot_id;
 				""", (
-					user_id, password_hash, secret, user_id,
-					user_id, password_hash, secret, user_id,
+					user_id, password_hash, secret, await bot_type_map.get_id(bot_type), user.user_id,
+					user_id, password_hash, secret, await bot_type_map.get_id(bot_type), user.user_id,
 				),
 				commit=True,
 				fetch_one=True,
@@ -400,7 +443,7 @@ class Authenticator(SqlInterface, Hashable) :
 				secret=secret,
 			)
 
-		except :
+		except :  # noqa: E722
 			refid = uuid4().hex
 			self.logger.exception({ 'refid': refid })
 			raise InternalServerError('an error occurred during bot creation.', logdata={ 'refid': refid })
@@ -413,16 +456,18 @@ class Authenticator(SqlInterface, Hashable) :
 	async def botLogin(self, token: str) -> LoginResponse :
 		bot_login: BotLogin = BotLoginDeserializer(b64decode(token)) # type: ignore
 
-		user_id: int
+		user_id: Optional[int]
 		password_hash: str
 		secret: int
+		bot_type: BotType
 
 		try :
-			data: Tuple[int, memoryview, int] = await self.query_async("""
+			data: Tuple[int, memoryview, int, int] = await self.query_async("""
 				SELECT
 					bot_login.user_id,
 					bot_login.password,
-					bot_login.secret
+					bot_login.secret,
+					bot_login.bot_type_id
 				FROM kheina.auth.bot_login
 				WHERE bot_id = %s;
 				""",
@@ -433,8 +478,10 @@ class Authenticator(SqlInterface, Hashable) :
 			if not data :
 				raise Unauthorized('bot login failed.')
 
-			user_id, pw, secret = data
+			bot_type_id: int
+			user_id, pw, secret, bot_type_id = data
 			password_hash = pw.tobytes().decode()
+			bot_type = await bot_type_map.get(bot_type_id)
 
 			if user_id != bot_login.user_id :
 				raise Unauthorized('login failed.')
@@ -459,37 +506,49 @@ class Authenticator(SqlInterface, Hashable) :
 		except HttpError :
 			raise
 
-		except :
+		except :  # noqa: E722
 			refid = uuid4().hex
 			self.logger.exception({ 'refid': refid })
 			raise InternalServerError('an error occurred during bot verification.', logdata={ 'refid': refid })
 
-		iuser = await self.select(InternalUser(
-			user_id=user_id,
-			name='',
-			handle='',
-			privacy=-1,
-			created=datetime.zero(),
-		)) # type: ignore
+		user_id: int = user_id or 0
+		scope: list[Scope] = [Scope.internal if bot_type == BotType.internal else Scope.bot]
+
+		if user_id :
+			iuser = await self.select(InternalUser(
+				user_id=user_id,
+				name='',
+				handle='',
+				privacy=-1,
+				created=datetime.zero(),
+			)) # type: ignore
+
+			return LoginResponse(
+				user_id=user_id,
+				handle=iuser.handle,
+				name=iuser.name,
+				mod=False,
+				token=await self.generate_token(user_id, { 'scope': scope }),
+			) # type: ignore
 
 		return LoginResponse(
 			user_id=user_id,
-			name=iuser.name,
-			handle=iuser.handle,
+			handle='',
 			mod=False,
-			token=self.generate_token(user_id, { 'scope': [Scope.bot] }),
-		)
+			token=await self.generate_token(user_id, { 'scope': scope }),
+		) # type: ignore
 
 
-	def changePassword(self, email: str, old_password: str, new_password: str) :
+
+	async def changePassword(self, email: str, old_password: str, new_password: str) :
 		"""
 		changes a user's password
 		"""
 		try :
 
 			email_hash = self._hash_email(email)
-			data = self.query("""
-				SELECT user_login.user_id, password, secret, handle, display_name
+			data: tuple[memoryview, int] = await self.query_async("""
+				SELECT password, secret
 				FROM kheina.auth.user_login
 					INNER JOIN kheina.public.users
 						ON users.user_id = user_login.user_id
@@ -502,8 +561,8 @@ class Authenticator(SqlInterface, Hashable) :
 			if not data :
 				raise Unauthorized('password change failed.')
 
-			user_id, password_hash, secret, handle, name = data
-			password_hash = password_hash.tobytes()
+			pwhash, secret = data
+			password_hash = pwhash.tobytes()
 
 			if not self._argon2.verify(password_hash.decode(), old_password.encode() + self._secrets[secret]) :
 				raise Unauthorized('password change failed.')
@@ -517,12 +576,12 @@ class Authenticator(SqlInterface, Hashable) :
 		except HttpError :
 			raise
 
-		except :
+		except :  # noqa: E722
 			refid = uuid4().hex
 			self.logger.exception({ 'refid': refid })
 			raise InternalServerError('an error occurred during verification.', logdata={ 'refid': refid })
 
-		self.query("""
+		await self.query_async("""
 			UPDATE kheina.auth.user_login
 			SET password = %s,
 				secret = %s
@@ -533,7 +592,7 @@ class Authenticator(SqlInterface, Hashable) :
 		)
 
 
-	def create(self, handle: str, name: str, email: str, password: str, token_data:Dict[str, Any]={ }) -> LoginResponse :
+	async def create(self, handle: str, name: str, email: str, password: str, token_data:Dict[str, Any]={ }) -> LoginResponse :
 		"""
 		returns user data on success otherwise raises Bad Request
 		"""
@@ -541,7 +600,7 @@ class Authenticator(SqlInterface, Hashable) :
 			email_hash = self._hash_email(email)
 			secret = randbelow(len(self._secrets))
 			password_hash = self._argon2.hash(password.encode() + self._secrets[secret]).encode()
-			data = self.query("""
+			data: tuple[int] = await self.query_async("""
 				WITH new_user AS (
 					INSERT INTO kheina.public.users
 					(handle, display_name)
@@ -562,12 +621,13 @@ class Authenticator(SqlInterface, Hashable) :
 				fetch_one=True,
 			)
 
+
 			return LoginResponse(
 				user_id=data[0],
 				handle=handle,
 				name=name,
 				mod=False,
-				token=self.generate_token(data[0], token_data),
+				token=await self.generate_token(data[0], token_data),
 			)
 
 		except UniqueViolation :
@@ -575,7 +635,7 @@ class Authenticator(SqlInterface, Hashable) :
 			self.logger.exception({ 'refid': refid })
 			raise Conflict('a user already exists with that handle or email.', logdata={ 'refid': refid })
 
-		except :
+		except :  # noqa: E722
 			refid = uuid4().hex
 			self.logger.exception({ 'refid': refid })
 			raise InternalServerError('an error occurred during user creation.', logdata={ 'refid': refid })

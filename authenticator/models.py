@@ -88,6 +88,14 @@ class BotLogin(BaseModel) :
 	secret: AvroInt
 
 
+class BotType(Enum) :
+	"""
+	this enum maps to a db type.
+	"""
+	internal = 'internal'
+	bot      = 'bot'
+
+
 class BotCreateResponse(BaseModel) :
 	token: str
 

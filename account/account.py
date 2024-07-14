@@ -10,7 +10,6 @@ from shared.config.constants import environment
 from shared.email import Button, sendEmail
 from shared.exceptions.http_error import BadRequest, Conflict, HttpError, HttpErrorHandler
 from shared.hashing import Hashable
-from shared.models.user import User
 from shared.server import Request
 from shared.sql import SqlInterface
 
@@ -77,13 +76,13 @@ class Account(SqlInterface, Hashable) :
 			'fp': browserFingerprint(request),
 		}
 
-		return auth.login(email, password, token_data)
+		return await auth.login(email, password, token_data)
 
 
 	@HttpErrorHandler('creating user account')
 	async def createAccount(self: 'Account', email: str, name: str) :
 		self._validateEmail(email)
-		data: TokenResponse = auth.generate_token(0, {
+		data: TokenResponse = await auth.generate_token(0, {
 			'name': name,
 			'email': email,
 			'key': Account.AccountCreateKey,
@@ -117,7 +116,7 @@ class Account(SqlInterface, Hashable) :
 		if token_data.data.get('key') != Account.AccountCreateKey :
 			raise BadRequest('the token provided does not match the purpose required.')
 
-		data: LoginResponse = auth.create(
+		data: LoginResponse = await auth.create(
 			handle = handle,
 			name = name,
 			email = token_data.data['email'],
@@ -154,7 +153,7 @@ class Account(SqlInterface, Hashable) :
 		self._validatePassword(old_password)
 		self._validatePassword(new_password)
 
-		auth.changePassword(
+		await auth.changePassword(
 			email,
 			old_password,
 			new_password,
@@ -180,7 +179,7 @@ class Account(SqlInterface, Hashable) :
 	async def recoverPassword(self: 'Account', email: str) :
 		self._validateEmail(email)
 
-		data: TokenResponse = auth.generate_token(0, {
+		data: TokenResponse = await auth.generate_token(0, {
 			'email': email,
 			'key': Account.AccountRecoveryKey,
 		})

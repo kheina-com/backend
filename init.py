@@ -2,9 +2,9 @@ from dataclasses import dataclass
 from os import listdir, remove
 from os.path import isdir, isfile, join
 from secrets import token_bytes
-from typing import BinaryIO
+from typing import Any, BinaryIO, Optional
 
-import click
+import asyncclick as click
 import ujson
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -16,6 +16,14 @@ from shared.backblaze import B2Interface
 from shared.base64 import b64encode
 from shared.caching.key_value_store import KeyValueStore
 from shared.sql import SqlInterface
+
+
+def isint(value: Any) -> Optional[int] :
+	try :
+		return int(value)
+
+	except ValueError :
+		return None
 
 
 @click.group()
@@ -52,7 +60,7 @@ def execSql(unlock: bool = False) -> None :
 			sqllock = int(open('sql.lock').read().strip())
 			click.echo(f'==> sql.lock: {sqllock}')
 
-		dirs = sorted(int(i) for i in listdir('db') if isdir(f'db/{i}') and i == str(int(i)))
+		dirs = sorted(int(i) for i in listdir('db') if isdir(f'db/{i}') and i == str(isint(i)))
 		dir = ""
 		for dir in dirs :
 			if sqllock and sqllock >= dir :
@@ -91,20 +99,20 @@ def uploadDefaultIcon() -> None :
 
 
 @cli.command('admin')
-def createAdmin() -> LoginRequest :
+async def createAdmin() -> LoginRequest :
 	"""
 	creates a default admin account on your fuzzly instance
 	"""
 	auth = Authenticator()
 	email = 'localhost@kheina.com'
 	password = b64encode(token_bytes(18)).decode()
-	r = auth.create(
+	r = await auth.create(
 		'kheina',
 		'kheina',
 		email,
 		password,
 	)
-	auth.query("""
+	await auth.query_async("""
 		UPDATE kheina.public.users
 			SET admin = true
 		WHERE user_id = %s;

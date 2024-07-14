@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from fastapi.responses import Response
 
-from authenticator.models import BotCreateResponse, BotLoginRequest, ChangePasswordRequest, LoginRequest, LoginResponse
+from authenticator.models import BotCreateResponse, BotLoginRequest, BotType, ChangePasswordRequest, LoginRequest, LoginResponse
 from shared.auth import Scope
 from shared.config.constants import environment
 from shared.datetime import datetime
@@ -80,13 +80,19 @@ async def v1BotLogin(body: BotLoginRequest) -> LoginResponse :
 	return await auth.botLogin(body.token)
 
 
+@app.post('/bot/renew', response_model=BotCreateResponse)
+async def v1BotRenew(req: Request) -> BotCreateResponse :
+	await req.user.verify_scope(Scope.internal)
+	return await auth.createBot(req.user, BotType.internal)
+
+
 @app.get('/bot/create', response_model=BotCreateResponse)
 async def v1BotCreate(req: Request) -> BotCreateResponse :
 	await req.user.verify_scope(Scope.user)
-	return await auth.createBot(req.user.user_id)
+	return await auth.createBot(req.user, BotType.bot)
 
 
-# @app.get('/bot_internal', response_model=BotCreateResponse)
-# async def v1BotCreateInternal(req: Request) :
-# 	await req.user.verify_scope(Scope.admin)
-# 	return auth.createBot(BotType.internal, req.user.user_id)
+@app.get('/bot/internal', response_model=BotCreateResponse)
+async def v1BotCreateInternal(req: Request) -> BotCreateResponse :
+	await req.user.verify_scope(Scope.admin)
+	return await auth.createBot(req.user, BotType.internal)

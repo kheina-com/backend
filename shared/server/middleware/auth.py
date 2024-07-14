@@ -46,4 +46,7 @@ class KhAuthMiddleware:
 				scope={ Scope.default },
 			)
 
+		except Exception as e :
+			return await jsonErrorHandler(request, e)(scope, receive, send)
+
 		await self.app(scope, receive, send)

@@ -50,7 +50,7 @@ class KhUser(KhUser) :
 
 @ArgsCache(60 * 60 * 24)  # 24 hour cache
 async def _fetchPublicKey(key_id: int, algorithm: str) -> Ed25519PublicKey :
-	load: PublicKeyResponse = authenticator.fetchPublicKey(key_id, AuthAlgorithm(algorithm))
+	load: PublicKeyResponse = await authenticator.fetchPublicKey(key_id, AuthAlgorithm(algorithm))
 
 	if datetime.now() > load.expires :
 		raise Unauthorized('Key has expired.')
