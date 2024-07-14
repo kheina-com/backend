@@ -1,10 +1,10 @@
 from enum import Enum, unique
 from typing import Dict, List, Literal, Optional, Set, Union
-from shared.models import PostId
 
 from pydantic import BaseModel, conbytes
 
 from avrofastapi.schema import AvroInt
+from shared.models import PostId
 
 
 UserConfigKeyFormat: str = 'user.{user_id}'

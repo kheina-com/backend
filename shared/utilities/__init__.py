@@ -1,7 +1,7 @@
 from collections import OrderedDict
 from math import ceil
 from time import time
-from typing import Any, Callable, Hashable, Iterable, Optional, Tuple, Type, TypeVar
+from typing import Any, Callable, Generator, Hashable, Iterable, Optional, Tuple, Type, TypeVar
 
 from pydantic import parse_obj_as
 
@@ -44,7 +44,7 @@ def stringSlice(string: str, start: Optional[str] = None, end: Optional[str] = N
 	return string[s:e]
 
 
-def flatten(it: Iterable[Any]) -> Iterable[Any] :
+def flatten(it: Iterable[Any]) -> Generator[Any, None, None] :
 	if isinstance(it, str) :
 		yield it
 		return

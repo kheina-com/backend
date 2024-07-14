@@ -8,12 +8,12 @@ from .user import UserPortable
 
 @unique
 class TagGroupPortable(Enum) :
-	artist: str = 'artist'
-	subject: str = 'subject'
-	sponsor: str = 'sponsor'
-	species: str = 'species'
-	gender: str = 'gender'
-	misc: str = 'misc'
+	artist  = 'artist'
+	subject = 'subject'
+	sponsor = 'sponsor'
+	species = 'species'
+	gender  = 'gender'
+	misc    = 'misc'
 
 
 class TagGroups(Dict[TagGroupPortable, List[str]]) :

@@ -42,8 +42,8 @@ COMMENT ON EXTENSION pgcrypto IS 'cryptographic functions';
 --
 
 CREATE PROCEDURE public.add_tags(sp_post_id character, sp_user_id bigint, sp_tags text[])
-    LANGUAGE plpgsql
-    AS $$
+	LANGUAGE plpgsql
+	AS $$
 BEGIN
 
 INSERT INTO kheina.public.tag_post
@@ -69,8 +69,8 @@ $$;
 --
 
 CREATE PROCEDURE public.add_tags(sp_post_id bigint, sp_user_id bigint, sp_tags text[])
-    LANGUAGE plpgsql
-    AS $$
+	LANGUAGE plpgsql
+	AS $$
 BEGIN
 
 INSERT INTO kheina.public.tag_post
@@ -96,8 +96,8 @@ $$;
 --
 
 CREATE FUNCTION public.context_to_id(_frame text) RETURNS smallint
-    LANGUAGE sql
-    AS $$
+	LANGUAGE sql
+	AS $$
 SELECT context_id FROM context WHERE frame = _frame LIMIT 1;
 $$;
 
@@ -107,8 +107,8 @@ $$;
 --
 
 CREATE FUNCTION public.create_new_post(sp_user_id bigint) RETURNS character
-    LANGUAGE plpgsql
-    AS $$
+	LANGUAGE plpgsql
+	AS $$
 DECLARE
 sp_post_id CHAR(8);
 BEGIN
@@ -139,8 +139,8 @@ $$;
 --
 
 CREATE PROCEDURE public.inherit_tag(sp_user_id bigint, sp_parent text, sp_child text, sp_deprecate boolean)
-    LANGUAGE plpgsql
-    AS $$
+	LANGUAGE plpgsql
+	AS $$
 DECLARE sp_parent_id INT;
 DECLARE sp_child_id INT;
 BEGIN
@@ -182,8 +182,8 @@ $$;
 --
 
 CREATE FUNCTION public.media_file_type_to_id(_type text) RETURNS smallint
-    LANGUAGE sql
-    AS $$
+	LANGUAGE sql
+	AS $$
 SELECT media_type_id FROM media_type WHERE file_type = _type LIMIT 1;
 $$;
 
@@ -193,8 +193,8 @@ $$;
 --
 
 CREATE FUNCTION public.media_mime_type_to_id(_type text) RETURNS smallint
-    LANGUAGE sql
-    AS $$
+	LANGUAGE sql
+	AS $$
 SELECT media_type_id FROM media_type WHERE mime_type = _type LIMIT 1;
 $$;
 
@@ -204,8 +204,8 @@ $$;
 --
 
 CREATE FUNCTION public.new_post_id() RETURNS character
-    LANGUAGE plpgsql
-    AS $$
+	LANGUAGE plpgsql
+	AS $$
 DECLARE
 fn_post_id CHAR(8);
 BEGIN
@@ -225,8 +225,8 @@ $$;
 --
 
 CREATE FUNCTION public.privacy_to_id(_type text) RETURNS smallint
-    LANGUAGE sql
-    AS $$
+	LANGUAGE sql
+	AS $$
 SELECT privacy_id FROM privacy WHERE type = _type LIMIT 1;
 $$;
 
@@ -236,8 +236,8 @@ $$;
 --
 
 CREATE FUNCTION public.rating_to_id(_rating text) RETURNS smallint
-    LANGUAGE sql
-    AS $$
+	LANGUAGE sql
+	AS $$
 SELECT ratings.rating_id FROM kheina.public.ratings WHERE ratings.rating = LOWER(_rating) LIMIT 1;
 $$;
 
@@ -247,8 +247,8 @@ $$;
 --
 
 CREATE FUNCTION public.relation_to_id(_type text) RETURNS smallint
-    LANGUAGE sql
-    AS $$
+	LANGUAGE sql
+	AS $$
 SELECT relation_id FROM relations WHERE relation = _type LIMIT 1;
 $$;
 
@@ -258,8 +258,8 @@ $$;
 --
 
 CREATE PROCEDURE public.remove_tags(sp_post_id character, sp_user_id bigint, sp_tags text[])
-    LANGUAGE plpgsql
-    AS $$
+	LANGUAGE plpgsql
+	AS $$
 DECLARE sp_user_ids BIGINT[];
 BEGIN
 
@@ -300,8 +300,8 @@ $$;
 --
 
 CREATE PROCEDURE public.remove_tags(sp_post_id bigint, sp_user_id bigint, sp_tags text[])
-    LANGUAGE plpgsql
-    AS $$
+	LANGUAGE plpgsql
+	AS $$
 DECLARE sp_user_ids BIGINT[];
 BEGIN
 
@@ -342,8 +342,8 @@ $$;
 --
 
 CREATE FUNCTION public.tag_class_to_id(_class text) RETURNS smallint
-    LANGUAGE sql
-    AS $$
+	LANGUAGE sql
+	AS $$
 SELECT class_id FROM tag_classes WHERE class = _class LIMIT 1;
 $$;
 
@@ -353,8 +353,8 @@ $$;
 --
 
 CREATE FUNCTION public.tag_to_id(_tag text) RETURNS integer
-    LANGUAGE plpgsql
-    AS $$
+	LANGUAGE plpgsql
+	AS $$
 DECLARE
 fn_tag_id INT;
 BEGIN
@@ -374,8 +374,8 @@ $$;
 --
 
 CREATE FUNCTION public.user_to_id(_handle text) RETURNS bigint
-    LANGUAGE sql
-    AS $$
+	LANGUAGE sql
+	AS $$
 SELECT user_id FROM users WHERE handle = _handle LIMIT 1;
 $$;
 
@@ -385,8 +385,8 @@ $$;
 --
 
 CREATE PROCEDURE public.user_upload_file(sp_user_id bigint, INOUT sp_post_id character, sp_media_type text, sp_filename text)
-    LANGUAGE plpgsql
-    AS $$
+	LANGUAGE plpgsql
+	AS $$
 BEGIN
 
 IF sp_post_id IS NULL THEN
@@ -413,12 +413,12 @@ SET default_table_access_method = heap;
 --
 
 CREATE TABLE auth.bot_login (
-    bot_id bigint NOT NULL,
-    user_id bigint,
-    password bytea NOT NULL,
-    secret smallint NOT NULL,
-    bot_type_id smallint NOT NULL,
-    created_by bigint NOT NULL
+	bot_id bigint NOT NULL,
+	user_id bigint,
+	password bytea NOT NULL,
+	secret smallint NOT NULL,
+	bot_type_id smallint NOT NULL,
+	created_by bigint NOT NULL
 );
 
 
@@ -427,12 +427,12 @@ CREATE TABLE auth.bot_login (
 --
 
 ALTER TABLE auth.bot_login ALTER COLUMN bot_id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME auth.bot_login_bot_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
+	SEQUENCE NAME auth.bot_login_bot_id_seq
+	START WITH 1
+	INCREMENT BY 1
+	NO MINVALUE
+	NO MAXVALUE
+	CACHE 1
 );
 
 
@@ -441,8 +441,8 @@ ALTER TABLE auth.bot_login ALTER COLUMN bot_id ADD GENERATED ALWAYS AS IDENTITY 
 --
 
 CREATE TABLE auth.bot_type (
-    bot_type_id smallint NOT NULL,
-    bot_type text NOT NULL
+	bot_type_id smallint NOT NULL,
+	bot_type text NOT NULL
 );
 
 
@@ -451,12 +451,12 @@ CREATE TABLE auth.bot_type (
 --
 
 ALTER TABLE auth.bot_type ALTER COLUMN bot_type_id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME auth.bot_type_bot_type_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
+	SEQUENCE NAME auth.bot_type_bot_type_id_seq
+	START WITH 1
+	INCREMENT BY 1
+	NO MINVALUE
+	NO MAXVALUE
+	CACHE 1
 );
 
 
@@ -465,12 +465,12 @@ ALTER TABLE auth.bot_type ALTER COLUMN bot_type_id ADD GENERATED ALWAYS AS IDENT
 --
 
 CREATE TABLE auth.token_keys (
-    key_id integer NOT NULL,
-    algorithm text NOT NULL,
-    public_key bytea NOT NULL,
-    signature bytea NOT NULL,
-    issued timestamp with time zone DEFAULT now() NOT NULL,
-    expires timestamp with time zone DEFAULT (CURRENT_DATE + '30 days'::interval) NOT NULL
+	key_id integer NOT NULL,
+	algorithm text NOT NULL,
+	public_key bytea NOT NULL,
+	signature bytea NOT NULL,
+	issued timestamp with time zone DEFAULT now() NOT NULL,
+	expires timestamp with time zone DEFAULT (CURRENT_DATE + '30 days'::interval) NOT NULL
 );
 
 
@@ -479,12 +479,12 @@ CREATE TABLE auth.token_keys (
 --
 
 ALTER TABLE auth.token_keys ALTER COLUMN key_id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME auth.token_keys_key_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
+	SEQUENCE NAME auth.token_keys_key_id_seq
+	START WITH 1
+	INCREMENT BY 1
+	NO MINVALUE
+	NO MAXVALUE
+	CACHE 1
 );
 
 
@@ -493,10 +493,10 @@ ALTER TABLE auth.token_keys ALTER COLUMN key_id ADD GENERATED ALWAYS AS IDENTITY
 --
 
 CREATE TABLE auth.user_login (
-    user_id bigint NOT NULL,
-    email_hash bytea NOT NULL,
-    password bytea NOT NULL,
-    secret smallint NOT NULL
+	user_id bigint NOT NULL,
+	email_hash bytea NOT NULL,
+	password bytea NOT NULL,
+	secret smallint NOT NULL
 );
 
 
@@ -505,8 +505,8 @@ CREATE TABLE auth.user_login (
 --
 
 CREATE TABLE public.avro_schemas (
-    fingerprint bigint NOT NULL,
-    schema bytea NOT NULL
+	fingerprint bigint NOT NULL,
+	schema bytea NOT NULL
 );
 
 
@@ -515,9 +515,9 @@ CREATE TABLE public.avro_schemas (
 --
 
 CREATE TABLE public.badges (
-    badge_id smallint NOT NULL,
-    emoji text NOT NULL,
-    label text NOT NULL
+	badge_id smallint NOT NULL,
+	emoji text NOT NULL,
+	label text NOT NULL
 );
 
 
@@ -526,12 +526,12 @@ CREATE TABLE public.badges (
 --
 
 ALTER TABLE public.badges ALTER COLUMN badge_id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME public.badges_badge_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
+	SEQUENCE NAME public.badges_badge_id_seq
+	START WITH 1
+	INCREMENT BY 1
+	NO MINVALUE
+	NO MAXVALUE
+	CACHE 1
 );
 
 
@@ -540,8 +540,8 @@ ALTER TABLE public.badges ALTER COLUMN badge_id ADD GENERATED ALWAYS AS IDENTITY
 --
 
 CREATE TABLE public.banned_words (
-    word text NOT NULL,
-    context_id smallint NOT NULL
+	word text NOT NULL,
+	context_id smallint NOT NULL
 );
 
 
@@ -550,12 +550,12 @@ CREATE TABLE public.banned_words (
 --
 
 CREATE TABLE public.configs (
-    key text NOT NULL,
-    value text,
-    created_on timestamp with time zone DEFAULT now() NOT NULL,
-    updated_on timestamp with time zone DEFAULT now() NOT NULL,
-    updated_by bigint NOT NULL,
-    bytes bytea
+	key text NOT NULL,
+	value text,
+	created_on timestamp with time zone DEFAULT now() NOT NULL,
+	updated_on timestamp with time zone DEFAULT now() NOT NULL,
+	updated_by bigint NOT NULL,
+	bytes bytea
 );
 
 
@@ -564,8 +564,8 @@ CREATE TABLE public.configs (
 --
 
 CREATE TABLE public.context (
-    context_id smallint NOT NULL,
-    frame text NOT NULL
+	context_id smallint NOT NULL,
+	frame text NOT NULL
 );
 
 
@@ -574,12 +574,12 @@ CREATE TABLE public.context (
 --
 
 ALTER TABLE public.context ALTER COLUMN context_id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME public.context_context_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
+	SEQUENCE NAME public.context_context_id_seq
+	START WITH 1
+	INCREMENT BY 1
+	NO MINVALUE
+	NO MAXVALUE
+	CACHE 1
 );
 
 
@@ -588,8 +588,8 @@ ALTER TABLE public.context ALTER COLUMN context_id ADD GENERATED ALWAYS AS IDENT
 --
 
 CREATE TABLE public.following (
-    user_id bigint NOT NULL,
-    follows bigint NOT NULL
+	user_id bigint NOT NULL,
+	follows bigint NOT NULL
 );
 
 
@@ -598,9 +598,9 @@ CREATE TABLE public.following (
 --
 
 CREATE TABLE public.media_type (
-    media_type_id smallint NOT NULL,
-    file_type text NOT NULL,
-    mime_type text NOT NULL
+	media_type_id smallint NOT NULL,
+	file_type text NOT NULL,
+	mime_type text NOT NULL
 );
 
 
@@ -609,12 +609,12 @@ CREATE TABLE public.media_type (
 --
 
 ALTER TABLE public.media_type ALTER COLUMN media_type_id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME public.media_type_media_type_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
+	SEQUENCE NAME public.media_type_media_type_id_seq
+	START WITH 1
+	INCREMENT BY 1
+	NO MINVALUE
+	NO MAXVALUE
+	CACHE 1
 );
 
 
@@ -623,13 +623,13 @@ ALTER TABLE public.media_type ALTER COLUMN media_type_id ADD GENERATED ALWAYS AS
 --
 
 CREATE TABLE public.post_scores (
-    upvotes integer NOT NULL,
-    downvotes integer NOT NULL,
-    top integer NOT NULL,
-    hot double precision NOT NULL,
-    best double precision NOT NULL,
-    controversial double precision NOT NULL,
-    post_id bigint NOT NULL
+	upvotes integer NOT NULL,
+	downvotes integer NOT NULL,
+	top integer NOT NULL,
+	hot double precision NOT NULL,
+	best double precision NOT NULL,
+	controversial double precision NOT NULL,
+	post_id bigint NOT NULL
 );
 
 
@@ -638,10 +638,10 @@ CREATE TABLE public.post_scores (
 --
 
 CREATE TABLE public.post_votes (
-    user_id bigint NOT NULL,
-    upvote boolean,
-    created_on timestamp with time zone DEFAULT now() NOT NULL,
-    post_id bigint NOT NULL
+	user_id bigint NOT NULL,
+	upvote boolean,
+	created_on timestamp with time zone DEFAULT now() NOT NULL,
+	post_id bigint NOT NULL
 );
 
 
@@ -650,19 +650,19 @@ CREATE TABLE public.post_votes (
 --
 
 CREATE TABLE public.posts (
-    uploader bigint NOT NULL,
-    created_on timestamp with time zone DEFAULT now() NOT NULL,
-    updated_on timestamp with time zone DEFAULT now() NOT NULL,
-    media_type_id smallint,
-    privacy_id smallint DEFAULT public.privacy_to_id('unpublished'::text) NOT NULL,
-    title text,
-    description text,
-    filename text,
-    rating smallint DEFAULT public.rating_to_id('explicit'::text) NOT NULL,
-    width integer,
-    height integer,
-    post_id bigint NOT NULL,
-    parent bigint
+	uploader bigint NOT NULL,
+	created_on timestamp with time zone DEFAULT now() NOT NULL,
+	updated_on timestamp with time zone DEFAULT now() NOT NULL,
+	media_type_id smallint,
+	privacy_id smallint DEFAULT public.privacy_to_id('unpublished'::text) NOT NULL,
+	title text,
+	description text,
+	filename text,
+	rating smallint DEFAULT public.rating_to_id('explicit'::text) NOT NULL,
+	width integer,
+	height integer,
+	post_id bigint NOT NULL,
+	parent bigint
 );
 
 
@@ -671,8 +671,8 @@ CREATE TABLE public.posts (
 --
 
 CREATE TABLE public.privacy (
-    privacy_id smallint NOT NULL,
-    type text NOT NULL
+	privacy_id smallint NOT NULL,
+	type text NOT NULL
 );
 
 
@@ -681,12 +681,12 @@ CREATE TABLE public.privacy (
 --
 
 ALTER TABLE public.privacy ALTER COLUMN privacy_id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME public.privacy_privacy_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
+	SEQUENCE NAME public.privacy_privacy_id_seq
+	START WITH 1
+	INCREMENT BY 1
+	NO MINVALUE
+	NO MAXVALUE
+	CACHE 1
 );
 
 
@@ -695,8 +695,8 @@ ALTER TABLE public.privacy ALTER COLUMN privacy_id ADD GENERATED ALWAYS AS IDENT
 --
 
 CREATE TABLE public.ratings (
-    rating_id smallint NOT NULL,
-    rating text NOT NULL
+	rating_id smallint NOT NULL,
+	rating text NOT NULL
 );
 
 
@@ -705,12 +705,12 @@ CREATE TABLE public.ratings (
 --
 
 ALTER TABLE public.ratings ALTER COLUMN rating_id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME public.ratings_rating_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
+	SEQUENCE NAME public.ratings_rating_id_seq
+	START WITH 1
+	INCREMENT BY 1
+	NO MINVALUE
+	NO MAXVALUE
+	CACHE 1
 );
 
 
@@ -719,8 +719,8 @@ ALTER TABLE public.ratings ALTER COLUMN rating_id ADD GENERATED ALWAYS AS IDENTI
 --
 
 CREATE TABLE public.relations (
-    relation_id smallint NOT NULL,
-    relation text NOT NULL
+	relation_id smallint NOT NULL,
+	relation text NOT NULL
 );
 
 
@@ -729,12 +729,12 @@ CREATE TABLE public.relations (
 --
 
 ALTER TABLE public.relations ALTER COLUMN relation_id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME public.relations_relation_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
+	SEQUENCE NAME public.relations_relation_id_seq
+	START WITH 1
+	INCREMENT BY 1
+	NO MINVALUE
+	NO MAXVALUE
+	CACHE 1
 );
 
 
@@ -743,9 +743,9 @@ ALTER TABLE public.relations ALTER COLUMN relation_id ADD GENERATED ALWAYS AS ID
 --
 
 CREATE TABLE public.set_post (
-    set_id bigint NOT NULL,
-    post_id bigint NOT NULL,
-    index integer NOT NULL
+	set_id bigint NOT NULL,
+	post_id bigint NOT NULL,
+	index integer NOT NULL
 );
 
 
@@ -754,13 +754,13 @@ CREATE TABLE public.set_post (
 --
 
 CREATE TABLE public.sets (
-    set_id bigint NOT NULL,
-    owner bigint NOT NULL,
-    title text,
-    description text,
-    privacy smallint NOT NULL,
-    created timestamp with time zone DEFAULT now() NOT NULL,
-    updated timestamp with time zone DEFAULT now() NOT NULL
+	set_id bigint NOT NULL,
+	owner bigint NOT NULL,
+	title text,
+	description text,
+	privacy smallint NOT NULL,
+	created timestamp with time zone DEFAULT now() NOT NULL,
+	updated timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -769,8 +769,8 @@ CREATE TABLE public.sets (
 --
 
 CREATE TABLE public.tag_assist (
-    string text NOT NULL,
-    tag_id integer NOT NULL
+	string text NOT NULL,
+	tag_id integer NOT NULL
 );
 
 
@@ -779,8 +779,8 @@ CREATE TABLE public.tag_assist (
 --
 
 CREATE TABLE public.tag_blocking (
-    user_id bigint NOT NULL,
-    blocked bigint NOT NULL
+	user_id bigint NOT NULL,
+	blocked bigint NOT NULL
 );
 
 
@@ -789,8 +789,8 @@ CREATE TABLE public.tag_blocking (
 --
 
 CREATE TABLE public.tag_classes (
-    class_id smallint NOT NULL,
-    class text NOT NULL
+	class_id smallint NOT NULL,
+	class text NOT NULL
 );
 
 
@@ -799,12 +799,12 @@ CREATE TABLE public.tag_classes (
 --
 
 ALTER TABLE public.tag_classes ALTER COLUMN class_id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME public.tag_classes_class_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
+	SEQUENCE NAME public.tag_classes_class_id_seq
+	START WITH 1
+	INCREMENT BY 1
+	NO MINVALUE
+	NO MAXVALUE
+	CACHE 1
 );
 
 
@@ -813,8 +813,8 @@ ALTER TABLE public.tag_classes ALTER COLUMN class_id ADD GENERATED ALWAYS AS IDE
 --
 
 CREATE TABLE public.tag_inheritance (
-    parent integer NOT NULL,
-    child integer NOT NULL
+	parent integer NOT NULL,
+	child integer NOT NULL
 );
 
 
@@ -823,9 +823,9 @@ CREATE TABLE public.tag_inheritance (
 --
 
 CREATE TABLE public.tag_post (
-    tag_id integer NOT NULL,
-    user_id bigint NOT NULL,
-    post_id bigint NOT NULL
+	tag_id integer NOT NULL,
+	user_id bigint NOT NULL,
+	post_id bigint NOT NULL
 );
 
 
@@ -834,12 +834,12 @@ CREATE TABLE public.tag_post (
 --
 
 CREATE TABLE public.tags (
-    tag_id bigint NOT NULL,
-    tag text NOT NULL,
-    deprecated boolean DEFAULT false NOT NULL,
-    class_id smallint DEFAULT public.tag_class_to_id('misc'::text) NOT NULL,
-    owner bigint,
-    description text
+	tag_id bigint NOT NULL,
+	tag text NOT NULL,
+	deprecated boolean DEFAULT false NOT NULL,
+	class_id smallint DEFAULT public.tag_class_to_id('misc'::text) NOT NULL,
+	owner bigint,
+	description text
 );
 
 
@@ -848,12 +848,12 @@ CREATE TABLE public.tags (
 --
 
 ALTER TABLE public.tags ALTER COLUMN tag_id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME public.tags_tag_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
+	SEQUENCE NAME public.tags_tag_id_seq
+	START WITH 1
+	INCREMENT BY 1
+	NO MINVALUE
+	NO MAXVALUE
+	CACHE 1
 );
 
 
@@ -862,8 +862,8 @@ ALTER TABLE public.tags ALTER COLUMN tag_id ADD GENERATED ALWAYS AS IDENTITY (
 --
 
 CREATE TABLE public.user_badge (
-    user_id bigint NOT NULL,
-    badge_id smallint NOT NULL
+	user_id bigint NOT NULL,
+	badge_id smallint NOT NULL
 );
 
 
@@ -872,8 +872,8 @@ CREATE TABLE public.user_badge (
 --
 
 CREATE TABLE public.user_blocking (
-    user_id bigint NOT NULL,
-    blocked bigint NOT NULL
+	user_id bigint NOT NULL,
+	blocked bigint NOT NULL
 );
 
 
@@ -882,8 +882,8 @@ CREATE TABLE public.user_blocking (
 --
 
 CREATE TABLE public.user_post (
-    post_id bigint NOT NULL,
-    user_id bigint NOT NULL
+	post_id bigint NOT NULL,
+	user_id bigint NOT NULL
 );
 
 
@@ -892,18 +892,18 @@ CREATE TABLE public.user_post (
 --
 
 CREATE TABLE public.users (
-    user_id bigint NOT NULL,
-    display_name text NOT NULL,
-    handle text NOT NULL,
-    privacy_id smallint DEFAULT public.privacy_to_id('public'::text) NOT NULL,
-    description text,
-    website text,
-    created_on timestamp with time zone DEFAULT now() NOT NULL,
-    mod boolean DEFAULT false NOT NULL,
-    admin boolean DEFAULT false NOT NULL,
-    verified boolean DEFAULT false NOT NULL,
-    icon bigint,
-    banner bigint
+	user_id bigint NOT NULL,
+	display_name text NOT NULL,
+	handle text NOT NULL,
+	privacy_id smallint DEFAULT public.privacy_to_id('public'::text) NOT NULL,
+	description text,
+	website text,
+	created_on timestamp with time zone DEFAULT now() NOT NULL,
+	mod boolean DEFAULT false NOT NULL,
+	admin boolean DEFAULT false NOT NULL,
+	verified boolean DEFAULT false NOT NULL,
+	icon bigint,
+	banner bigint
 );
 
 
@@ -912,12 +912,12 @@ CREATE TABLE public.users (
 --
 
 ALTER TABLE public.users ALTER COLUMN user_id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME public.users_user_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
+	SEQUENCE NAME public.users_user_id_seq
+	START WITH 1
+	INCREMENT BY 1
+	NO MINVALUE
+	NO MAXVALUE
+	CACHE 1
 );
 
 
@@ -926,7 +926,7 @@ ALTER TABLE public.users ALTER COLUMN user_id ADD GENERATED ALWAYS AS IDENTITY (
 --
 
 ALTER TABLE ONLY auth.bot_login
-    ADD CONSTRAINT bot_login_pkey PRIMARY KEY (bot_id);
+	ADD CONSTRAINT bot_login_pkey PRIMARY KEY (bot_id);
 
 
 --
@@ -934,7 +934,7 @@ ALTER TABLE ONLY auth.bot_login
 --
 
 ALTER TABLE ONLY auth.bot_type
-    ADD CONSTRAINT bot_type_pkey PRIMARY KEY (bot_type_id);
+	ADD CONSTRAINT bot_type_pkey PRIMARY KEY (bot_type_id);
 
 
 --
@@ -942,7 +942,7 @@ ALTER TABLE ONLY auth.bot_type
 --
 
 ALTER TABLE ONLY auth.token_keys
-    ADD CONSTRAINT token_keys_key_id_key UNIQUE (key_id);
+	ADD CONSTRAINT token_keys_key_id_key UNIQUE (key_id);
 
 
 --
@@ -950,7 +950,7 @@ ALTER TABLE ONLY auth.token_keys
 --
 
 ALTER TABLE ONLY auth.token_keys
-    ADD CONSTRAINT token_keys_pkey PRIMARY KEY (algorithm, key_id);
+	ADD CONSTRAINT token_keys_pkey PRIMARY KEY (algorithm, key_id);
 
 
 --
@@ -958,7 +958,7 @@ ALTER TABLE ONLY auth.token_keys
 --
 
 ALTER TABLE ONLY auth.user_login
-    ADD CONSTRAINT user_login_email_hash_key UNIQUE (email_hash);
+	ADD CONSTRAINT user_login_email_hash_key UNIQUE (email_hash);
 
 
 --
@@ -966,7 +966,7 @@ ALTER TABLE ONLY auth.user_login
 --
 
 ALTER TABLE ONLY auth.user_login
-    ADD CONSTRAINT user_login_pkey PRIMARY KEY (user_id);
+	ADD CONSTRAINT user_login_pkey PRIMARY KEY (user_id);
 
 
 --
@@ -974,7 +974,7 @@ ALTER TABLE ONLY auth.user_login
 --
 
 ALTER TABLE ONLY public.avro_schemas
-    ADD CONSTRAINT avro_schemas_pkey PRIMARY KEY (fingerprint);
+	ADD CONSTRAINT avro_schemas_pkey PRIMARY KEY (fingerprint);
 
 
 --
@@ -982,7 +982,7 @@ ALTER TABLE ONLY public.avro_schemas
 --
 
 ALTER TABLE ONLY public.badges
-    ADD CONSTRAINT badges_pkey PRIMARY KEY (badge_id);
+	ADD CONSTRAINT badges_pkey PRIMARY KEY (badge_id);
 
 
 --
@@ -990,7 +990,7 @@ ALTER TABLE ONLY public.badges
 --
 
 ALTER TABLE ONLY public.banned_words
-    ADD CONSTRAINT banned_words_pkey PRIMARY KEY (context_id, word);
+	ADD CONSTRAINT banned_words_pkey PRIMARY KEY (context_id, word);
 
 
 --
@@ -998,7 +998,7 @@ ALTER TABLE ONLY public.banned_words
 --
 
 ALTER TABLE ONLY public.banned_words
-    ADD CONSTRAINT banned_words_word_key UNIQUE (word);
+	ADD CONSTRAINT banned_words_word_key UNIQUE (word);
 
 
 --
@@ -1006,7 +1006,7 @@ ALTER TABLE ONLY public.banned_words
 --
 
 ALTER TABLE ONLY public.configs
-    ADD CONSTRAINT configs_pkey PRIMARY KEY (key);
+	ADD CONSTRAINT configs_pkey PRIMARY KEY (key);
 
 
 --
@@ -1014,7 +1014,7 @@ ALTER TABLE ONLY public.configs
 --
 
 ALTER TABLE ONLY public.context
-    ADD CONSTRAINT context_frame_key UNIQUE (frame);
+	ADD CONSTRAINT context_frame_key UNIQUE (frame);
 
 
 --
@@ -1022,7 +1022,7 @@ ALTER TABLE ONLY public.context
 --
 
 ALTER TABLE ONLY public.context
-    ADD CONSTRAINT context_pkey PRIMARY KEY (context_id);
+	ADD CONSTRAINT context_pkey PRIMARY KEY (context_id);
 
 
 --
@@ -1030,7 +1030,7 @@ ALTER TABLE ONLY public.context
 --
 
 ALTER TABLE ONLY public.following
-    ADD CONSTRAINT following_pkey PRIMARY KEY (user_id, follows);
+	ADD CONSTRAINT following_pkey PRIMARY KEY (user_id, follows);
 
 
 --
@@ -1038,7 +1038,7 @@ ALTER TABLE ONLY public.following
 --
 
 ALTER TABLE ONLY public.media_type
-    ADD CONSTRAINT media_type_mime_type_key UNIQUE (mime_type);
+	ADD CONSTRAINT media_type_mime_type_key UNIQUE (mime_type);
 
 
 --
@@ -1046,7 +1046,7 @@ ALTER TABLE ONLY public.media_type
 --
 
 ALTER TABLE ONLY public.media_type
-    ADD CONSTRAINT media_type_pkey PRIMARY KEY (media_type_id);
+	ADD CONSTRAINT media_type_pkey PRIMARY KEY (media_type_id);
 
 
 --
@@ -1054,7 +1054,7 @@ ALTER TABLE ONLY public.media_type
 --
 
 ALTER TABLE ONLY public.media_type
-    ADD CONSTRAINT media_type_type_key UNIQUE (file_type);
+	ADD CONSTRAINT media_type_type_key UNIQUE (file_type);
 
 
 --
@@ -1062,7 +1062,7 @@ ALTER TABLE ONLY public.media_type
 --
 
 ALTER TABLE ONLY public.post_scores
-    ADD CONSTRAINT post_scores_pkey PRIMARY KEY (post_id);
+	ADD CONSTRAINT post_scores_pkey PRIMARY KEY (post_id);
 
 
 --
@@ -1070,7 +1070,7 @@ ALTER TABLE ONLY public.post_scores
 --
 
 ALTER TABLE ONLY public.post_votes
-    ADD CONSTRAINT post_votes_pkey PRIMARY KEY (user_id, post_id);
+	ADD CONSTRAINT post_votes_pkey PRIMARY KEY (user_id, post_id);
 
 
 --
@@ -1078,7 +1078,7 @@ ALTER TABLE ONLY public.post_votes
 --
 
 ALTER TABLE ONLY public.posts
-    ADD CONSTRAINT posts_id_pk UNIQUE (post_id);
+	ADD CONSTRAINT posts_id_pk UNIQUE (post_id);
 
 
 --
@@ -1086,7 +1086,7 @@ ALTER TABLE ONLY public.posts
 --
 
 ALTER TABLE ONLY public.posts
-    ADD CONSTRAINT posts_pkey PRIMARY KEY (post_id);
+	ADD CONSTRAINT posts_pkey PRIMARY KEY (post_id);
 
 
 --
@@ -1094,7 +1094,7 @@ ALTER TABLE ONLY public.posts
 --
 
 ALTER TABLE ONLY public.privacy
-    ADD CONSTRAINT privacy_pkey PRIMARY KEY (privacy_id);
+	ADD CONSTRAINT privacy_pkey PRIMARY KEY (privacy_id);
 
 
 --
@@ -1102,7 +1102,7 @@ ALTER TABLE ONLY public.privacy
 --
 
 ALTER TABLE ONLY public.privacy
-    ADD CONSTRAINT privacy_type_key UNIQUE (type);
+	ADD CONSTRAINT privacy_type_key UNIQUE (type);
 
 
 --
@@ -1110,7 +1110,7 @@ ALTER TABLE ONLY public.privacy
 --
 
 ALTER TABLE ONLY public.ratings
-    ADD CONSTRAINT ratings_pkey PRIMARY KEY (rating_id);
+	ADD CONSTRAINT ratings_pkey PRIMARY KEY (rating_id);
 
 
 --
@@ -1118,7 +1118,7 @@ ALTER TABLE ONLY public.ratings
 --
 
 ALTER TABLE ONLY public.ratings
-    ADD CONSTRAINT ratings_rating_key UNIQUE (rating);
+	ADD CONSTRAINT ratings_rating_key UNIQUE (rating);
 
 
 --
@@ -1126,7 +1126,7 @@ ALTER TABLE ONLY public.ratings
 --
 
 ALTER TABLE ONLY public.relations
-    ADD CONSTRAINT relations_pkey PRIMARY KEY (relation_id);
+	ADD CONSTRAINT relations_pkey PRIMARY KEY (relation_id);
 
 
 --
@@ -1134,7 +1134,7 @@ ALTER TABLE ONLY public.relations
 --
 
 ALTER TABLE ONLY public.relations
-    ADD CONSTRAINT relations_type_key UNIQUE (relation);
+	ADD CONSTRAINT relations_type_key UNIQUE (relation);
 
 
 --
@@ -1142,7 +1142,7 @@ ALTER TABLE ONLY public.relations
 --
 
 ALTER TABLE ONLY public.set_post
-    ADD CONSTRAINT set_post_pkey PRIMARY KEY (set_id, post_id);
+	ADD CONSTRAINT set_post_pkey PRIMARY KEY (set_id, post_id);
 
 
 --
@@ -1150,7 +1150,7 @@ ALTER TABLE ONLY public.set_post
 --
 
 ALTER TABLE ONLY public.set_post
-    ADD CONSTRAINT set_post_post_id_set_id_key UNIQUE (post_id, set_id);
+	ADD CONSTRAINT set_post_post_id_set_id_key UNIQUE (post_id, set_id);
 
 
 --
@@ -1158,7 +1158,7 @@ ALTER TABLE ONLY public.set_post
 --
 
 ALTER TABLE ONLY public.set_post
-    ADD CONSTRAINT set_post_set_id_index_post_id_key UNIQUE (set_id, index) INCLUDE (post_id);
+	ADD CONSTRAINT set_post_set_id_index_post_id_key UNIQUE (set_id, index) INCLUDE (post_id);
 
 
 --
@@ -1166,7 +1166,7 @@ ALTER TABLE ONLY public.set_post
 --
 
 ALTER TABLE ONLY public.sets
-    ADD CONSTRAINT sets_pkey PRIMARY KEY (set_id);
+	ADD CONSTRAINT sets_pkey PRIMARY KEY (set_id);
 
 
 --
@@ -1174,7 +1174,7 @@ ALTER TABLE ONLY public.sets
 --
 
 ALTER TABLE ONLY public.tag_assist
-    ADD CONSTRAINT tag_assist_pkey PRIMARY KEY (string, tag_id);
+	ADD CONSTRAINT tag_assist_pkey PRIMARY KEY (string, tag_id);
 
 
 --
@@ -1182,7 +1182,7 @@ ALTER TABLE ONLY public.tag_assist
 --
 
 ALTER TABLE ONLY public.tag_blocking
-    ADD CONSTRAINT tag_blocking_pkey PRIMARY KEY (user_id, blocked);
+	ADD CONSTRAINT tag_blocking_pkey PRIMARY KEY (user_id, blocked);
 
 
 --
@@ -1190,7 +1190,7 @@ ALTER TABLE ONLY public.tag_blocking
 --
 
 ALTER TABLE ONLY public.tag_classes
-    ADD CONSTRAINT tag_classes_class_key UNIQUE (class);
+	ADD CONSTRAINT tag_classes_class_key UNIQUE (class);
 
 
 --
@@ -1198,7 +1198,7 @@ ALTER TABLE ONLY public.tag_classes
 --
 
 ALTER TABLE ONLY public.tag_classes
-    ADD CONSTRAINT tag_classes_pkey PRIMARY KEY (class_id);
+	ADD CONSTRAINT tag_classes_pkey PRIMARY KEY (class_id);
 
 
 --
@@ -1206,7 +1206,7 @@ ALTER TABLE ONLY public.tag_classes
 --
 
 ALTER TABLE ONLY public.tag_inheritance
-    ADD CONSTRAINT tag_inheritance_pkey PRIMARY KEY (parent, child);
+	ADD CONSTRAINT tag_inheritance_pkey PRIMARY KEY (parent, child);
 
 
 --
@@ -1214,7 +1214,7 @@ ALTER TABLE ONLY public.tag_inheritance
 --
 
 ALTER TABLE ONLY public.tag_post
-    ADD CONSTRAINT tag_post_pkey PRIMARY KEY (post_id, tag_id);
+	ADD CONSTRAINT tag_post_pkey PRIMARY KEY (post_id, tag_id);
 
 
 --
@@ -1222,7 +1222,7 @@ ALTER TABLE ONLY public.tag_post
 --
 
 ALTER TABLE ONLY public.tags
-    ADD CONSTRAINT tags_pkey PRIMARY KEY (tag_id);
+	ADD CONSTRAINT tags_pkey PRIMARY KEY (tag_id);
 
 
 --
@@ -1230,7 +1230,7 @@ ALTER TABLE ONLY public.tags
 --
 
 ALTER TABLE ONLY public.tags
-    ADD CONSTRAINT tags_tag_key UNIQUE (tag);
+	ADD CONSTRAINT tags_tag_key UNIQUE (tag);
 
 
 --
@@ -1238,7 +1238,7 @@ ALTER TABLE ONLY public.tags
 --
 
 ALTER TABLE ONLY public.user_badge
-    ADD CONSTRAINT user_badge_pkey PRIMARY KEY (user_id, badge_id);
+	ADD CONSTRAINT user_badge_pkey PRIMARY KEY (user_id, badge_id);
 
 
 --
@@ -1246,7 +1246,7 @@ ALTER TABLE ONLY public.user_badge
 --
 
 ALTER TABLE ONLY public.user_blocking
-    ADD CONSTRAINT user_blocking_pkey PRIMARY KEY (user_id, blocked);
+	ADD CONSTRAINT user_blocking_pkey PRIMARY KEY (user_id, blocked);
 
 
 --
@@ -1254,7 +1254,7 @@ ALTER TABLE ONLY public.user_blocking
 --
 
 ALTER TABLE ONLY public.user_post
-    ADD CONSTRAINT user_post_pkey PRIMARY KEY (post_id, user_id);
+	ADD CONSTRAINT user_post_pkey PRIMARY KEY (post_id, user_id);
 
 
 --
@@ -1262,7 +1262,7 @@ ALTER TABLE ONLY public.user_post
 --
 
 ALTER TABLE ONLY public.users
-    ADD CONSTRAINT users_pkey PRIMARY KEY (user_id);
+	ADD CONSTRAINT users_pkey PRIMARY KEY (user_id);
 
 
 --
@@ -1347,7 +1347,7 @@ CREATE UNIQUE INDEX users_handle_key ON public.users USING btree (lower(handle))
 --
 
 ALTER TABLE ONLY auth.bot_login
-    ADD CONSTRAINT bot_login_bot_type_id_fkey FOREIGN KEY (bot_type_id) REFERENCES auth.bot_type(bot_type_id);
+	ADD CONSTRAINT bot_login_bot_type_id_fkey FOREIGN KEY (bot_type_id) REFERENCES auth.bot_type(bot_type_id);
 
 
 --
@@ -1355,7 +1355,7 @@ ALTER TABLE ONLY auth.bot_login
 --
 
 ALTER TABLE ONLY auth.bot_login
-    ADD CONSTRAINT bot_login_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(user_id);
+	ADD CONSTRAINT bot_login_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(user_id);
 
 
 --
@@ -1363,7 +1363,7 @@ ALTER TABLE ONLY auth.bot_login
 --
 
 ALTER TABLE ONLY auth.bot_login
-    ADD CONSTRAINT user_id_fk FOREIGN KEY (user_id) REFERENCES public.users(user_id);
+	ADD CONSTRAINT user_id_fk FOREIGN KEY (user_id) REFERENCES public.users(user_id);
 
 
 --
@@ -1371,7 +1371,7 @@ ALTER TABLE ONLY auth.bot_login
 --
 
 ALTER TABLE ONLY auth.user_login
-    ADD CONSTRAINT user_login_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id);
+	ADD CONSTRAINT user_login_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id);
 
 
 --
@@ -1379,7 +1379,7 @@ ALTER TABLE ONLY auth.user_login
 --
 
 ALTER TABLE ONLY public.banned_words
-    ADD CONSTRAINT banned_words_context_id_fkey FOREIGN KEY (context_id) REFERENCES public.context(context_id);
+	ADD CONSTRAINT banned_words_context_id_fkey FOREIGN KEY (context_id) REFERENCES public.context(context_id);
 
 
 --
@@ -1387,7 +1387,7 @@ ALTER TABLE ONLY public.banned_words
 --
 
 ALTER TABLE ONLY public.configs
-    ADD CONSTRAINT configs_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.users(user_id);
+	ADD CONSTRAINT configs_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.users(user_id);
 
 
 --
@@ -1395,7 +1395,7 @@ ALTER TABLE ONLY public.configs
 --
 
 ALTER TABLE ONLY public.user_badge
-    ADD CONSTRAINT fk_badge_id FOREIGN KEY (badge_id) REFERENCES public.badges(badge_id);
+	ADD CONSTRAINT fk_badge_id FOREIGN KEY (badge_id) REFERENCES public.badges(badge_id);
 
 
 --
@@ -1403,7 +1403,7 @@ ALTER TABLE ONLY public.user_badge
 --
 
 ALTER TABLE ONLY public.user_badge
-    ADD CONSTRAINT fk_user_id FOREIGN KEY (user_id) REFERENCES public.users(user_id);
+	ADD CONSTRAINT fk_user_id FOREIGN KEY (user_id) REFERENCES public.users(user_id);
 
 
 --
@@ -1411,7 +1411,7 @@ ALTER TABLE ONLY public.user_badge
 --
 
 ALTER TABLE ONLY public.following
-    ADD CONSTRAINT following_follows_fkey FOREIGN KEY (follows) REFERENCES public.users(user_id);
+	ADD CONSTRAINT following_follows_fkey FOREIGN KEY (follows) REFERENCES public.users(user_id);
 
 
 --
@@ -1419,7 +1419,7 @@ ALTER TABLE ONLY public.following
 --
 
 ALTER TABLE ONLY public.following
-    ADD CONSTRAINT following_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id);
+	ADD CONSTRAINT following_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id);
 
 
 --
@@ -1427,7 +1427,7 @@ ALTER TABLE ONLY public.following
 --
 
 ALTER TABLE ONLY public.post_scores
-    ADD CONSTRAINT post_scores_post_id_int_fkey FOREIGN KEY (post_id) REFERENCES public.posts(post_id);
+	ADD CONSTRAINT post_scores_post_id_int_fkey FOREIGN KEY (post_id) REFERENCES public.posts(post_id);
 
 
 --
@@ -1435,7 +1435,7 @@ ALTER TABLE ONLY public.post_scores
 --
 
 ALTER TABLE ONLY public.post_votes
-    ADD CONSTRAINT post_votes_post_id_int_fkey FOREIGN KEY (post_id) REFERENCES public.posts(post_id);
+	ADD CONSTRAINT post_votes_post_id_int_fkey FOREIGN KEY (post_id) REFERENCES public.posts(post_id);
 
 
 --
@@ -1443,7 +1443,7 @@ ALTER TABLE ONLY public.post_votes
 --
 
 ALTER TABLE ONLY public.post_votes
-    ADD CONSTRAINT post_votes_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id);
+	ADD CONSTRAINT post_votes_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id);
 
 
 --
@@ -1451,7 +1451,7 @@ ALTER TABLE ONLY public.post_votes
 --
 
 ALTER TABLE ONLY public.posts
-    ADD CONSTRAINT posts_media_type_id_fkey FOREIGN KEY (media_type_id) REFERENCES public.media_type(media_type_id);
+	ADD CONSTRAINT posts_media_type_id_fkey FOREIGN KEY (media_type_id) REFERENCES public.media_type(media_type_id);
 
 
 --
@@ -1459,7 +1459,7 @@ ALTER TABLE ONLY public.posts
 --
 
 ALTER TABLE ONLY public.posts
-    ADD CONSTRAINT posts_parent_int_fkey FOREIGN KEY (parent) REFERENCES public.posts(post_id);
+	ADD CONSTRAINT posts_parent_int_fkey FOREIGN KEY (parent) REFERENCES public.posts(post_id);
 
 
 --
@@ -1467,7 +1467,7 @@ ALTER TABLE ONLY public.posts
 --
 
 ALTER TABLE ONLY public.posts
-    ADD CONSTRAINT posts_privacy_id_fkey FOREIGN KEY (privacy_id) REFERENCES public.privacy(privacy_id);
+	ADD CONSTRAINT posts_privacy_id_fkey FOREIGN KEY (privacy_id) REFERENCES public.privacy(privacy_id);
 
 
 --
@@ -1475,7 +1475,7 @@ ALTER TABLE ONLY public.posts
 --
 
 ALTER TABLE ONLY public.posts
-    ADD CONSTRAINT posts_rating_fkey FOREIGN KEY (rating) REFERENCES public.ratings(rating_id);
+	ADD CONSTRAINT posts_rating_fkey FOREIGN KEY (rating) REFERENCES public.ratings(rating_id);
 
 
 --
@@ -1483,7 +1483,7 @@ ALTER TABLE ONLY public.posts
 --
 
 ALTER TABLE ONLY public.posts
-    ADD CONSTRAINT posts_uploader_fkey FOREIGN KEY (uploader) REFERENCES public.users(user_id);
+	ADD CONSTRAINT posts_uploader_fkey FOREIGN KEY (uploader) REFERENCES public.users(user_id);
 
 
 --
@@ -1491,7 +1491,7 @@ ALTER TABLE ONLY public.posts
 --
 
 ALTER TABLE ONLY public.set_post
-    ADD CONSTRAINT set_post_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(post_id);
+	ADD CONSTRAINT set_post_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(post_id);
 
 
 --
@@ -1499,7 +1499,7 @@ ALTER TABLE ONLY public.set_post
 --
 
 ALTER TABLE ONLY public.set_post
-    ADD CONSTRAINT set_post_set_id_fkey FOREIGN KEY (set_id) REFERENCES public.sets(set_id);
+	ADD CONSTRAINT set_post_set_id_fkey FOREIGN KEY (set_id) REFERENCES public.sets(set_id);
 
 
 --
@@ -1507,7 +1507,7 @@ ALTER TABLE ONLY public.set_post
 --
 
 ALTER TABLE ONLY public.sets
-    ADD CONSTRAINT sets_owner_fkey FOREIGN KEY (owner) REFERENCES public.users(user_id);
+	ADD CONSTRAINT sets_owner_fkey FOREIGN KEY (owner) REFERENCES public.users(user_id);
 
 
 --
@@ -1515,7 +1515,7 @@ ALTER TABLE ONLY public.sets
 --
 
 ALTER TABLE ONLY public.sets
-    ADD CONSTRAINT sets_privacy_fkey FOREIGN KEY (privacy) REFERENCES public.privacy(privacy_id);
+	ADD CONSTRAINT sets_privacy_fkey FOREIGN KEY (privacy) REFERENCES public.privacy(privacy_id);
 
 
 --
@@ -1523,7 +1523,7 @@ ALTER TABLE ONLY public.sets
 --
 
 ALTER TABLE ONLY public.tag_assist
-    ADD CONSTRAINT tag_assist_tag_id_fkey FOREIGN KEY (tag_id) REFERENCES public.tags(tag_id);
+	ADD CONSTRAINT tag_assist_tag_id_fkey FOREIGN KEY (tag_id) REFERENCES public.tags(tag_id);
 
 
 --
@@ -1531,7 +1531,7 @@ ALTER TABLE ONLY public.tag_assist
 --
 
 ALTER TABLE ONLY public.tag_blocking
-    ADD CONSTRAINT tag_blocking_blocked_fkey FOREIGN KEY (blocked) REFERENCES public.tags(tag_id);
+	ADD CONSTRAINT tag_blocking_blocked_fkey FOREIGN KEY (blocked) REFERENCES public.tags(tag_id);
 
 
 --
@@ -1539,7 +1539,7 @@ ALTER TABLE ONLY public.tag_blocking
 --
 
 ALTER TABLE ONLY public.tag_blocking
-    ADD CONSTRAINT tag_blocking_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id);
+	ADD CONSTRAINT tag_blocking_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id);
 
 
 --
@@ -1547,7 +1547,7 @@ ALTER TABLE ONLY public.tag_blocking
 --
 
 ALTER TABLE ONLY public.tag_inheritance
-    ADD CONSTRAINT tag_inheritance_child_fkey FOREIGN KEY (child) REFERENCES public.tags(tag_id);
+	ADD CONSTRAINT tag_inheritance_child_fkey FOREIGN KEY (child) REFERENCES public.tags(tag_id);
 
 
 --
@@ -1555,7 +1555,7 @@ ALTER TABLE ONLY public.tag_inheritance
 --
 
 ALTER TABLE ONLY public.tag_inheritance
-    ADD CONSTRAINT tag_inheritance_parent_fkey FOREIGN KEY (parent) REFERENCES public.tags(tag_id);
+	ADD CONSTRAINT tag_inheritance_parent_fkey FOREIGN KEY (parent) REFERENCES public.tags(tag_id);
 
 
 --
@@ -1563,7 +1563,7 @@ ALTER TABLE ONLY public.tag_inheritance
 --
 
 ALTER TABLE ONLY public.tag_post
-    ADD CONSTRAINT tag_post_post_id_int_fkey FOREIGN KEY (post_id) REFERENCES public.posts(post_id);
+	ADD CONSTRAINT tag_post_post_id_int_fkey FOREIGN KEY (post_id) REFERENCES public.posts(post_id);
 
 
 --
@@ -1571,7 +1571,7 @@ ALTER TABLE ONLY public.tag_post
 --
 
 ALTER TABLE ONLY public.tag_post
-    ADD CONSTRAINT tag_post_tag_id_fkey FOREIGN KEY (tag_id) REFERENCES public.tags(tag_id);
+	ADD CONSTRAINT tag_post_tag_id_fkey FOREIGN KEY (tag_id) REFERENCES public.tags(tag_id);
 
 
 --
@@ -1579,7 +1579,7 @@ ALTER TABLE ONLY public.tag_post
 --
 
 ALTER TABLE ONLY public.tag_post
-    ADD CONSTRAINT tag_post_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id);
+	ADD CONSTRAINT tag_post_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id);
 
 
 --
@@ -1587,7 +1587,7 @@ ALTER TABLE ONLY public.tag_post
 --
 
 ALTER TABLE ONLY public.tags
-    ADD CONSTRAINT tags_class_ic_fkey FOREIGN KEY (class_id) REFERENCES public.tag_classes(class_id);
+	ADD CONSTRAINT tags_class_ic_fkey FOREIGN KEY (class_id) REFERENCES public.tag_classes(class_id);
 
 
 --
@@ -1595,7 +1595,7 @@ ALTER TABLE ONLY public.tags
 --
 
 ALTER TABLE ONLY public.tags
-    ADD CONSTRAINT tags_owner_fkey FOREIGN KEY (owner) REFERENCES public.users(user_id);
+	ADD CONSTRAINT tags_owner_fkey FOREIGN KEY (owner) REFERENCES public.users(user_id);
 
 
 --
@@ -1603,7 +1603,7 @@ ALTER TABLE ONLY public.tags
 --
 
 ALTER TABLE ONLY public.user_blocking
-    ADD CONSTRAINT user_blocking_blocked_fkey FOREIGN KEY (blocked) REFERENCES public.users(user_id);
+	ADD CONSTRAINT user_blocking_blocked_fkey FOREIGN KEY (blocked) REFERENCES public.users(user_id);
 
 
 --
@@ -1611,7 +1611,7 @@ ALTER TABLE ONLY public.user_blocking
 --
 
 ALTER TABLE ONLY public.user_blocking
-    ADD CONSTRAINT user_blocking_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id);
+	ADD CONSTRAINT user_blocking_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id);
 
 
 --
@@ -1619,7 +1619,7 @@ ALTER TABLE ONLY public.user_blocking
 --
 
 ALTER TABLE ONLY public.user_post
-    ADD CONSTRAINT user_post_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(post_id);
+	ADD CONSTRAINT user_post_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(post_id);
 
 
 --
@@ -1627,7 +1627,7 @@ ALTER TABLE ONLY public.user_post
 --
 
 ALTER TABLE ONLY public.user_post
-    ADD CONSTRAINT user_post_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id);
+	ADD CONSTRAINT user_post_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id);
 
 
 --
@@ -1635,7 +1635,7 @@ ALTER TABLE ONLY public.user_post
 --
 
 ALTER TABLE ONLY public.users
-    ADD CONSTRAINT users_banner_int_fkey FOREIGN KEY (banner) REFERENCES public.posts(post_id);
+	ADD CONSTRAINT users_banner_int_fkey FOREIGN KEY (banner) REFERENCES public.posts(post_id);
 
 
 --
@@ -1643,7 +1643,7 @@ ALTER TABLE ONLY public.users
 --
 
 ALTER TABLE ONLY public.users
-    ADD CONSTRAINT users_icon_int_fkey FOREIGN KEY (icon) REFERENCES public.posts(post_id);
+	ADD CONSTRAINT users_icon_int_fkey FOREIGN KEY (icon) REFERENCES public.posts(post_id);
 
 
 --
@@ -1651,7 +1651,7 @@ ALTER TABLE ONLY public.users
 --
 
 ALTER TABLE ONLY public.users
-    ADD CONSTRAINT users_privacy_id_fkey FOREIGN KEY (privacy_id) REFERENCES public.privacy(privacy_id);
+	ADD CONSTRAINT users_privacy_id_fkey FOREIGN KEY (privacy_id) REFERENCES public.privacy(privacy_id);
 
 
 --

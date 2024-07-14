@@ -1,6 +1,6 @@
 from asyncio import Task, ensure_future, wait
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Self, Sequence, Tuple
 
 from psycopg2.errors import NotNullViolation, UniqueViolation
 
@@ -20,14 +20,15 @@ PostsBody = { 'sort': 'new', 'count': 64, 'page': 1 }
 Misc: TagGroupPortable = TagGroupPortable('misc')
 CountKVS: KeyValueStore = KeyValueStore('kheina', 'tag_count')
 TagKVS: KeyValueStore = KeyValueStore('kheina', 'tags')
+BlockingKVS: KeyValueStore = KeyValueStore('kheina', 'blocking', local_TTL=30)
 
 
 class Tags(SqlInterface) :
 
 	# TODO: figure out a way that we can increase this TTL (updating inheritance won't be reflected in cache)
-	@timed.link
+	@timed
 	@AerospikeCache('kheina', 'tags', 'post.{post_id}', TTL_minutes=1, _kvs=TagKVS)
-	async def _fetch_tags_by_post(self, post_id: PostId) -> TagGroups :
+	async def _fetch_tags_by_post(self: Self, post_id: PostId) -> TagGroups :
 		data = await self.query_async("""
 			SELECT tag_classes.class, array_agg(tags.tag)
 			FROM kheina.public.tag_post
@@ -54,7 +55,7 @@ class Tags(SqlInterface) :
 
 
 	@AerospikeCache('kheina', 'tag_count', '{tag}', _kvs=CountKVS)
-	async def tagCount(self, tag: str) -> int :
+	async def tagCount(self: Self, tag: str) -> int :
 		data = await self.query_async("""
 			SELECT COUNT(1)
 			FROM kheina.public.tags
@@ -73,3 +74,71 @@ class Tags(SqlInterface) :
 			return 0
 
 		return data[0]
+
+
+	@timed
+	@AerospikeCache('kheina', 'blocking', 'tags.{user_id}', _kvs=BlockingKVS)
+	async def _user_blocked_tags(self: Self, user_id: int) -> TagGroups :
+		data: list[tuple[str, list[str]]] = await self.query_async("""
+			SELECT
+				tag_classes.class,
+				array_agg(tags.tag)
+			FROM kheina.public.tag_blocking
+				INNER JOIN tags
+					ON tags.tag_id = tag_blocking.blocked
+				INNER JOIN tag_classes
+					ON tag_classes.class_id = tags.class_id
+			WHERE tag_blocking.user_id = %s
+			GROUP BY tag_classes.class_id, tags.class_id;
+			""", (
+				user_id,
+			),
+			fetch_all=True,
+		)
+
+		if not data :
+			return TagGroups()
+
+		return TagGroups({
+			TagGroupPortable(i[0]): sorted(filter(None, i[1]))
+			for i in data
+			if i[0]
+		})
+
+
+	@timed
+	async def _update_blocked_tags(self: Self, user_id: int, tags: Sequence[str]) -> None :
+		blocked: set[str] = set(flatten(await self._user_blocked_tags(user_id)))
+		t        = set(tags)
+		adding   = t - blocked
+		removing = blocked - t
+
+		async with self.transaction() as transaction :
+			if adding :
+				await transaction.query_async("""
+					INSERT INTO kheina.public.tag_blocking
+					(user_id, blocked)
+					SELECT
+						%s,
+						tag_id
+					FROM tags
+					WHERE tags.tag = any(%s);
+					""", (
+						user_id,
+						list(adding),
+					),
+				)
+
+			if removing :
+				await transaction.query_async("""
+					DELETE FROM kheina.public.tag_blocking
+					where user_id = %s AND tags.tag = any(%s);
+					""", (
+						user_id,
+						list(removing),
+					),
+				)
+
+			if adding or removing :
+				transaction.commit()
+				await BlockingKVS.remove_async(f'tags.{user_id}')

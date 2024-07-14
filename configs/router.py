@@ -7,7 +7,7 @@ from shared.auth import Scope
 from shared.server import Request
 
 from .configs import Configs
-from .models import BannerResponse, CostsStore, FundingResponse, UpdateConfigRequest, UserConfigRequest, UserConfigResponse
+from .models import BannerResponse, ConfigType, CostsStore, FundingResponse, UpdateConfigRequest, UserConfigRequest, UserConfigResponse
 
 
 app = APIRouter(
@@ -37,12 +37,12 @@ async def shutdown() :
 ##################################################  PUBLIC  ##################################################
 @app.get('/banner', response_model=BannerResponse)
 async def v1Banner() -> BannerResponse :
-	return await configs.getConfig('banner')
+	return await configs.getConfig(ConfigType.banner, BannerResponse)
 
 
 @app.get('/funding', response_model=FundingResponse)
 async def v1Funding() -> FundingResponse :
-	costs: Task[CostsStore] = ensure_future(configs.getConfig('costs'))
+	costs: Task[CostsStore] = ensure_future(configs.getConfig(ConfigType.costs, CostsStore))
 	return FundingResponse(
 		funds=configs.getFunding(),
 		costs=(await costs).costs,

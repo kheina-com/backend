@@ -4,6 +4,7 @@ from re import compile as re_compile
 from psycopg2.errors import UniqueViolation
 
 from authenticator.authenticator import Authenticator
+from authenticator.models import LoginResponse, TokenResponse
 from shared.auth import KhUser, browserFingerprint, verifyToken
 from shared.config.constants import environment
 from shared.email import Button, sendEmail
@@ -12,8 +13,6 @@ from shared.hashing import Hashable
 from shared.models.user import User
 from shared.server import Request
 from shared.sql import SqlInterface
-
-from authenticator.models import LoginResponse, TokenResponse
 
 
 auth = Authenticator()

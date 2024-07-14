@@ -8,7 +8,6 @@ from time import time
 from typing import Any, Callable, Dict, Hashable, Iterable, Optional, Set, Tuple
 
 from ..timing import timed
-
 from ..utilities import __clear_cache__
 from .key_value_store import KeyValueStore
 

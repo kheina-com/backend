@@ -1,14 +1,12 @@
 from asyncio import Task, ensure_future
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from shared.auth import KhUser
-from shared.caching import AerospikeCache, SimpleCache
-from shared.caching.key_value_store import KeyValueStore
+from shared.caching import SimpleCache
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
 from shared.models.user import Badge, InternalUser, User, UserPrivacy, Verified
-from shared.sql import SqlInterface
 
-from .repository import FollowKVS, UserKVS, Users, privacy_map # type: ignore
+from .repository import FollowKVS, UserKVS, Users, privacy_map  # type: ignore
 
 
 class Users(Users) :
@@ -76,7 +74,7 @@ class Users(Users) :
 			iuser.name = name
 
 		if privacy is not None :
-			p = privacy_map[privacy]
+			p = await privacy_map.get(privacy)
 			assert isinstance(p, int)
 			iuser.privacy = p
 
@@ -131,7 +129,7 @@ class Users(Users) :
 			User(
 				name = row[0],
 				handle = row[1],
-				privacy = self._validate_privacy(privacy_map[row[2]]),
+				privacy = self._validate_privacy(await privacy_map.get(row[2])),
 				icon = row[3],
 				banner = row[7],
 				website = row[4],
@@ -185,7 +183,7 @@ class Users(Users) :
 		iuser: InternalUser = await iuser_task
 
 		if len(iuser.badges) >= 3 :
-			raise BadRequest(f'user already has the maximum amount of badges allowed.')
+			raise BadRequest('user already has the maximum amount of badges allowed.')
 
 		await self.query_async("""
 			INSERT INTO kheina.public.user_badge
@@ -215,7 +213,7 @@ class Users(Users) :
 			iuser.badges.remove(badge)
 
 		except ValueError :
-			raise BadRequest(f'user does not have that badge.')
+			raise BadRequest('user does not have that badge.')
 
 		await self.query_async("""
 			DELETE FROM kheina.public.user_badge

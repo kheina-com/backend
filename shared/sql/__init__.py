@@ -1,14 +1,13 @@
 from asyncio import get_event_loop
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field, is_dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache, partial
-from logging import DEBUG
 from random import randbytes
 from re import compile
 from threading import Lock
 from types import TracebackType
-from typing import Any, Awaitable, Callable, Dict, Hashable, List, Optional, Self, Tuple, Type, Union
+from typing import Any, Awaitable, Callable, Dict, Hashable, List, Optional, Protocol, Self, Tuple, Type, Union
 
 from psycopg2 import Binary
 from psycopg2 import connect as dbConnect
@@ -23,7 +22,6 @@ from ..config.credentials import fetch
 from ..logging import Logger, getLogger
 from ..timing import Timer, timed
 from .query import Field, Insert, Operator, Query, Table, Update, Value, Where
-from typing import Protocol
 
 
 _orm_regex = compile(r'orm:"([^\n]*?)(?<!\\)"')
@@ -112,6 +110,8 @@ class Conn :
 # really be an issue I don't think
 # TODO: add connection culling so that if the total number of connections aren't
 # being used very often, they can be closed and resources reclaimed
+# TODO: create async connections when conn_async and have two pools rather than
+# only having sync connections
 class ConnectionPool :
 
 	total:     int

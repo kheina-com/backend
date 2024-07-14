@@ -10,7 +10,6 @@ from avro_schema_repository.schema_repository import SchemaRepository
 from avrofastapi.schema import convert_schema
 from avrofastapi.serialization import AvroDeserializer, AvroSerializer, Schema, parse_avro_schema
 from shared.auth import KhUser
-from shared.base64 import b64decode
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.constants import environment
@@ -26,7 +25,6 @@ repo: SchemaRepository = SchemaRepository()
 PatreonClient: PatreonApi = PatreonApi(fetch('creator_access_token', str))
 KVS: KeyValueStore = KeyValueStore('kheina', 'configs', local_TTL=60)
 UserConfigSerializer: AvroSerializer = AvroSerializer(UserConfig)
-UserConfigKeyFormat: str = 'user_config.{user_id}'
 AvroMarker: bytes = b'\xC3\x01'
 ColorRegex: Pattern = re_compile(r'^(?:#(?P<hex>[a-f0-9]{8}|[a-f0-9]{6})|(?P<var>[a-z0-9-]+))$')
 PropValidators: Dict[CssProperty, Pattern] = {
@@ -75,7 +73,7 @@ class Configs(SqlInterface) :
 
 	@HttpErrorHandler('retrieving config')
 	@AerospikeCache('kheina', 'configs', '{config}', _kvs=KVS)
-	async def getConfig(self, config: ConfigType) -> BaseModel :
+	async def getConfig[T: BaseModel](self, config: ConfigType, _: Type[T]) -> T :
 		data: List[bytes] = await self.query_async("""
 			SELECT bytes
 			FROM kheina.public.configs
@@ -119,34 +117,35 @@ class Configs(SqlInterface) :
 		KVS.put(config, value)
 
 
-	def _validateColors(css_properties: Optional[Dict[CssProperty, str]]) -> Optional[Dict[CssProperty, Union[str, int]]] :
+	@staticmethod
+	def _validateColors(css_properties: Optional[Dict[CssProperty, str]]) -> Optional[Dict[str, Union[str, int]]] :
 		if not css_properties :
 			return None
 
-		output: Dict[CssProperty, Union[str, int]] = { }
+		output: Dict[str, Union[str, int]] = { }
 
 		# color input is very strict
 		for prop, value in css_properties.items() :
 			if prop in PropValidators :
 				if PropValidators[prop].match(value) :
-					output[prop.value.replace('_', '-')] = value
+					output[prop.value] = value
 					continue
 
 				else :
 					raise BadRequest(f'{value} is not a valid value. when setting a background property, value must be a valid value for that property')
 
-			color: str = prop.value.replace('_', '-')
+			color = CssProperty(prop.value.replace('_', '-'))
 
-			match: Match[str] = ColorRegex.match(value)
+			match: Optional[Match[str]] = ColorRegex.match(value)
 			if not match :
 				raise BadRequest(f'{value} is not a valid color. value must be in the form "#xxxxxx", "#xxxxxxxx", or the name of another color variable (without the preceding deshes)')
 
 			if match.group('hex') :
 				if len(match.group('hex')) == 6 :
-					output[color] = int(match.group('hex') + 'ff', 16)
+					output[color.value] = int(match.group('hex') + 'ff', 16)
 
 				elif len(match.group('hex')) == 8 :
-					output[color] = int(match.group('hex') + 'ff', 16)
+					output[color.value] = int(match.group('hex'), 16)
 
 				else :
 					raise BadRequest(f'{value} is not a valid color. value must be in the form "#xxxxxx", "#xxxxxxxx", or the name of another color variable (without the preceding deshes)')
@@ -154,7 +153,7 @@ class Configs(SqlInterface) :
 			else :
 				c: str = match.group('var').replace('-', '_')
 				if c in CssProperty._member_map_ :
-					output[color] = CssProperty[c]
+					output[color.value] = c
 
 				else :
 					raise BadRequest(f'{value} is not a valid color. value must be in the form "#xxxxxx", "#xxxxxxxx", or the name of another color variable (without the preceding deshes)')
@@ -166,7 +165,7 @@ class Configs(SqlInterface) :
 	async def setUserConfig(self, user: KhUser, value: UserConfigRequest) -> None :
 		user_config: UserConfig = UserConfig(
 			blocking_behavior=value.blocking_behavior,
-			blocked_tags=value.blocked_tags,
+			blocked_tags=list(map(list, value.blocked_tags)) if value.blocked_tags else None,
 			# TODO: internal tokens need to be added so that we can convert handles to user ids
 			blocked_users=None,
 			wallpaper=value.wallpaper,
@@ -185,8 +184,7 @@ class Configs(SqlInterface) :
 					updated = now(),
 					bytes = %s,
 					updated_by = %s;
-			""",
-			(
+			""", (
 				config_key, data, user.user_id,
 				data, user.user_id,
 			),
@@ -223,7 +221,7 @@ class Configs(SqlInterface) :
 
 		return UserConfigResponse(
 			blocking_behavior=user_config.blocking_behavior,
-			blocked_tags=user_config.blocked_tags,
+			blocked_tags=list(map(set, user_config.blocked_tags)) if user_config.blocked_tags else [],
 			# TODO: internal tokens need to be added so that we can convert user ids to handles
 			blocked_users=None,
 			wallpaper=user_config.wallpaper.decode() if user_config.wallpaper else None,
@@ -239,7 +237,9 @@ class Configs(SqlInterface) :
 
 		css_properties: str = ''
 
-		for name, value in user_config.css_properties.items() :
+		for key, value in user_config.css_properties.items() :
+			name = key.replace("_", "-")
+
 			if isinstance(value, int) :
 				css_properties += f'--{name}:#{value:08x} !important;'
 

@@ -199,7 +199,7 @@ class Users(SqlInterface) :
 		return User(
 			name        = iuser.name,
 			handle      = iuser.handle,
-			privacy     = self._validate_privacy(privacy_map[iuser.privacy]),
+			privacy     = self._validate_privacy(await privacy_map.get(iuser.privacy)),
 			icon        = iuser.icon,
 			banner      = iuser.banner,
 			website     = iuser.website,
@@ -221,7 +221,7 @@ class Users(SqlInterface) :
 		return UserPortable(
 			name      = iuser.name,
 			handle    = iuser.handle,
-			privacy   = self._validate_privacy(privacy_map[iuser.privacy]),
+			privacy   = self._validate_privacy(await privacy_map.get(iuser.privacy)),
 			icon      = iuser.icon,
 			verified  = iuser.verified,
 			following = following,

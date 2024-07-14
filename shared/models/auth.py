@@ -68,7 +68,7 @@ class TokenMetadata(BaseModel) :
 
 @unique
 class AuthAlgorithm(Enum) :
-	ed25519: str = 'ed25519'
+	ed25519 = 'ed25519'
 
 
 class TokenResponse(BaseModel) :

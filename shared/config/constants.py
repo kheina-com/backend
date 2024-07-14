@@ -4,10 +4,10 @@ from os import environ
 
 @unique
 class Environment(Enum) :
-	local: str = 'local'
-	dev: str = 'dev'
-	prod: str = 'prod'
-	test: str = 'test'
+	local = 'local'
+	dev   = 'dev'
+	prod  = 'prod'
+	test  = 'test'
 
 	def is_local(self) :
 		return self == Environment.local

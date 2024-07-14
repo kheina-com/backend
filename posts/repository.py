@@ -1,21 +1,19 @@
 from asyncio import Task, ensure_future
 from collections import defaultdict
 from dataclasses import dataclass
-from math import ceil
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Self, Set, Tuple, Union
+from typing import Callable, Dict, List, Mapping, Optional, Self, Tuple, Union
 
-from pydantic import BaseModel
+from cache import AsyncLRU
 
-from sets.models import InternalSet
 from shared.auth import KhUser, Scope
-from shared.caching import AerospikeCache, ArgsCache, SimpleCache
+from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.datetime import datetime
-from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
+from shared.exceptions.http_error import BadRequest, NotFound
 from shared.maps import privacy_map
-from shared.models.user import InternalUser, UserPortable, UserPrivacy, Verified
+from shared.models.user import InternalUser, UserPortable, Verified
 from shared.sql import SqlInterface
-from shared.sql.query import Field, Join, JoinType, Operator, Order, Query, Table, Value, Where
+from shared.sql.query import Field, Query
 from shared.timing import timed
 from shared.utilities import flatten
 from tags.models import TagGroups
@@ -23,7 +21,7 @@ from tags.repository import Tags
 from users.repository import FollowKVS, UserKVS, Users, badge_map
 
 from .blocking import is_post_blocked
-from .models import InternalPost, InternalScore, MediaType, Post, PostId, PostSize, PostSort, Privacy, Rating, Score, SearchResults
+from .models import InternalPost, InternalScore, MediaType, Post, PostId, PostSize, Privacy, Rating, Score
 from .scoring import confidence, controversial, hot
 
 
@@ -34,12 +32,12 @@ users = Users()
 tagger = Tags()
 
 
-class RatingMap(SqlInterface, Dict[Union[int, Rating], Union[Rating, int]]) :
+class RatingMap(SqlInterface) :
 
-	@timed
-	def __missing__(self, key: Union[int, str, Rating]) -> Union[int, Rating] :
+	@AsyncLRU(maxsize=0)
+	async def get(self, key: Union[int, str, Rating]) -> Union[int, Rating] :
 		if isinstance(key, int) :
-			d1: Tuple[str] = self.query(f"""
+			d1: Tuple[str] = await self.query_async("""
 				SELECT rating
 				FROM kheina.public.ratings
 				WHERE ratings.rating_id = %s
@@ -48,17 +46,12 @@ class RatingMap(SqlInterface, Dict[Union[int, Rating], Union[Rating, int]]) :
 				(key,),
 				fetch_one=True,
 			)
-			r = Rating(value=d1[0])
-			id = key
-
-			self[id] = r
-			self[r] = id
 
 			# key is the id, return rating
-			return r
+			return Rating(value=d1[0])
 
 		else :
-			d2: Tuple[int] = self.query(f"""
+			d2: Tuple[int] = await self.query_async("""
 				SELECT rating_id
 				FROM kheina.public.ratings
 				WHERE ratings.rating = %s
@@ -67,27 +60,22 @@ class RatingMap(SqlInterface, Dict[Union[int, Rating], Union[Rating, int]]) :
 				(key,),
 				fetch_one=True,
 			)
-			r = Rating(key)
-			id = d2[0]
-
-			self[id] = r
-			self[r] = id
 
 			# key is rating, return the id
-			return id
+			return d2[0]
 
 
 rating_map: RatingMap = RatingMap()
 
 
-class MediaTypeMap(SqlInterface, dict) :
+class MediaTypeMap(SqlInterface) :
 
-	@timed
-	def __missing__(self, key: Optional[int]) -> Optional[MediaType] :
+	@AsyncLRU(maxsize=0)
+	async def get(self, key: Optional[int]) -> Optional[MediaType] :
 		if key is None :
 			return None
 
-		data: Tuple[str, str] = self.query(f"""
+		data: Tuple[str, str] = await self.query_async("""
 			SELECT file_type, mime_type
 			FROM kheina.public.media_type
 			WHERE media_type.media_type_id = %s
@@ -96,11 +84,10 @@ class MediaTypeMap(SqlInterface, dict) :
 			(key,),
 			fetch_one=True,
 		)
-		self[key] = MediaType(
+		return MediaType(
 			file_type = data[0],
 			mime_type = data[1],
 		)
-		return self[key]
 
 media_type_map: MediaTypeMap = MediaTypeMap()
 
@@ -190,19 +177,25 @@ class Posts(SqlInterface) :
 		upl_portable: Task[UserPortable] = ensure_future(users.portable(user, uploader))
 		blocked: Task[bool] = ensure_future(is_post_blocked(user, uploader, flatten(await tags)))
 
+		r = await rating_map.get(ipost.rating)
+		assert isinstance(r, Rating)
+
+		p = await privacy_map.get(ipost.privacy)
+		assert isinstance(p, Privacy)
+
 		return Post(
 			post_id=post_id,
 			title=ipost.title,
 			description=ipost.description,
 			user=await upl_portable,
 			score=await score,
-			rating=rating_map[ipost.rating],    # type: ignore
-			parent=ipost.parent,                # type: ignore
-			privacy=privacy_map[ipost.privacy], # type: ignore
+			rating=r,
+			parent=ipost.parent, # type: ignore
+			privacy=p,
 			created=ipost.created,
 			updated=ipost.updated,
 			filename=ipost.filename,
-			media_type=media_type_map[ipost.media_type],
+			media_type=await media_type_map.get(ipost.media_type),
 			size=ipost.size,
 			blocked=await blocked,
 			thumbhash=ipost.thumbhash,
@@ -567,7 +560,7 @@ class Posts(SqlInterface) :
 				portable=UserPortable(
 					name=iuser.name,
 					handle=iuser.handle,
-					privacy=users._validate_privacy(privacy_map[iuser.privacy]),
+					privacy=users._validate_privacy(await privacy_map.get(iuser.privacy)),
 					icon=iuser.icon,
 					verified=iuser.verified,
 					following=following[user_id],
@@ -662,19 +655,26 @@ class Posts(SqlInterface) :
 		posts: List[Post] = []
 		for post in iposts :
 			post_id: PostId = PostId(post.post_id)
+
+			r = await rating_map.get(post.rating)
+			assert isinstance(r, Rating)
+
+			p = await privacy_map.get(post.privacy)
+			assert isinstance(p, Privacy)
+
 			posts.append(Post(
 				post_id=post_id,
 				title=post.title,
 				description=post.description,
 				user=uploaders[post.user_id].portable,
 				score=scores[post_id],
-				rating=rating_map[post.rating],    # type: ignore
-				parent=post.parent,                # type: ignore
-				privacy=privacy_map[post.privacy], # type: ignore
+				rating=r,
+				parent=post.parent, # type: ignore
+				privacy=p,
 				created=post.created,
 				updated=post.updated,
 				filename=post.filename,
-				media_type=media_type_map[post.media_type],
+				media_type=await media_type_map.get(post.media_type),
 				size=post.size,
 				# only the first call retrieves blocked info, all the rest should be cached and not actually await
 				blocked=await is_post_blocked(user, uploaders[post.user_id].internal, tags[post_id]),

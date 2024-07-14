@@ -264,8 +264,8 @@ class Uploader(SqlInterface, B2Interface) :
 	@HttpErrorHandler('creating populated post')
 	@timed
 	async def createPostWithFields(self: 'Uploader', user: KhUser, reply_to: Optional[PostId], title: Optional[str], description: Optional[str], privacy: Optional[Privacy], rating: Optional[Rating]) -> Post :
-		explicit = rating_map[Rating.explicit]
-		draft = privacy_map[Privacy.draft]
+		explicit = await rating_map.get(Rating.explicit)
+		draft = await privacy_map.get(Privacy.draft)
 		assert isinstance(explicit, int)
 		assert isinstance(draft, int)
 
@@ -291,7 +291,7 @@ class Uploader(SqlInterface, B2Interface) :
 			post.description = description
 
 		if rating :
-			r = rating_map[rating]
+			r = await rating_map.get(rating)
 			assert isinstance(r, int)
 			post.rating = r
 
@@ -312,7 +312,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 			if privacy :
 				await self._update_privacy(user, post_id, privacy, transaction=transaction, commit=False)
-				p = privacy_map[privacy]
+				p = await privacy_map.get(privacy)
 				assert isinstance(p, int)
 				post.privacy = p
 
@@ -551,7 +551,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 		if rating :
 			update = True
-			r = rating_map[rating]
+			r = await rating_map.get(rating)
 			assert isinstance(r, int)
 			post.rating = r
 

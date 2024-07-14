@@ -84,7 +84,6 @@ Access method: heap
 """
 
 
-KVS: KeyValueStore = KeyValueStore('kheina', 'token')
 BotLoginSerializer: AvroSerializer = AvroSerializer(BotLogin)
 BotLoginDeserializer: AvroDeserializer = AvroDeserializer(BotLogin)
 
@@ -92,6 +91,7 @@ BotLoginDeserializer: AvroDeserializer = AvroDeserializer(BotLogin)
 class Authenticator(SqlInterface, Hashable) :
 
 	EmailRegex = re_compile(r'^(?P<user>[A-Z0-9._%+-]+)@(?P<domain>[A-Z0-9.-]+\.[A-Z]{2,})$', flags=IGNORECASE)
+	KVS: KeyValueStore
 
 	def __init__(self) :
 		Hashable.__init__(self)
@@ -111,6 +111,9 @@ class Authenticator(SqlInterface, Hashable) :
 			'end': 0,
 			'id': 0,
 		}
+
+		if getattr(Authenticator, 'KVS', None) is None :
+			Authenticator.KVS = KeyValueStore('kheina', 'token')
 
 
 	def _validateEmail(self, email: str) -> Dict[str, str] :
@@ -213,7 +216,7 @@ class Authenticator(SqlInterface, Hashable) :
 			algorithm=self._token_algorithm,
 			fingerprint=token_data.get('fp', '').encode(),
 		)
-		KVS.put(guid.bytes, token_info, self._token_expires_interval)
+		Authenticator.KVS.put(guid.bytes, token_info, self._token_expires_interval)
 
 		version = self._token_version.encode()
 		content = b64encode(version) + b'.' + b64encode(load)
@@ -233,7 +236,7 @@ class Authenticator(SqlInterface, Hashable) :
 	async def logout(self, guid: RefId) :
 		# since this endpoint is behind user.authenticated, we already know that the
 		# token exists and all the information is correct. we just need to delete it.
-		await KVS.remove_async(guid)
+		await Authenticator.KVS.remove_async(guid)
 
 
 	def fetchPublicKey(self, key_id, algorithm: Optional[AuthAlgorithm] = None) -> PublicKeyResponse :

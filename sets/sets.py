@@ -60,14 +60,14 @@ class Sets(Sets) :
 
 
 	@staticmethod
-	def _validate_privacy(p: Optional[Privacy]) -> int :
+	async def _validate_privacy(p: Optional[Privacy]) -> int :
 		try :
 			assert p is not None, 'privacy value must be public or private'
 
 		except AssertionError as e :
 			raise BadRequest(str(e))
 
-		ip = privacy_map[p]
+		ip = await privacy_map.get(p)
 		assert isinstance(ip, int)
 		return ip
 
@@ -177,7 +177,7 @@ class Sets(Sets) :
 			count=0,
 			title=title,
 			description=description,
-			privacy=Sets._validate_privacy(privacy),
+			privacy=await Sets._validate_privacy(privacy),
 			created=data[0],
 			updated=data[1],
 			first=None,
@@ -229,7 +229,7 @@ class Sets(Sets) :
 
 			elif m == 'privacy' :
 				params.append(req.privacy)
-				iset.privacy = Sets._validate_privacy(req.privacy)
+				iset.privacy = await Sets._validate_privacy(req.privacy)
 				query.append(m + ' = privacy_to_id(%s)')
 
 			else :

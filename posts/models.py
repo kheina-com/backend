@@ -7,9 +7,9 @@ from pydantic import BaseModel, Field, validator
 from shared.base64 import b64encode
 from shared.config.constants import environment
 from shared.config.repo import short_hash
+from shared.datetime import datetime as dt
 from shared.models._shared import PostId, Privacy, UserPortable, _post_id_converter
 from shared.sql.query import Table
-from shared.datetime import datetime as dt
 
 
 @unique
@@ -83,12 +83,11 @@ class MediaType(BaseModel) :
 
 @unique
 class TagGroupPortable(Enum) :
-	artist: str = 'artist'
-	subject: str = 'subject'
-	sponsor: str = 'sponsor'
-	species: str = 'species'
-	gender: str = 'gender'
-	misc: str = 'misc'
+	artist  = 'artist'
+	subject = 'subject'
+	species = 'species'
+	gender  = 'gender'
+	misc    = 'misc'
 
 
 class TagGroups(Dict[TagGroupPortable, List[str]]) :

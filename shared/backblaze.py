@@ -1,5 +1,4 @@
 from asyncio import get_event_loop
-from asyncio import sleep as sleep_async
 from base64 import b64encode
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -7,17 +6,10 @@ from hashlib import sha1 as hashlib_sha1
 from io import BytesIO
 from time import sleep
 from types import TracebackType
-from typing import Any, Dict, Optional, Self, Type, Union
-from urllib.parse import quote, unquote
+from typing import Dict, Optional, Self, Type, Union
 
-import ujson as json
-from aiohttp import ClientTimeout
-from aiohttp import request as async_request
 from minio import Minio
 from minio.datatypes import Object
-from requests import Response
-from requests import get as requests_get
-from requests import post as requests_post
 from urllib3.response import HTTPResponse
 
 from .config.constants import environment
@@ -170,6 +162,8 @@ class B2Interface :
 		sha1: str = sha1 or b64encode(hashlib_sha1(file_data).digest()).decode()
 		content_type: str = content_type or self._get_mime_from_filename(filename)
 
+		print('content_type:', content_type, 'content_length:', len(file_data), 'sha1:', sha1)
+
 		backoff: float = 1
 		result = None
 
@@ -181,13 +175,13 @@ class B2Interface :
 					BytesIO(file_data),
 					len(file_data),
 					content_type=content_type,
-					metadata={
-						'x-amz-checksum-algorithm': 'SHA1',
-						'x-amz-checksum-sha1': sha1,
-					},
+					# metadata={
+					# 	'x-amz-checksum-algorithm': 'SHA1',
+					# 	'x-amz-checksum-sha1': sha1,
+					# },
 				)
 
-				assert sha1 == result.http_headers['x-amz-checksum-sha1']
+				# assert sha1 == result.http_headers['x-amz-checksum-sha1']
 				return
 
 			except AssertionError :

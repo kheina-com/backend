@@ -1,7 +1,7 @@
 # credentials
-**/credentials.*
-**/credentials
-credentials
+**/credentials*.*
+**/credentials*
+credentials*
 
 # config files
 .vscode

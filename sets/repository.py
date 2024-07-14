@@ -130,7 +130,7 @@ class Sets(SqlInterface, Hashable) :
 			count=iset.count,
 			title=iset.title,
 			description=iset.description,
-			privacy=Sets._validate_privacy(privacy_map[iset.privacy]),
+			privacy=Sets._validate_privacy(await privacy_map.get(iset.privacy)),
 			created=iset.created,
 			updated=iset.updated,
 			first=first_post,

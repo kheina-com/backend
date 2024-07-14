@@ -6,7 +6,7 @@ from logging import getLogger
 from sys import _getframe
 from time import time
 from types import FrameType
-from typing import Any, Callable, Coroutine, Dict, Hashable, Optional, Self, Union
+from typing import Any, Callable, Coroutine, Dict, Optional, Self, Union
 
 
 class TimeUnit(Enum) :

@@ -1,6 +1,6 @@
 from asyncio import Task, ensure_future, wait
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Self, Tuple
+from typing import Any, Dict, List, Optional, Self, Sequence, Tuple
 
 import aerospike
 from psycopg2.errors import NotNullViolation, UniqueViolation
@@ -324,6 +324,16 @@ class Tagger(Tags) :
 			raise NotFound("the provided post does not exist or you don't have access to it.", post_id=post_id)
 
 		return await tags
+
+
+	@HttpErrorHandler('fetching tag blocklist')
+	async def fetchBlockedTags(self, user: KhUser) -> TagGroups :
+		return await self._user_blocked_tags(user.user_id)
+
+
+	@HttpErrorHandler('updating tag blocklist')
+	async def setBlockedTags(self: Self, user: KhUser, tags: Sequence[str]) -> None :
+		return await self._update_blocked_tags(user.user_id, tags)
 
 
 	@SimpleCache(60)

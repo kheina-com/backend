@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from math import ceil
 from os import listdir, remove
 from os.path import isdir, isfile, join
 from secrets import token_bytes
@@ -11,9 +10,11 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from account.models import LoginRequest
+from authenticator.authenticator import Authenticator
+from authenticator.models import LoginRequest
 from shared.backblaze import B2Interface
 from shared.base64 import b64encode
+from shared.caching.key_value_store import KeyValueStore
 from shared.sql import SqlInterface
 
 
@@ -35,6 +36,13 @@ def execSql(unlock: bool = False) -> None :
 	folders under db are sorted numberically and run in descending order
 	files within those folders are treated the same.
 	"""
+
+	# wipe all caching first, just in case
+	# TODO: fetch all the sets or have a better method of clearing aerospike than this
+	for set in ['token', 'avro_schemas', 'configs', 'score', 'votes', 'posts', 'sets', 'tag_count', 'tags', 'users', 'following', 'user_handle_map'] :
+		kvs = KeyValueStore('kheina', set)
+		kvs.truncate()
+
 	sql = SqlInterface()
 	with sql.pool.conn() as conn :
 		cur = conn.cursor()
@@ -87,15 +95,23 @@ def createAdmin() -> LoginRequest :
 	"""
 	creates a default admin account on your fuzzly instance
 	"""
-	from authenticator.authenticator import Authenticator
 	auth = Authenticator()
 	email = 'localhost@kheina.com'
 	password = b64encode(token_bytes(18)).decode()
-	auth.create(
+	r = auth.create(
 		'kheina',
 		'kheina',
 		email,
 		password,
+	)
+	auth.query("""
+		UPDATE kheina.public.users
+			SET admin = true
+		WHERE user_id = %s;
+		""", (
+			r.user_id,
+		),
+		commit=True,
 	)
 
 	acct = LoginRequest(email=email, password=password)

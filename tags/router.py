@@ -8,7 +8,7 @@ from shared.exceptions.http_error import Forbidden
 from shared.server import Request
 from shared.timing import timed
 
-from .models import InheritRequest, InternalTag, LookupRequest, RemoveInheritance, Tag, TagGroupPortable, TagGroups, TagsRequest, UpdateRequest
+from .models import BlockedRequest, InheritRequest, InternalTag, LookupRequest, RemoveInheritance, Tag, TagGroupPortable, TagGroups, TagsRequest, UpdateRequest
 from .tagger import Tagger
 
 
@@ -91,6 +91,33 @@ async def v1FrequentlyUsed(req: Request) :
 	return await tagger.frequentlyUsed(req.user)
 
 
+# @tagsRouter.get('/blocked', response_model=TagGroups)
+# @timed.root
+# async def v1FetchBlocked(req: Request) :
+# 	await req.user.authenticated()
+# 	return await tagger.fetchBlockedTags(req.user)
+
+
+# @tagsRouter.patch('/blocked', status_code=204)
+# @timed.root
+# async def v1UpdateBlocked(req: Request, body: BlockedRequest) :
+# 	await req.user.authenticated()
+# 	return await tagger.setBlockedTags(req.user, body.tags)
+
+
+@tagsRouter.get('/{post_id}', response_model=TagGroups)
+@timed.root
+async def v1FetchTags(req: Request, post_id: PostId) :
+	# fastapi does not ensure that postids are in the correct form, so do it manually
+	return await tagger.fetchTagsByPost(req.user, PostId(post_id))
+
+
+@tagRouter.get('/{tag}', response_model=Tag)
+@timed.root
+async def v1FetchTag(req: Request, tag: str) :
+	return await tagger.fetchTag(req.user, tag)
+
+
 @tagRouter.patch('/{tag}', status_code=204)
 @timed.root
 async def v1UpdateTag(req: Request, tag: str, body: UpdateRequest) :
@@ -108,19 +135,6 @@ async def v1UpdateTag(req: Request, tag: str, body: UpdateRequest) :
 		body.description,
 		body.deprecated,
 	)
-
-
-@tagsRouter.get('/{post_id}', response_model=TagGroups)
-@timed.root
-async def v1FetchTags(req: Request, post_id: PostId) :
-	# fastapi does not ensure that postids are in the correct form, so do it manually
-	return await tagger.fetchTagsByPost(req.user, PostId(post_id))
-
-
-@tagRouter.get('/{tag}', response_model=Tag)
-@timed.root
-async def v1FetchTag(req: Request, tag: str) :
-	return await tagger.fetchTag(req.user, tag)
 
 
 app = APIRouter(

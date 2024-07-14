@@ -84,8 +84,9 @@ class Posts(Posts) :
 				FROM kheina.public.posts
 				WHERE posts.rating = %s
 					AND posts.privacy = privacy_to_id('public');
-				""",
-				(rating_map[tag],), # type: ignore
+				""", (
+					await rating_map.get(tag),
+				),
 				fetch_one=True,
 			)
 			count = data[0]
@@ -242,7 +243,7 @@ class Posts(Posts) :
 						Where(
 							Field('posts', 'privacy'),
 							Operator.equal,
-							Value(privacy_map[Privacy.public]),
+							Value(await privacy_map.get(Privacy.public)),
 						),
 					),
 					Join(
@@ -279,7 +280,7 @@ class Posts(Posts) :
 						Where(
 							Field('posts', 'privacy'),
 							Operator.equal,
-							Value(privacy_map[Privacy.public]),
+							Value(await privacy_map.get(Privacy.public)),
 						),
 					),
 				)
@@ -302,7 +303,7 @@ class Posts(Posts) :
 					Where(
 						Field('posts', 'privacy'),
 						Operator.equal,
-						Value(privacy_map[Privacy.public]),
+						Value(await privacy_map.get(Privacy.public)),
 					),
 				)
 
@@ -373,7 +374,7 @@ class Posts(Posts) :
 					Where(
 						Field('posts', 'rating'),
 						Operator.equal,
-						Value(rating_map[include_rating[0]]),
+						Value(await rating_map.get(include_rating[0])),
 					),
 				)
 
@@ -382,7 +383,7 @@ class Posts(Posts) :
 					Where(
 						Field('posts', 'rating'),
 						Operator.not_equal,
-						Value(list(map(lambda x : rating_map[x], exclude_rating)), 'all'),
+						Value([await rating_map.get(x) for x in exclude_rating], 'all'),
 					),
 				)
 
@@ -448,7 +449,7 @@ class Posts(Posts) :
 				Where(
 					Field('posts', 'privacy'),
 					Operator.equal,
-					Value(privacy_map[Privacy.public]),
+					Value(await privacy_map.get(Privacy.public)),
 				),
 			)
 
@@ -631,7 +632,7 @@ class Posts(Posts) :
 			Where(
 				Field('posts', 'privacy'),
 				Operator.equal,
-				Value(privacy_map[Privacy.public]),
+				Value(await privacy_map.get(Privacy.public)),
 			),
 		).order(
 			Field('posts', 'created'),
@@ -670,7 +671,7 @@ class Posts(Posts) :
 			Where(
 				Field('posts', 'privacy'),
 				Operator.equal,
-				Value(privacy_map[Privacy.public]),
+				Value(await privacy_map.get(Privacy.public)),
 			),
 			Where(
 				Field('posts', 'created'),
@@ -800,7 +801,7 @@ class Posts(Posts) :
 			Where(
 				Field('posts', 'privacy'),
 				Operator.equal,
-				Value(privacy_map[Privacy.draft]),				
+				Value(await privacy_map.get(Privacy.draft)),
 			),
 		).order(
 			Field('posts', 'created'),

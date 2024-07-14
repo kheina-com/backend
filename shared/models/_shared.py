@@ -130,8 +130,8 @@ UserPrivacy = Literal[Privacy.public, Privacy.private]
 @unique
 class Verified(Enum) :
 	artist = 'artist'
-	mod = 'mod'
-	admin = 'admin'
+	mod    = 'mod'
+	admin  = 'admin'
 
 
 class UserPortable(BaseModel) :

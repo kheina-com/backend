@@ -8,10 +8,9 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Type, TypeVa
 
 import aerospike
 
-from ..timing import timed
-
 from ..config.constants import environment
 from ..config.credentials import fetch
+from ..timing import timed
 from ..utilities import __clear_cache__, coerse
 
 
@@ -168,7 +167,7 @@ class KeyValueStore :
 				},
 			)
 			# check the metadata, since it will always be populated
-			return meta != None
+			return meta is not None
 
 		except aerospike.exception.RecordNotFound :
 			return False
