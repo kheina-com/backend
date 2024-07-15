@@ -11,7 +11,7 @@ from shared.caching.key_value_store import KeyValueStore
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
 from shared.hashing import Hashable
-from shared.models.user import InternalUser, UserPortable, UserPrivacy
+from shared.models import InternalUser, UserPortable, UserPrivacy
 from shared.sql import SqlInterface
 from users.repository import Users
 

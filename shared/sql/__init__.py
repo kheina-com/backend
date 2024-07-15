@@ -119,6 +119,7 @@ class ConnectionPool :
 	db:        Dict[str, str]
 	available: List[Connection]           = []
 	used:      Dict[Hashable, Connection] = { }
+	_readonly: Connection
 
 	def __init__(self) :
 		self.logger: Logger = getLogger()
@@ -142,7 +143,7 @@ class ConnectionPool :
 			return conn
 
 		except Exception as e :
-			self.logger.critical(f'failed to connect to database!', exc_info=e)
+			self.logger.critical(f'failed to connect to database! ({ConnectionPool.total})', exc_info=e)
 			raise
 
 
@@ -187,6 +188,15 @@ class ConnectionPool :
 
 	async def conn_async(self: Self) -> Conn :
 		return self.conn()
+
+
+	def readonly(self: Self) -> Connection :
+		conn = getattr(ConnectionPool, '_readonly', None)
+
+		if not conn :
+			conn = ConnectionPool._readonly = self._sql_connect()
+
+		return conn
 
 
 	def destroy(self: Self, key: Hashable) -> None :
@@ -265,47 +275,65 @@ class SqlInterface :
 
 		params = tuple(map(self._convert_item, params))
 
-		conn: Conn = SqlInterface.pool.conn()
-		with conn as conn :
-			try :
-				with conn.cursor() as cur :
-					timer = Timer().start()
+		conn: Connection | Conn
 
-					cur.execute(sql, params)
+		if commit :
+			conn = SqlInterface.pool.conn().__enter__()
 
-					if commit :
-						conn.commit()
+		else :
+			conn = SqlInterface.pool.readonly()
 
-					else :
-						conn.rollback()
+		ex: Exception
 
-					if timer.elapsed() > self._long_query :
-						self.logger.warning(f'query took longer than {self._long_query} seconds:\n{sql}')
+		try :
+			with conn.cursor() as cur :
+				timer = Timer().start()
 
-					if fetch_one :
-						return cur.fetchone()
+				cur.execute(sql, params)
 
-					elif fetch_all :
-						return cur.fetchall()
-
-			except (ConnectionException, InterfaceError) as e :
-				if maxretry > 1 :
-					self.logger.warning('connection to db was severed, attempting to reconnect.', exc_info=e)
-					# self._sql_connect()
-					return self.query(sql, params, commit, fetch_one, fetch_all, maxretry - 1)
+				if commit :
+					conn.commit()
 
 				else :
-					self.logger.critical('failed to reconnect to db.', exc_info=e)
-					raise
+					conn.rollback()
 
-			except Exception as e :
-				self.logger.warning({
-					'message': 'unexpected error encountered during sql query.',
-					'query': sql,
-				}, exc_info=e)
-				# now attempt to recover by rolling back
-				conn.rollback()
+				if timer.elapsed() > self._long_query :
+					self.logger.warning(f'query took longer than {self._long_query} seconds:\n{sql}')
+
+				if fetch_one :
+					return cur.fetchone()
+
+				elif fetch_all :
+					return cur.fetchall()
+
+		except (ConnectionException, InterfaceError) as e :
+			ex = e
+			if maxretry > 1 :
+				self.logger.warning('connection to db was severed, attempting to reconnect.', exc_info=e)
+				# self._sql_connect()
+				return self.query(sql, params, commit, fetch_one, fetch_all, maxretry - 1)
+
+			else :
+				self.logger.critical('failed to reconnect to db.', exc_info=e)
 				raise
+
+		except Exception as e :
+			ex = e
+			self.logger.warning({
+				'message': 'unexpected error encountered during sql query.',
+				'query': sql,
+			}, exc_info=e)
+			# now attempt to recover by rolling back
+			conn.rollback()
+			raise
+
+		finally :
+			if commit :
+				if ex :
+					conn.__exit__(type(ex), ex, ex.__traceback__)
+
+				else :
+					conn.__exit__(None, None, None)
 
 
 	@timed

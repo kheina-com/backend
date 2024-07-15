@@ -2,7 +2,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from ._shared import Badge, InternalUser, User, UserPortable, UserPrivacy, Verified
+from ._shared import UserPrivacy, Verified
 
 
 class UpdateSelf(BaseModel) :

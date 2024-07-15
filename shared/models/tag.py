@@ -3,7 +3,7 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel
 
-from .user import UserPortable
+from ._shared import UserPortable
 
 
 @unique
