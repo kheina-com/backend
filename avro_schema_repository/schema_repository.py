@@ -1,8 +1,8 @@
 from typing import List
 
 import ujson
-
 from avrofastapi.schema import AvroSchema
+
 from shared.base64 import b64decode, b64encode
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore

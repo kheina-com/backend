@@ -1,12 +1,11 @@
-from typing import Dict, List, Optional, Self, Tuple, Union
+from typing import Dict, Optional, Self, Tuple, Union
 
 from shared.auth import KhUser
 from shared.caching import AerospikeCache, SimpleCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadRequest, NotFound
 from shared.maps import privacy_map
-from shared.models import Privacy
-from shared.models.user import Badge, InternalUser, User, UserPortable, UserPrivacy, Verified
+from shared.models import Badge, InternalUser, Privacy, User, UserPortable, UserPrivacy, Verified
 from shared.sql import SqlInterface
 from shared.timing import timed
 

@@ -1,7 +1,7 @@
-import logging
 import json
+import logging
+from logging import ERROR, INFO, Logger, getLevelName
 from sys import stderr, stdout
-from logging import Logger, getLevelName, INFO, ERROR
 from traceback import format_tb
 from types import ModuleType
 from typing import Any, Callable, Dict, List, Optional, Self, TextIO

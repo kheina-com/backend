@@ -1,4 +1,4 @@
-from os import listdir, path, environ
+from os import environ, listdir, path
 from typing import Any, Dict, Optional, Type
 
 from cryptography.hazmat.backends import default_backend

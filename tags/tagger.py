@@ -11,10 +11,10 @@ from shared.auth import KhUser, Scope
 from shared.caching import AerospikeCache, SimpleCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadRequest, Conflict, Forbidden, HttpErrorHandler, NotFound
-from shared.models.user import UserPortable
+from shared.maps import privacy_map
+from shared.models import UserPortable
 from shared.utilities import flatten
 from users.repository import Users
-from shared.maps import privacy_map
 
 from .models import InternalTag, Tag, TagGroupPortable, TagGroups
 from .repository import TagKVS, Tags

@@ -10,12 +10,13 @@ from uuid import UUID, uuid4
 import ujson as json
 from argon2 import PasswordHasher as Argon2
 from argon2.exceptions import VerifyMismatchError
+from avrofastapi.models import RefId
+from avrofastapi.serialization import AvroDeserializer, AvroSerializer
+from cache import AsyncLRU
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from psycopg2.errors import UniqueViolation
 
-from avrofastapi.models import RefId
-from avrofastapi.serialization import AvroDeserializer, AvroSerializer
 from shared import logging
 from shared.base64 import b64decode, b64encode
 from shared.caching.key_value_store import KeyValueStore
@@ -23,12 +24,10 @@ from shared.config.credentials import fetch
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, Conflict, HttpError, InternalServerError, NotFound, Unauthorized
 from shared.hashing import Hashable
+from shared.models import InternalUser
 from shared.models.auth import AuthState, KhUser, Scope, TokenMetadata
 from shared.sql import SqlInterface
 from shared.utilities.json import json_stream
-from cache import AsyncLRU
-
-from shared.models import InternalUser
 
 from .models import AuthAlgorithm, BotCreateResponse, BotLogin, BotType, LoginResponse, PublicKeyResponse, TokenResponse
 

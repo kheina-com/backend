@@ -2,8 +2,9 @@ from typing import List
 
 from fastapi import APIRouter
 
+from shared.models import Badge, User
 from shared.models.auth import Scope
-from shared.models.user import Badge, Follow, InternalUser, SetMod, SetVerified, UpdateSelf, User
+from shared.models.user import SetMod, SetVerified, UpdateSelf
 from shared.server import Request
 from shared.timing import timed
 

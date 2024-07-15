@@ -1,10 +1,10 @@
 from enum import Enum, unique
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from posts.models import PostId, PostIdValidator
-from shared.models.user import UserPortable
+from shared.models import UserPortable
 
 
 @unique

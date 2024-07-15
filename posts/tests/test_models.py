@@ -1,6 +1,7 @@
 from typing import Any
 
 import pytest
+
 from posts.models import PostId
 
 

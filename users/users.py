@@ -4,7 +4,7 @@ from typing import List, Optional
 from shared.auth import KhUser
 from shared.caching import SimpleCache
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
-from shared.models.user import Badge, InternalUser, User, UserPrivacy, Verified
+from shared.models import Badge, InternalUser, User, UserPrivacy, Verified
 
 from .repository import FollowKVS, UserKVS, Users, privacy_map  # type: ignore
 

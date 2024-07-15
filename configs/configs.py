@@ -2,13 +2,13 @@ from re import Match, Pattern
 from re import compile as re_compile
 from typing import Dict, List, Optional, Tuple, Type, Union
 
+from avrofastapi.schema import convert_schema
+from avrofastapi.serialization import AvroDeserializer, AvroSerializer, Schema, parse_avro_schema
 from cache import AsyncLRU
 from patreon import API as PatreonApi
 from pydantic import BaseModel
 
 from avro_schema_repository.schema_repository import SchemaRepository
-from avrofastapi.schema import convert_schema
-from avrofastapi.serialization import AvroDeserializer, AvroSerializer, Schema, parse_avro_schema
 from shared.auth import KhUser
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore

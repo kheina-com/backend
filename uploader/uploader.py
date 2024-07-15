@@ -14,7 +14,7 @@ from aiohttp import ClientResponseError
 from exiftool import ExifToolAlpha as ExifTool
 from wand.image import Image
 
-from posts.models import InternalPost, MediaType, Post, PostId, PostSize, Privacy, Rating
+from posts.models import InternalPost, Post, PostId, PostSize, Privacy, Rating
 from posts.repository import PostKVS, Posts, VoteKVS, privacy_map, rating_map
 from posts.scoring import confidence
 from posts.scoring import controversial as calc_cont
@@ -24,7 +24,7 @@ from shared.backblaze import B2Interface
 from shared.base64 import b64decode
 from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadGateway, BadRequest, Forbidden, HttpErrorHandler, InternalServerError, NotFound
-from shared.models.user import InternalUser
+from shared.models import InternalUser
 from shared.sql import SqlInterface, Transaction
 from shared.timing import timed
 from shared.utilities import flatten, int_from_bytes
