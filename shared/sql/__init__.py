@@ -135,11 +135,14 @@ class ConnectionPool :
 
 
 	def _sql_connect(self: Self) -> Connection :
-		assert len(self.available) == 0
-		assert len(self.used) == ConnectionPool.total
 		try :
 			conn: Connection = dbConnect(**ConnectionPool.db) # type: ignore
-			self.logger.debug(f'connected to database.   ==> available: {len(self.available)}, used: {len(self.used)}, total: {ConnectionPool.total}')
+			self.logger.info({
+				'op': 'ConnectionPool._sql_connect',
+				'available': len(self.available),
+				'used': list(self.used.keys()),
+				'total': ConnectionPool.total,
+			})
 			return conn
 
 		except Exception as e :
@@ -158,7 +161,12 @@ class ConnectionPool :
 		with self.lock :
 			if key in self.used :
 				self.available.append(self.used.pop(key))
-			self.logger.debug(f'ConnectionPool._free     ==> available: {len(self.available)}, used: {len(self.used)}, total: {ConnectionPool.total}')
+			self.logger.info({
+				'op': 'ConnectionPool._free',
+				'available': len(self.available),
+				'used': list(self.used.keys()),
+				'total': ConnectionPool.total,
+			})
 
 
 	def _get_conn(self: Self) -> Tuple[Connection, Hashable] :
@@ -167,13 +175,21 @@ class ConnectionPool :
 			conn = self.available.pop()
 
 		except IndexError :
+			assert len(self.available) == 0
+			assert len(self.used) == ConnectionPool.total
 			conn = self._sql_connect()
 			ConnectionPool.total += 1
 
 		key: Hashable = self._id()
 		self.used[key] = conn
 		assert len(self.available) + len(self.used) == ConnectionPool.total
-		self.logger.debug(f'ConnectionPool._get_conn ==> available: {len(self.available)}, used: {len(self.used)}, total: {ConnectionPool.total}')
+		self.logger.info({
+			'op': 'ConnectionPool._get_conn',
+			'key': key,
+			'available': len(self.available),
+			'used': list(self.used.keys()),
+			'total': ConnectionPool.total,
+		})
 		return conn, key
 
 
@@ -220,7 +236,7 @@ class ConnectionPool :
 
 
 	def close_all(self: Self) -> None :
-		print('closing connection pool...', end='')
+		print('closing connection pool', end='')
 		with self.lock :
 			while self.available :
 				self.available.pop().close()
