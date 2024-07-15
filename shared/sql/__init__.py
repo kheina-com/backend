@@ -283,7 +283,7 @@ class SqlInterface :
 		else :
 			conn = SqlInterface.pool.readonly()
 
-		ex: Exception
+		ex: Optional[Exception] = None
 
 		try :
 			with conn.cursor() as cur :
