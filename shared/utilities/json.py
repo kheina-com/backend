@@ -7,7 +7,6 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from ..crc import CRC
-
 from ..models.auth import AuthToken, KhUser
 
 

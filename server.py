@@ -1,4 +1,5 @@
 import json
+from os import environ
 
 from fastapi import FastAPI
 from starlette.middleware.exceptions import ExceptionMiddleware
@@ -7,6 +8,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from account.router import app as account
 from configs.router import app as configs
 from posts.router import app as posts
+from probe.router import probes
 from sets.router import app as sets
 from shared.config.constants import environment
 from shared.exceptions.base_error import BaseError
@@ -19,7 +21,6 @@ from shared.timing import timed
 from tags.router import app as tags
 from uploader.router import app as uploader
 from users.router import app as users
-from probe.router import probes
 
 
 timed.logger = lambda n, x : print(json.dumps({ n: x.dict() }))
@@ -82,8 +83,8 @@ app.add_middleware(
 	max_age = 86400,
 )
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=[
+	environ.get('pod_ip', '127.0.0.1'),
 	'localhost',
-	'127.0.0.1',
 	'*.fuzz.ly',
 	'fuzz.ly',
 ])

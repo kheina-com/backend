@@ -1,8 +1,10 @@
 from datetime import datetime
 from typing import Self
+from uuid import uuid4
+
 from shared.caching.key_value_store import KeyValueStore
 from shared.sql import SqlInterface
-from uuid import uuid4
+
 
 KVS: KeyValueStore = KeyValueStore('kheina', 'health')
 

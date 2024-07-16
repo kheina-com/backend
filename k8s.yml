@@ -14,8 +14,12 @@ spec:
     spec:
       containers:
       - name: fuzzly-backend
-        image: us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend@sha256:1b5a84e0be907872dedc445297689a57fb0d5480c931bd13769ea2085d98cfa8
+        image: us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend@sha256:fc344fe363e372b73d020c51ee9c561e2c24ae71a23eea5658b5752fc5d017bf
         env:
+        - name: pod_ip
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
         - name: kh_aes
           valueFrom:
             secretKeyRef:
@@ -44,12 +48,14 @@ spec:
           httpGet:
             path: /healthz
             port: 443
+            scheme: HTTPS
           initialDelaySeconds: 10
           periodSeconds: 30
         readinessProbe:
           httpGet:
             path: /readyz
             port: 443
+            scheme: HTTPS
           initialDelaySeconds: 15
           periodSeconds: 30
       - name: cloud-sql-proxy
