@@ -51,8 +51,8 @@ RUN wget https://go.dev/dl/go1.22.5.linux-amd64.tar.gz && \
 	rm go1.22.5.linux-amd64.tar.gz
 
 ENV GOROOT=/usr/local/go
-# ENV GOPATH=$GOROOT
-ENV PATH=$GOROOT/bin:$PATH
+ENV GOPATH=$HOME/go
+ENV PATH=$GOPATH/bin:$GOROOT/bin:$PATH
 
 RUN python3 -m venv /opt/.venv
 
