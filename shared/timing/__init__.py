@@ -6,7 +6,7 @@ from logging import getLogger
 from sys import _getframe
 from time import time
 from types import FrameType
-from typing import Any, Callable, Coroutine, Dict, Optional, Self, Union
+from typing import Any, Callable, Coroutine, Optional, Self
 
 
 class TimeUnit(Enum) :
@@ -103,7 +103,7 @@ class Execution :
 	def __init__(self, name: Optional[str] = None) -> None :
 		self.total:  Time                   = Time()
 		self.count:  int                    = 0
-		self.nested: Dict[str, 'Execution'] = { }
+		self.nested: dict[str, 'Execution'] = { }
 		self._name:  Optional[str]          = name
 
 
@@ -125,7 +125,7 @@ class Execution :
 
 
 	def dict(self: Self) -> dict :
-		ret: Dict[str, Any] = { 'total': self.total, 'count': self.count }
+		ret: dict[str, Any] = { 'total': self.total, 'count': self.count }
 		ret.update({ k: v.dict() for k, v in self.nested.items() })
 		return ret
 
@@ -146,19 +146,21 @@ def _get_parent(frame: Optional[FrameType]) -> Optional[Execution] :
 		frame = frame.f_back
 
 
-def timed(root: Union[bool, Callable] = False) -> Callable :
+# it's required for timed and decorator to not be annotated otherwise it fucks up @wraps(func), don't ask me why.
+def timed(root) :
 	"""
 	times the passed function.
-	
+
 	if root = True, timing values are logged on completion.
 	if root = False, timing values are stored in the root's callstack and logged upon the root's completion.
+	if timed is used without passing root, it is assumed to be false.
 	"""
 
 	if getattr(timed, 'logger', None) is None :
-		l = getLogger('stats')
-		timed.logger = lambda n, x : l.info({ n: x.dict() })
+		logger = getLogger('stats')
+		timed.logger = lambda n, x : logger.info({ n: x.dict() })
 
-	def decorator(func: Callable) -> Callable :
+	def decorator(func) :
 		start:     Callable[[Optional[Execution]], float]
 		completed: Callable[[float], None]
 
@@ -214,23 +216,22 @@ def timed(root: Union[bool, Callable] = False) -> Callable :
 			completed = c
 
 		if iscoroutinefunction(func) :
+			async def coro(parent: Optional[Execution], args: tuple[Any], kwargs: dict[str, Any]) -> Any :
+				s: float = start(parent)
+
+				try :
+					return await func(*args, **kwargs)
+
+				except :
+					raise
+
+				finally :
+					completed(s)
+
 			@wraps(func)
 			def wrapper(*args: Any, **kwargs: Any) -> Coroutine[Any, Any, Any] :
 				parent = _get_parent(_getframe())
-
-				async def coro() -> Any :
-					s: float = start(parent)
-
-					try :
-						return await func(*args, **kwargs)
-
-					except :
-						raise
-
-					finally :
-						completed(s)
-
-				return coro()
+				return coro(parent, args, kwargs)
 
 			# this is necessary to mark wrapper as an async function
 			wrapper._is_coroutine = _is_coroutine # type: ignore
@@ -265,7 +266,7 @@ def timed(root: Union[bool, Callable] = False) -> Callable :
 
 	if callable(root) :
 		# The func was passed in directly via root
-		func, root = root, timed.__defaults__[0] # type: ignore
+		func, root = root, False
 		return decorator(func)
 
 	elif isinstance(root, bool) :		

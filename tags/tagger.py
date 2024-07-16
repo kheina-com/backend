@@ -190,8 +190,8 @@ class Tagger(Tags) :
 
 
 	@HttpErrorHandler('updating a tag', handlers = {
-		UniqueViolation: (Conflict, 'A tag with that name already exists.'),
-		UniqueViolation: (NotNullViolation, 'The tag group you entered could not be found or does not exist.'),
+		UniqueViolation:  (Conflict, 'A tag with that name already exists.'),
+		NotNullViolation: (NotFound, 'The tag group you entered could not be found or does not exist.'),
 	})
 	async def updateTag(self,
 		user: KhUser,
@@ -437,7 +437,7 @@ class Tagger(Tags) :
 
 	@AerospikeCache('kheina', 'tags', 'freq.{user_id}', TTL_days=1, _kvs=TagKVS)
 	async def _frequently_used(self, user_id: int) -> TagGroups :
-		data = await self.query_async("""
+		data: list[tuple[str, list[str]]] = await self.query_async("""
 			WITH p AS (
 				SELECT
 					posts.post_id
@@ -462,17 +462,17 @@ class Tagger(Tags) :
 			fetch_all=True,
 		)
 
-		tags = defaultdict(lambda : defaultdict(lambda : 0))
+		tags: dict[TagGroupPortable, dict[str, int]] = defaultdict(lambda : defaultdict(lambda : 0))
 
 		for group, tag_list in data :
 			if not group :
 				continue
 
 			for tag in tag_list :
-				tags[group][tag] += 1
+				tags[TagGroupPortable(group)][tag] += 1
 
 		return TagGroups({
-			TagGroupPortable(group): list(map(lambda x : x[0], sorted(tag_ranks.items(), key=lambda x : x[1], reverse=True)))[:(25 if group == Misc else 10)]
+			group: list(map(lambda x : x[0], sorted(tag_ranks.items(), key=lambda x : x[1], reverse=True)))[:(25 if group == Misc else 10)]
 			for group, tag_ranks in tags.items()
 		})
 

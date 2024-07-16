@@ -151,7 +151,7 @@ class KeyValueStore :
 		)
 
 
-	@timed.link
+	@timed
 	async def remove_async(self: 'KeyValueStore', key: KeyType) -> None :
 		with ThreadPoolExecutor() as threadpool :
 			return await get_event_loop().run_in_executor(threadpool, partial(self.remove, key))
@@ -173,7 +173,7 @@ class KeyValueStore :
 			return False
 
 
-	@timed.link
+	@timed
 	async def exists_async(self: 'KeyValueStore', key: KeyType) -> bool :
 		with ThreadPoolExecutor() as threadpool :
 			return await get_event_loop().run_in_executor(threadpool, partial(self.exists, key))

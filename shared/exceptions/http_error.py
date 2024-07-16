@@ -1,3 +1,4 @@
+from asyncio.coroutines import _is_coroutine  # type: ignore
 from functools import wraps
 from inspect import FullArgSpec, getfullargspec, iscoroutinefunction
 from typing import Any, Callable, Dict, Iterable, Set, Tuple, Type
@@ -110,6 +111,8 @@ def HttpErrorHandler(message: str, exclusions: Iterable[str] = ['self'], handler
 						refid = refid,
 						logdata = logdata,
 					)
+
+			wrapper._is_coroutine = _is_coroutine # type: ignore
 
 		else :
 			@wraps(func)

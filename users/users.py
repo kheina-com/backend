@@ -56,7 +56,6 @@ class Users(Users) :
 		FollowKVS.put(f'{user.user_id}|{user_id}', False)
 
 
-	@HttpErrorHandler("retrieving user's own profile")
 	async def getSelf(self: 'Users', user: KhUser) -> User :
 		iuser: InternalUser = await self._get_user(user.user_id)
 		return await self.user(user, iuser)

@@ -19,6 +19,7 @@ from shared.timing import timed
 from tags.router import app as tags
 from uploader.router import app as uploader
 from users.router import app as users
+from probe.router import probes
 
 
 timed.logger = lambda n, x : print(json.dumps({ n: x.dict() }))
@@ -88,6 +89,7 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=[
 ])
 app.add_middleware(KhAuthMiddleware, required=False)
 
+app.include_router(probes)
 app.include_router(account)
 app.include_router(configs)
 app.include_router(posts)

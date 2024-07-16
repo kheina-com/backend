@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: fuzzly-backend
-        image: us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend:aca93d5
+        image: us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend@sha256:1b5a84e0be907872dedc445297689a57fb0d5480c931bd13769ea2085d98cfa8
         env:
         - name: kh_aes
           valueFrom:
@@ -40,6 +40,18 @@ spec:
           requests:
             cpu: "1"
             memory: 2Gi
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 443
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 443
+          initialDelaySeconds: 15
+          periodSeconds: 30
       - name: cloud-sql-proxy
         # It is recommended to use the latest version of the Cloud SQL Auth Proxy
         # Make sure to update on a regular schedule!

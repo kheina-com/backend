@@ -6,7 +6,12 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from ..models.auth import KhUser
+from ..crc import CRC
+
+from ..models.auth import AuthToken, KhUser
+
+
+crc = CRC(32)
 
 
 _conversions: Dict[type, Callable] = {
@@ -24,11 +29,14 @@ _conversions: Dict[type, Callable] = {
 	KhUser: lambda x : {
 		'user_id': x.user_id,
 		'scope': json_stream(x.scope),
-		'token': {
-			'expires': json_stream(x.token.expires),
-			'guid': json_stream(x.token.guid),
-			'data': x.token.data,
-		} if x.token else None,
+		'token': json_stream(x.token) if x.token else None,
+	},
+	AuthToken: lambda x : {
+		'user_id': x.user_id,
+		'expires': json_stream(x.expires),
+		'guid': json_stream(x.guid),
+		'data': x.data,
+		'token': f'{crc(x.token_string.encode()):x}',
 	},
 	BaseModel: lambda x : json_stream(x.dict()),
 }

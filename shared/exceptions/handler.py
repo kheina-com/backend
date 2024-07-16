@@ -13,7 +13,7 @@ from .http_error import BadGateway
 logger: Logger = getLogger()
 
 
-def jsonErrorHandler(request: Request, e: Exception) -> UJSONResponse :
+def jsonErrorHandler(_: Request, e: Exception) -> UJSONResponse :
 	status: int = getattr(e, 'status', 500)
 
 	error: Dict[str, Union[str, int]] = {
@@ -22,6 +22,7 @@ def jsonErrorHandler(request: Request, e: Exception) -> UJSONResponse :
 	}
 
 	if isinstance(e, BaseError) :
+		logger.warning(error, exc_info=e)
 		error['error'] = f'{e.__class__.__name__}: {e}'
 
 	elif isinstance(e, ClientError) :

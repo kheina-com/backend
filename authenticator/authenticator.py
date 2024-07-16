@@ -538,7 +538,6 @@ class Authenticator(SqlInterface, Hashable) :
 		) # type: ignore
 
 
-
 	async def changePassword(self, email: str, old_password: str, new_password: str) :
 		"""
 		changes a user's password
@@ -619,7 +618,6 @@ class Authenticator(SqlInterface, Hashable) :
 				commit=True,
 				fetch_one=True,
 			)
-
 
 			return LoginResponse(
 				user_id=data[0],

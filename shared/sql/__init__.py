@@ -207,6 +207,7 @@ class ConnectionPool :
 
 
 	def readonly(self: Self) -> Connection :
+		# TODO: reconnect on failure
 		conn = getattr(ConnectionPool, '_readonly', None)
 
 		if not conn :

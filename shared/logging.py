@@ -84,7 +84,7 @@ class LogHandler(logging.Handler) :
 			try :
 				self.agent.log_struct(errorinfo, severity=record.levelno)
 
-			except :
+			except :  # noqa: E722
 				# we really, really do not want to fail-crash here.
 				# normally we would log this error and move on, but, well.
 				pass
@@ -97,7 +97,7 @@ class LogHandler(logging.Handler) :
 				else :
 					self.agent.log_text(str(record.msg), severity=record.levelno)
 
-			except :
+			except :  # noqa: E722
 				# we really, really do not want to fail-crash here.
 				# normally we would log this error and move on, but, well.
 				pass

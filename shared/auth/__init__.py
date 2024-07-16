@@ -37,14 +37,14 @@ class KhUser(KhUser) :
 	async def authenticated(self, raise_error: bool = True) :
 		if not self.token or self.token != await verifyToken(self.token.token_string) :
 			if raise_error :
-				raise Unauthorized('User is not authenticated.')
+				raise Unauthorized('User is not authenticated.', user=self, token=(await verifyToken(self.token.token_string) if self.token else None))
 			return False
 		return True
 
 	async def verify_scope(self, scope: Scope, raise_error: bool = True) :
 		await self.authenticated(raise_error)
 		if scope not in self.scope :
-			raise Forbidden('User is not authorized to access this resource.')
+			raise Forbidden('User is not authorized to access this resource.', user=self)
 		return True
 
 
@@ -95,18 +95,18 @@ async def v1token(token: str) -> AuthToken :
 		raise Unauthorized('Key has expired.')
 
 
-	token_info = ensure_future(KVS.get_async(guid.bytes, TokenMetadata))
+	token_info_task = ensure_future(KVS.get_async(guid.bytes, TokenMetadata))
 
 	try :
 		public_key = await _fetchPublicKey(key_id, algorithm)
 		public_key.verify(b64decode(signature), content.encode())
 
 	except :
-		token_info.cancel()
+		token_info_task.cancel()
 		raise Unauthorized('Key validation failed.')
 
 	try :
-		token_info = await token_info
+		token_info = await token_info_task
 		assert token_info.state == AuthState.active, 'This token is no longer active.'
 		assert token_info.algorithm == algorithm, 'Token algorithm mismatch.'
 		assert token_info.expires == expires, 'Token expiration mismatch.'
@@ -150,8 +150,9 @@ async def retrieveAuthToken(request: Request) -> AuthToken :
 
 	token_data: AuthToken = await verifyToken(token.split()[-1])
 
-	if 'fp' in token_data.data and token_data.data['fp'] != browserFingerprint(request) :
-		raise Unauthorized('The authentication token provided is not valid from this device or location.')
+	# TODO: this still isn't stable, I don't know why, one of the headers used is probably ephemeral
+	# if 'fp' in token_data.data and token_data.data['fp'] != browserFingerprint(request) :
+	# 	raise Unauthorized('The authentication token provided is not valid from this device or location.')
 
 	return token_data
 

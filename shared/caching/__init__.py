@@ -221,7 +221,7 @@ def AerospikeCache(
 
 		argspec: FullArgSpec = getfullargspec(func)
 		kw: Dict[str, Hashable] = dict(zip(argspec.args[-len(argspec.defaults):], argspec.defaults)) if argspec.defaults else { }
-		return_type: type = argspec.annotations.get('return') # type: ignore
+		return_type: Optional[type] = argspec.annotations.get('return')
 		arg_spec: Tuple[str, ...] = tuple(argspec.args)
 		del argspec
 
@@ -231,7 +231,7 @@ def AerospikeCache(
 		if iscoroutinefunction(func) :
 			@wraps(func)
 			@timed
-			async def wrapper(*args: Tuple[Hashable], **kwargs: Dict[str, Hashable]) -> Any : # type: ignore
+			async def wrapper(*args: Hashable, **kwargs: Hashable) -> Any :
 				key: str = key_format.format(**{ **kw, **dict(zip(arg_spec, args)), **kwargs })
 
 				data: return_type
@@ -256,7 +256,7 @@ def AerospikeCache(
 
 		else :
 			@wraps(func)
-			def wrapper(*args: Tuple[Hashable], **kwargs: Dict[str, Hashable]) -> Any :
+			def wrapper(*args: Hashable, **kwargs: Hashable) -> Any :
 				key: str = key_format.format(**{ **kw, **dict(zip(arg_spec, args)), **kwargs })
 
 				data: return_type

@@ -2,6 +2,7 @@ from typing import List
 
 from fastapi import APIRouter
 
+from shared.exceptions.http_error import HttpErrorHandler
 from shared.models import Badge, User
 from shared.models.auth import Scope
 from shared.models.user import SetMod, SetVerified, UpdateSelf
@@ -31,6 +32,7 @@ users: Users = Users()
 ##################################################  PUBLIC  ##################################################
 @userRouter.get('/self', response_model=User)
 @timed.root
+@HttpErrorHandler("retrieving user's own profile")
 async def v1FetchSelf(req: Request) -> User :
 	await req.user.authenticated()
 	return await users.getSelf(req.user)
