@@ -14,12 +14,14 @@ spec:
     spec:
       containers:
       - name: fuzzly-backend
-        image: us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend@sha256:fc344fe363e372b73d020c51ee9c561e2c24ae71a23eea5658b5752fc5d017bf
+        image: us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend@sha256:e8b973e82c795d3cc0f2ebb02509f601b674619644e86ca9fb9abbf627c9327d
         env:
         - name: pod_ip
           valueFrom:
             fieldRef:
               fieldPath: status.podIP
+        - name: pod_host
+          value: "*.fuzz.ly"
         - name: kh_aes
           valueFrom:
             secretKeyRef:
@@ -46,14 +48,14 @@ spec:
             memory: 2Gi
         livenessProbe:
           httpGet:
-            path: /healthz
+            path: /health/liveness
             port: 443
             scheme: HTTPS
-          initialDelaySeconds: 10
+          initialDelaySeconds: 15
           periodSeconds: 30
         readinessProbe:
           httpGet:
-            path: /readyz
+            path: /health/readiness
             port: 443
             scheme: HTTPS
           initialDelaySeconds: 15

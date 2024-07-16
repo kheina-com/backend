@@ -84,9 +84,7 @@ app.add_middleware(
 )
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=[
 	environ.get('pod_ip', '127.0.0.1'),
-	'localhost',
-	'*.fuzz.ly',
-	'fuzz.ly',
+	environ.get('pod_host', 'localhost'),
 ])
 app.add_middleware(KhAuthMiddleware, required=False)
 
