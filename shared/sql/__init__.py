@@ -1,6 +1,6 @@
 from asyncio import get_event_loop
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field as dataclass_field
 from enum import Enum
 from functools import lru_cache, partial
 from random import randbytes
@@ -30,7 +30,7 @@ _orm_attr_regex = compile(r'(col|map|pk|gen|default)(?:\[([\s\S]*?)\])?')
 
 @dataclass
 class FieldAttributes :
-	map:         List[Tuple[Tuple[str, ...], str]] = field(default_factory=lambda : [])
+	map: List[Tuple[Tuple[str, ...], str]] = dataclass_field(default_factory=lambda : [])
 	"""
 	list of paths to columns.
 	first entry of each list member is the route to the field within the model.
@@ -46,7 +46,8 @@ class FieldAttributes :
 class Conn :
 
 	def __init__(self, pool: 'ConnectionPool') -> None :
-		self.conn: Connection; self.key: Hashable
+		self.conn: Connection
+		self.key: Hashable
 		self.conn, self.key = pool._get_conn()
 
 		self.pool: ConnectionPool = pool
@@ -224,7 +225,7 @@ class ConnectionPool :
 			try :
 				self.used[key].close()
 
-			except :
+			except Exception :
 				pass
 
 			finally :
@@ -255,8 +256,14 @@ class ConnectionPool :
 
 
 
-class AwaitableQuery(Protocol):
-    def __call__(self, sql: Query, params:tuple=(), fetch_one: bool = False, fetch_all: bool = False) -> Awaitable[Any] : ...
+class AwaitableQuery(Protocol) :
+    def __call__(
+		self:      Self,
+		sql:       Query,
+		params:    tuple[Any, ...] = (),
+		fetch_one: bool            = False,
+		fetch_all: bool            = False,
+	) -> Awaitable[Any] : ...
 
 
 class SqlInterface :
@@ -277,16 +284,25 @@ class SqlInterface :
 			SqlInterface.pool = ConnectionPool()
 
 
-	def _convert_item(self: 'SqlInterface', item: Any) -> Any :
+	def _convert_item(self: Self, item: Any) -> Any :
 		for cls in type(item).__mro__ :
 			if cls in self._conversions :
 				return self._conversions[cls](item)
+
 		return item
 
 
 	@timed
 	@deprecated('use query_async instead')
-	def query(self: 'SqlInterface', sql: Union[str, Query], params:tuple=(), commit:bool=False, fetch_one:bool=False, fetch_all:bool=False, maxretry:int=2) -> Any :
+	def query(
+		self:      Self,
+		sql:       Union[str, Query],
+		params:    tuple[Any, ...] = (),
+		commit:    bool            = False,
+		fetch_one: bool            = False,
+		fetch_all: bool            = False,
+		maxretry:  int             = 2,
+	) -> Any :
 		if isinstance(sql, Query) :
 			sql, params = sql.build()
 
@@ -354,16 +370,24 @@ class SqlInterface :
 
 
 	@timed
-	async def query_async(self: 'SqlInterface', sql: Union[str, Query], params:tuple=(), commit:bool=False, fetch_one:bool=False, fetch_all:bool=False, maxretry:int=2) -> Any :
+	async def query_async(
+		self:      Self,
+		sql:       Union[str, Query],
+		params:    tuple[Any, ...] = (),
+		commit:    bool            = False,
+		fetch_one: bool            = False,
+		fetch_all: bool            = False,
+		maxretry:  int             = 2,
+	) -> Any :
 		with ThreadPoolExecutor() as threadpool :
 			return await get_event_loop().run_in_executor(threadpool, partial(self.query, sql, params, commit, fetch_one, fetch_all, maxretry))
 
 
-	def transaction(self: 'SqlInterface') -> 'Transaction' :
+	def transaction(self: Self) -> 'Transaction' :
 		return Transaction(self)
 
 
-	def close(self: 'SqlInterface') -> int :
+	def close(self: Self) -> int :
 		return 0
 		SqlInterface._conn.close()
 		return SqlInterface._conn.closed
@@ -751,10 +775,10 @@ class Transaction :
 		self.select = partial(self._sql.select, query=self.query_async)
 		self.update = partial(self._sql.update, query=self.query_async)
 		self.delete = partial(self._sql.delete, query=self.query_async)
-		self.where  = partial(self._sql.where, query=self.query_async)
+		self.where  = partial(self._sql.where,  query=self.query_async)
 
 
-	async def __aenter__(self: 'Transaction') :
+	async def __aenter__(self: Self) :
 		if self.conn :
 			self.nested += 1
 
@@ -768,7 +792,7 @@ class Transaction :
 		return self
 
 
-	async def __aexit__(self: 'Transaction', exc_type: Optional[Type[BaseException]], exc_obj: Optional[BaseException], exc_tb: Optional[TracebackType]) :
+	async def __aexit__(self: Self, exc_type: Optional[Type[BaseException]], exc_obj: Optional[BaseException], exc_tb: Optional[TracebackType]) :
 		if not self.nested :
 			if self.cur :
 				self.cur.__exit__(exc_type, exc_obj, exc_tb)
@@ -779,15 +803,24 @@ class Transaction :
 			self.nested -= 1
 
 
-	def commit(self: 'Transaction') :
-		if self.conn : self.conn.commit()
+	def commit(self: Self) :
+		if self.conn :
+			self.conn.commit()
 
 
-	def rollback(self: 'Transaction') :
-		if self.conn : self.conn.rollback()
+	def rollback(self: Self) :
+		if self.conn :
+			self.conn.rollback()
 
 
-	def query(self: 'Transaction', sql: Union[str, Query], params:tuple=(), fetch_one:bool=False, fetch_all:bool=False) -> Any :
+	@timed
+	def query(
+		self:      Self,
+		sql:       Union[str, Query],
+		params:    tuple[Any, ...] = (),
+		fetch_one: bool            = False,
+		fetch_all: bool            = False,
+	) -> Any :
 		if isinstance(sql, Query) :
 			sql, params = sql.build()
 
@@ -818,6 +851,13 @@ class Transaction :
 			raise
 
 
-	async def query_async(self: 'Transaction', sql: Union[str, Query], params:tuple=(), fetch_one:bool=False, fetch_all:bool=False) -> Any :
+	@timed
+	async def query_async(
+		self:      Self,
+		sql:       Union[str, Query],
+		params:    tuple[Any, ...] = (),
+		fetch_one: bool            = False,
+		fetch_all: bool            = False,
+	) -> Any :
 		with ThreadPoolExecutor() as threadpool :
 			return await get_event_loop().run_in_executor(threadpool, partial(self.query, sql, params, fetch_one, fetch_all))

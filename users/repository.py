@@ -1,13 +1,15 @@
-from typing import Dict, Optional, Self, Tuple, Union
+from datetime import datetime
+from typing import Optional, Self, Union
 
 from shared.auth import KhUser
-from shared.caching import AerospikeCache, SimpleCache
+from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadRequest, NotFound
 from shared.maps import privacy_map
 from shared.models import Badge, InternalUser, Privacy, User, UserPortable, UserPrivacy, Verified
 from shared.sql import SqlInterface
 from shared.timing import timed
+from cache import AsyncLRU
 
 
 UserKVS: KeyValueStore = KeyValueStore('kheina', 'users', local_TTL=60)
@@ -15,20 +17,78 @@ FollowKVS: KeyValueStore = KeyValueStore('kheina', 'following')
 
 
 # this steals the idea of a map from kh_common.map.Map, probably use that when types are figured out in a generic way
-class BadgeMap(SqlInterface, dict) :
+class BadgeMap(SqlInterface) :
 
-	def __missing__(self, key: int) -> Badge :
-		data: Tuple[str, str] = self.query(f"""
+	_all: dict[int, Badge]
+
+	async def _populate_all(self: Self) -> None :
+		if getattr(BadgeMap, '_all', None) :
+			return
+
+		data: list[tuple[int, str, str]] = await self.query_async("""
+			SELECT badge_id, emoji, label
+			FROM kheina.public.badges;
+			""",
+			fetch_all=True,
+		)
+
+		BadgeMap._all = {
+			row[0]: Badge(emoji=row[1], label=row[2])
+			for row in data
+		}
+
+
+	async def all(self: Self) -> list[Badge] :
+		await self._populate_all()
+		return list(BadgeMap._all.values())
+
+
+	@AsyncLRU(maxsize=0)
+	async def get(self: Self, key: int) -> Badge :
+		data: tuple[str, str] = await self.query_async("""
 			SELECT emoji, label
 			FROM kheina.public.badges
 			WHERE badge_id = %s
 			LIMIT 1;
-			""",
-			(key,),
+			""", (
+				key,
+			),
 			fetch_one=True,
 		)
-		self[key] = Badge(emoji=data[0], label=data[1])
-		return self[key]
+
+		try :
+			badge = Badge(emoji=data[0], label=data[1])
+			await self._populate_all()
+			BadgeMap._all[key] = badge
+
+		except TypeError :
+			raise NotFound(f'badge with id {key} does not exist.')
+
+		return badge
+
+	@AsyncLRU(maxsize=0)
+	async def get_id(self: Self, key: Badge) -> int :
+		data: tuple[int] = await self.query_async("""
+			SELECT badge_id
+			FROM kheina.public.badges
+			WHERE emoji = %s
+				AND label = %s
+			LIMIT 1;
+			""", (
+				key.emoji,
+				key.label,
+			),
+			fetch_one=True,
+		)
+
+		try :
+			await self._populate_all()
+			BadgeMap._all[data[0]] = key
+
+		except TypeError :
+			raise NotFound(f'badge with emoji "{key.emoji}" and label "{key.label}" does not exist.')
+
+		return data[0]
 
 badge_map: BadgeMap = BadgeMap()
 
@@ -43,6 +103,7 @@ class Users(SqlInterface) :
 	def _validate_description(self: Self, description: str) -> Optional[str] :
 		if len(description) > 10000 :
 			raise BadRequest('the given description is over the 10,000 character limit.', description=description)
+
 		return self._clean_text(description)
 
 
@@ -69,26 +130,10 @@ class Users(SqlInterface) :
 		return p
 
 
-	@SimpleCache(600)
-	def _get_badge_map(self: Self) -> Dict[int, Badge] :
-		data = self.query("""
-			SELECT badge_id, emoji, label
-			FROM kheina.public.badges;
-			""",
-			fetch_all=True,
-		)
-		return { x[0]: Badge(emoji=x[1], label=x[2]) for x in data }
-
-
-	@SimpleCache(600)
-	def _get_reverse_badge_map(self: Self) -> Dict[Badge, int] :
-		return { badge: id for id, badge in self._get_badge_map().items() }
-
-
 	@timed.link
 	@AerospikeCache('kheina', 'users', '{user_id}', _kvs=UserKVS)
 	async def _get_user(self: Self, user_id: int) -> InternalUser :
-		data = await self.query_async("""
+		data: tuple[int, str, str, int, Optional[int], Optional[str], datetime, Optional[str], Optional[int], bool, bool, bool, list[int]] = await self.query_async("""
 			SELECT
 				users.user_id,
 				users.display_name,
@@ -109,13 +154,14 @@ class Users(SqlInterface) :
 			WHERE users.user_id = %s
 			GROUP BY
 				users.user_id;
-			""",
-			(user_id,),
+			""", (
+				user_id,
+			),
 			fetch_one=True,
 		)
 
 		if not data :
-			raise NotFound('no data was found for the provided user.')
+			raise NotFound('no data was found for the provided user.', user_id=user_id)
 
 		verified: Optional[Verified] = None
 
@@ -129,17 +175,17 @@ class Users(SqlInterface) :
 			verified = Verified.artist
 
 		return InternalUser(
-			user_id = data[0],
-			name = data[1],
-			handle = data[2],
-			privacy = data[3],
-			icon = data[4],
-			website = data[5],
-			created = data[6],
+			user_id     = data[0],
+			name        = data[1],
+			handle      = data[2],
+			privacy     = data[3],
+			icon        = data[4],  # type: ignore
+			website     = data[5],
+			created     = data[6],
 			description = data[7],
-			banner = data[8],
-			verified = verified,
-			badges = list(filter(None, map(self._get_badge_map().get, data[12]))),
+			banner      = data[8],  # type: ignore
+			verified    = verified,
+			badges      = [await badge_map.get(i) for i in filter(None, data[12])],
 		)
 
 
@@ -150,13 +196,14 @@ class Users(SqlInterface) :
 				users.user_id
 			FROM kheina.public.users
 			WHERE lower(users.handle) = lower(%s);
-			""",
-			(handle.lower(),),
+			""", (
+				handle.lower(),
+			),
 			fetch_one=True,
 		)
 
 		if not data :
-			raise NotFound('no data was found for the provided user.')
+			raise NotFound('no data was found for the provided user.', handle=handle)
 
 		return data[0]
 
@@ -173,14 +220,16 @@ class Users(SqlInterface) :
 		returns true if the user specified by user_id is following the user specified by target
 		"""
 
-		data = await self.query_async("""
+		data: tuple[int] = await self.query_async("""
 			SELECT count(1)
 			FROM kheina.public.following
 			WHERE following.user_id = %s
 				AND following.follows = %s;
-			""",
-			(user_id, target),
-			fetch_all=True,
+			""", (
+				user_id,
+				target,
+			),
+			fetch_one=True,
 		)
 
 		if not data :

@@ -6,7 +6,7 @@ from shared.caching import SimpleCache
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
 from shared.models import Badge, InternalUser, User, UserPrivacy, Verified
 
-from .repository import FollowKVS, UserKVS, Users, privacy_map  # type: ignore
+from .repository import badge_map, FollowKVS, UserKVS, Users, privacy_map  # type: ignore
 
 
 class Users(Users) :
@@ -41,7 +41,7 @@ class Users(Users) :
 		user_id: int = await self._handle_to_user_id(handle.lower())
 		following: bool = await self.following(user.user_id, user_id)
 
-		if following == False :
+		if following is False :
 			raise BadRequest('you are already not following this user.')
 
 		await self.query_async("""
@@ -134,7 +134,7 @@ class Users(Users) :
 				website = row[4],
 				created = row[5],
 				description = row[6],
-				badges = list(filter(None, map(self._get_badge_map().get, row[11]))),
+				badges = [await badge_map.get(i) for i in filter(None, row[11])],
 				verified = Verified.admin if row[9] else (
 					Verified.mod if row[8] else (
 						Verified.artist if row[10] else None
@@ -168,15 +168,16 @@ class Users(Users) :
 
 	@SimpleCache(60)
 	async def fetchBadges(self: 'Users') -> List[Badge] :
-		return list(self._get_badge_map().values())
+		return await badge_map.all()
 
 
 	@HttpErrorHandler('adding badge to self')
 	async def addBadge(self: 'Users', user: KhUser, badge: Badge) -> None :
 		iuser_task: Task[InternalUser] = ensure_future(self._get_user(user.user_id))
-		badge_id: Optional[int] = self._get_reverse_badge_map().get(badge)
+		try :
+			badge_id: int = await badge_map.get_id(badge)
 
-		if not badge_id :
+		except IndexError :
 			raise NotFound(f'badge with emoji "{badge.emoji}" and label "{badge.label}" does not exist.')
 
 		iuser: InternalUser = await iuser_task
@@ -201,9 +202,10 @@ class Users(Users) :
 	@HttpErrorHandler('removing badge from self')
 	async def removeBadge(self: 'Users', user: KhUser, badge: Badge) -> None :
 		iuser_task: Task[InternalUser] = ensure_future(self._get_user(user.user_id))
-		badge_id: Optional[int] = self._get_reverse_badge_map().get(badge)
+		try :
+			badge_id: int = await badge_map.get_id(badge)
 
-		if not badge_id :
+		except IndexError :
 			raise NotFound(f'badge with emoji "{badge.emoji}" and label "{badge.label}" does not exist.')
 
 		iuser: InternalUser = await iuser_task

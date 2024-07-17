@@ -162,7 +162,7 @@ class B2Interface :
 		sha1: str = sha1 or b64encode(hashlib_sha1(file_data).digest()).decode()
 		content_type: str = content_type or self._get_mime_from_filename(filename)
 
-		print('content_type:', content_type, 'content_length:', len(file_data), 'sha1:', sha1)
+		# print('content_type:', content_type, 'content_length:', len(file_data), 'sha1:', sha1)
 
 		backoff: float = 1
 		result = None

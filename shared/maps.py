@@ -7,10 +7,10 @@ from .sql import SqlInterface
 
 
 # this steals the idea of a map from kh_common.map.Map, probably use that when types are figured out in a generic way
-class PrivacyMap(SqlInterface):
+class PrivacyMap(SqlInterface) :
 	@AsyncLRU(maxsize=0)
-	async def get(self: Self, key: Union[int, str, Privacy]) -> Union[int, Privacy]:
-		if isinstance(key, int):
+	async def get(self: Self, key: Union[int, str, Privacy]) -> Union[int, Privacy] :
+		if isinstance(key, int) :
 			d1: Tuple[str] = await self.query_async(
 				"""
 				SELECT type
@@ -25,7 +25,7 @@ class PrivacyMap(SqlInterface):
 			# key is the id, return privacy
 			return Privacy(value=d1[0])
 
-		else:
+		else :
 			d2: Tuple[int] = await self.query_async(
 				"""
 				SELECT privacy_id

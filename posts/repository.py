@@ -527,7 +527,7 @@ class Posts(SqlInterface) :
 				description = datum[7],
 				banner = datum[8],
 				verified = verified,
-				badges = list(map(badge_map.__getitem__, filter(None, datum[12]))),
+				badges = [await badge_map.get(i) for i in filter(None, datum[12])],
 			)
 			users[datum[0]] = user
 			ensure_future(UserKVS.put_async(str(datum[0]), user))

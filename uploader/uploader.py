@@ -390,7 +390,7 @@ class Uploader(SqlInterface, B2Interface) :
 				content_type = et.get_tag(file_on_disk, 'File:MIMEType') # type: ignore
 				et.execute(b'-overwrite_original_in_place', b'-ALL=', file_on_disk)
 
-		except :
+		except :  # noqa: E722
 			self.delete_file(file_on_disk)
 			refid: UUID = uuid4()
 			self.logger.exception({ 'refid': refid })
@@ -406,7 +406,7 @@ class Uploader(SqlInterface, B2Interface) :
 			if dot_index and filename[dot_index + 1:].lower() in self.mime_types :
 				filename = filename[:dot_index] + '-web' + filename[dot_index:]
 
-		post = await posts._get_post(post_id)
+		post: InternalPost = await posts._get_post(post_id)
 
 		# thumbhash
 		with Image(file=open(file_on_disk, 'rb')) as image :
@@ -507,7 +507,7 @@ class Uploader(SqlInterface, B2Interface) :
 			post.media_type = media_type
 			post.size       = image_size
 			post.filename   = filename
-			post.thumbhash  = thumbhash
+			post.thumbhash  = thumbhash  # type: ignore
 			await PostKVS.put_async(post_id, post)
 
 			return {
