@@ -1,3 +1,4 @@
+configure docker to use the gcloud docker image repo
 ```sh
 gcloud auth configure-docker <REGION>-docker.pkg.dev
 docker push us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend:$(git rev-parse --short HEAD)

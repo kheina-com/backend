@@ -74,7 +74,7 @@ class Configs(SqlInterface) :
 	@HttpErrorHandler('retrieving config')
 	@AerospikeCache('kheina', 'configs', '{config}', _kvs=KVS)
 	async def getConfig[T: BaseModel](self, config: ConfigType, _: Type[T]) -> T :
-		data: List[bytes] = await self.query_async("""
+		data: tuple[memoryview] = await self.query_async("""
 			SELECT bytes
 			FROM kheina.public.configs
 			WHERE key = %s;

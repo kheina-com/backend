@@ -1,6 +1,7 @@
 from asyncio import get_event_loop
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from enum import Enum
 from functools import lru_cache, partial
 from random import randbytes
@@ -526,6 +527,19 @@ class SqlInterface :
 		return model.parse_obj(d)
 
 
+	_read_conversions = {
+		memoryview: bytes,
+	}
+
+
+	@staticmethod
+	def _read_convert(value: Any) -> Any :
+		if type(value) in SqlInterface._read_conversions :
+			return SqlInterface._read_conversions[type(value)](value)
+
+		return value
+
+
 	@staticmethod
 	def _assign_field_values[T: BaseModel](model: Type[T], data: Tuple[Any, ...]) -> T :
 		i = 0
@@ -552,7 +566,7 @@ class SqlInterface :
 					if data[i] :
 						unset = False
 
-					v[k] = data[i]
+					v[k] = SqlInterface._read_convert(data[i])
 					d[key] = v
 					i += 1
 
@@ -560,7 +574,7 @@ class SqlInterface :
 					d[key] = field.default
 
 			else :
-				d[key] = data[i]
+				d[key] = SqlInterface._read_convert(data[i])
 				i += 1
 
 		return model.parse_obj(d)

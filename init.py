@@ -10,7 +10,6 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from authenticator.authenticator import Authenticator
 from authenticator.models import LoginRequest
 from shared.backblaze import B2Interface
 from shared.base64 import b64encode
@@ -100,6 +99,7 @@ def uploadDefaultIcon() -> None :
 
 @cli.command('admin')
 async def createAdmin() -> LoginRequest :
+	from authenticator.authenticator import Authenticator
 	"""
 	creates a default admin account on your fuzzly instance
 	"""

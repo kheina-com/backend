@@ -14,18 +14,18 @@ from shared.sql.query import Table
 
 @unique
 class Rating(Enum) :
-	general = 'general'
-	mature = 'mature'
+	general  = 'general'
+	mature   = 'mature'
 	explicit = 'explicit'
 
 
 @unique
 class PostSort(Enum) :
-	new = 'new'
-	old = 'old'
-	top = 'top'
-	hot = 'hot'
-	best = 'best'
+	new           = 'new'
+	old           = 'old'
+	top           = 'top'
+	hot           = 'hot'
+	best          = 'best'
 	controversial = 'controversial'
 
 
@@ -33,14 +33,14 @@ PostIdValidator = validator('post_id', pre=True, always=True, allow_reuse=True)(
 
 
 class Score(BaseModel) :
-	up: int
-	down: int
-	total: int
+	up:        int
+	down:      int
+	total:     int
 	user_vote: int
 
 
 class PostSize(BaseModel) :
-	width: int
+	width:  int
 	height: int
 
 
@@ -48,12 +48,12 @@ class VoteRequest(BaseModel) :
 	_post_id_validator = PostIdValidator
 
 	post_id: PostId
-	vote: int
+	vote:    int
 
 
 class TimelineRequest(BaseModel) :
 	count: int = 64
-	page: int = 1
+	page:  int = 1
 
 
 class BaseFetchRequest(TimelineRequest) :
@@ -72,13 +72,13 @@ class FetchCommentsRequest(BaseFetchRequest) :
 
 class GetUserPostsRequest(BaseModel) :
 	handle: str
-	count: int = 64
-	page: int = 1
+	count:  int = 64
+	page:   int = 1
 
 
 class MediaType(BaseModel) :
-	file_type: str = ""
-	mime_type: str = ""
+	file_type: str = ''
+	mime_type: str = ''
 
 
 @unique
@@ -110,27 +110,27 @@ class Post(BaseModel) :
 	_post_id_converter = validator('parent', pre=True, always=True, allow_reuse=True)(_post_id_converter)
 	_thumbhash_converter = validator('thumbhash', pre=True, always=True, allow_reuse=True)(_thumbhash_converter)
 
-	post_id: PostId
-	title: Optional[str]
+	post_id:     PostId
+	title:       Optional[str]
 	description: Optional[str]
-	user: UserPortable
-	score: Optional[Score]
-	rating: Rating
-	parent: Optional[PostId]
-	privacy: Privacy
-	created: datetime
-	updated: datetime
-	filename: Optional[str]
-	media_type: Optional[MediaType]
-	size: Optional[PostSize]
-	blocked: bool
-	thumbhash: Optional[str]
+	user:        UserPortable
+	score:       Optional[Score]
+	rating:      Rating
+	parent:      Optional[PostId]
+	privacy:     Privacy
+	created:     datetime
+	updated:     datetime
+	filename:    Optional[str]
+	media_type:  Optional[MediaType]
+	size:        Optional[PostSize]
+	blocked:     bool
+	thumbhash:   Optional[str]
 
 
 class SearchResults(BaseModel) :
-	posts: List[Post]
+	posts: list[Post]
 	count: int
-	page: int
+	page:  int
 	total: int
 
 
@@ -157,11 +157,12 @@ class InternalPost(BaseModel) :
 	media_type:  Optional[int]      = None
 	size:        Optional[PostSize] = Field(None, description='orm:"map[width:width,height:height]"')
 	thumbhash:   Optional[str]      = None
+	locked:      bool               = False
 
 
 class InternalScore(BaseModel) :
-	up: int
-	down: int
+	up:    int
+	down:  int
 	total: int
 
 
@@ -194,13 +195,7 @@ RssItem = """<item>{title}
 </item>"""
 
 
-RssTitle = '\n<title>{}</title>'
-
-
+RssTitle       = '\n<title>{}</title>'
 RssDescription = '\n<description>{}</description>'
-
-
-RssMedia = '\n<enclosure url="{url}" length="{length}" type="{mime_type}"/>'
-
-
-RssDateFormat = '%a, %d %b %Y %H:%M:%S.%f %Z'
+RssMedia       = '\n<enclosure url="{url}" length="{length}" type="{mime_type}"/>'
+RssDateFormat  = '%a, %d %b %Y %H:%M:%S.%f %Z'

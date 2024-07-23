@@ -1,12 +1,11 @@
 from subprocess import PIPE, Popen
-from typing import Union
 
 from ..utilities import stringSlice
 
 
-name: Union[str, None] = None
+name: str = ''
 
-output: Union[bytes, None] = b''.join(Popen(['git', 'config', '--get', 'remote.origin.url'], stdout=PIPE, stderr=PIPE).communicate())
+output: bytes = b''.join(Popen(['git', 'config', '--get', 'remote.origin.url'], stdout=PIPE, stderr=PIPE).communicate())
 if output and not output.startswith(b'fatal'):
 	name = stringSlice(output.decode(), '/', '.git')
 
@@ -16,18 +15,22 @@ else :
 		name = stringSlice(output.decode(), '/').strip()
 
 
-short_hash: Union[str, None] = None
+short_hash: str = ''
 
 output = b''.join(Popen(['git', 'rev-parse', '--short', 'HEAD'], stdout=PIPE, stderr=PIPE).communicate())
 if output and not output.startswith(b'fatal'):
 	short_hash = output.decode().strip()
 
 
-full_hash: Union[str, None] = None
+full_hash: str = ''
 
 output = b''.join(Popen(['git', 'rev-parse', 'HEAD'], stdout=PIPE, stderr=PIPE).communicate())
 if output and not output.startswith(b'fatal'):
 	full_hash = output.decode().strip()
+
+
+if not all([name, short_hash, full_hash]) :
+	raise ValueError('failed to parse git environment')
 
 
 del output, stringSlice, PIPE, Popen

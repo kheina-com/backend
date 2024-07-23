@@ -8,7 +8,7 @@ async-timeout==3.0.1
 asyncclick==8.1.7.2
 attrs==23.2.0
 avro==1.11.3
-avrofastapi==0.0.5
+avrofastapi==0.0.6
 certifi==2024.7.4
 cffi==1.16.0
 chardet==4.0.0

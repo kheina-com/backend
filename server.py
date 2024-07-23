@@ -2,6 +2,7 @@ import json
 from os import environ
 
 from fastapi import FastAPI
+from pydantic import BaseModel
 from starlette.middleware.exceptions import ExceptionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -9,8 +10,10 @@ from account.router import app as account
 from configs.router import app as configs
 from posts.router import app as posts
 from probe.router import probes
+from reporting.router import app as reporting
 from sets.router import app as sets
-from shared.config.constants import environment
+from shared.config.constants import Environment, environment
+from shared.config.repo import full_hash, name, short_hash
 from shared.exceptions.base_error import BaseError
 from shared.exceptions.handler import jsonErrorHandler
 from shared.server.middleware import CustomHeaderMiddleware, HeadersToSet
@@ -88,6 +91,30 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=[
 ])
 app.add_middleware(KhAuthMiddleware, required=False)
 
+
+class VersionInfo(BaseModel) :
+	short: str
+	full:  str
+
+
+class ServiceInfo(BaseModel) :
+	name:        str
+	environment: Environment
+	version:     VersionInfo
+
+
+@app.get('/')
+def root() -> ServiceInfo :
+	return ServiceInfo(
+		name        = name,
+		environment = environment,
+		version = VersionInfo(
+			short = short_hash,
+			full  = full_hash,
+		),
+	)
+
+
 app.include_router(probes)
 app.include_router(account)
 app.include_router(configs)
@@ -96,6 +123,7 @@ app.include_router(sets)
 app.include_router(tags)
 app.include_router(uploader)
 app.include_router(users)
+app.include_router(reporting)
 
 @app.on_event('shutdown')
 def shutdown() :

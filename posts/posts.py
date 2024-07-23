@@ -245,6 +245,11 @@ class Posts(Posts) :
 							Operator.equal,
 							Value(await privacy_map.get(Privacy.public)),
 						),
+						Where(
+							Field('posts', 'locked'),
+							Operator.equal,
+							Value(False),
+						),
 					),
 					Join(
 						JoinType.inner,
@@ -282,6 +287,11 @@ class Posts(Posts) :
 							Operator.equal,
 							Value(await privacy_map.get(Privacy.public)),
 						),
+						Where(
+							Field('posts', 'locked'),
+							Operator.equal,
+							Value(False),
+						),
 					),
 				)
 
@@ -305,6 +315,11 @@ class Posts(Posts) :
 						Operator.equal,
 						Value(await privacy_map.get(Privacy.public)),
 					),
+					Where(
+						Field('posts', 'locked'),
+						Operator.equal,
+						Value(False),
+					),			
 				)
 
 			if include_tags :
@@ -451,6 +466,11 @@ class Posts(Posts) :
 					Operator.equal,
 					Value(await privacy_map.get(Privacy.public)),
 				),
+				Where(
+					Field('posts', 'locked'),
+					Operator.equal,
+					Value(False),
+				),			
 			)
 
 		if sort in { PostSort.new, PostSort.old } :

@@ -3,13 +3,12 @@ from typing import List
 import ujson
 from avrofastapi.schema import AvroSchema
 
-from shared.base64 import b64decode, b64encode
+from shared.base64 import b64encode
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.crc import CRC
 from shared.exceptions.http_error import HttpErrorHandler, NotFound
 from shared.sql import SqlInterface
-from shared.utilities import getFullyQualifiedClassName
 
 
 KVS: KeyValueStore = KeyValueStore('kheina', 'avro_schemas', local_TTL=60)

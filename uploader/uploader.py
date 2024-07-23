@@ -532,6 +532,7 @@ class Uploader(SqlInterface, B2Interface) :
 		privacy: Optional[Privacy] = None,
 		rating: Optional[Rating] = None,
 	) -> None :
+		#TODO: check for active actions on post and determine if update satisfies the required action
 		self._validateTitle(title)
 		self._validateDescription(description)
 

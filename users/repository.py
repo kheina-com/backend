@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import Optional, Self, Union
 
+from cache import AsyncLRU
+
 from shared.auth import KhUser
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
@@ -9,7 +11,6 @@ from shared.maps import privacy_map
 from shared.models import Badge, InternalUser, Privacy, User, UserPortable, UserPrivacy, Verified
 from shared.sql import SqlInterface
 from shared.timing import timed
-from cache import AsyncLRU
 
 
 UserKVS: KeyValueStore = KeyValueStore('kheina', 'users', local_TTL=60)
@@ -130,7 +131,7 @@ class Users(SqlInterface) :
 		return p
 
 
-	@timed.link
+	@timed
 	@AerospikeCache('kheina', 'users', '{user_id}', _kvs=UserKVS)
 	async def _get_user(self: Self, user_id: int) -> InternalUser :
 		data: tuple[int, str, str, int, Optional[int], Optional[str], datetime, Optional[str], Optional[int], bool, bool, bool, list[int]] = await self.query_async("""
@@ -259,7 +260,7 @@ class Users(SqlInterface) :
 		)
 
 
-	@timed.link
+	@timed
 	async def portable(self: Self, user: KhUser, iuser: InternalUser) -> UserPortable :
 		following: Optional[bool] = None
 

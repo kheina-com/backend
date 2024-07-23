@@ -6,7 +6,7 @@ from shared.caching import SimpleCache
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
 from shared.models import Badge, InternalUser, User, UserPrivacy, Verified
 
-from .repository import badge_map, FollowKVS, UserKVS, Users, privacy_map  # type: ignore
+from .repository import FollowKVS, UserKVS, Users, badge_map, privacy_map  # type: ignore
 
 
 class Users(Users) :

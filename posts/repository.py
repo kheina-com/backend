@@ -26,9 +26,9 @@ from .scoring import confidence, controversial, hot
 
 
 ScoreKVS: KeyValueStore = KeyValueStore('kheina', 'score')
-VoteKVS: KeyValueStore = KeyValueStore('kheina', 'votes')
-PostKVS: KeyValueStore = KeyValueStore('kheina', 'posts')
-users = Users()
+VoteKVS:  KeyValueStore = KeyValueStore('kheina', 'votes')
+PostKVS:  KeyValueStore = KeyValueStore('kheina', 'posts')
+users  = Users()
 tagger = Tags()
 
 
@@ -100,7 +100,7 @@ class UserCombined:
 
 class Posts(SqlInterface) :
 
-	def parse_response(self: Self, data: List[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes]]) -> List[InternalPost] :
+	def parse_response(self: Self, data: List[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes, bool]]) -> List[InternalPost] :
 			posts: List[InternalPost] = []
 
 			for row in data :
@@ -118,6 +118,7 @@ class Posts(SqlInterface) :
 					user_id=row[11],
 					privacy=row[12],
 					thumbhash=row[13], # type: ignore
+					locked=row[14],
 				)
 				posts.append(post)
 				ensure_future(PostKVS.put_async(post.post_id, post))
@@ -125,7 +126,7 @@ class Posts(SqlInterface) :
 			return posts
 
 
-	def internal_select(self: Self, query: Query) -> Callable[[List[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes]]], List[InternalPost]] :
+	def internal_select(self: Self, query: Query) -> Callable[[List[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes, bool]]], List[InternalPost]] :
 		query.select(
 			Field('posts', 'post_id'),
 			Field('posts', 'title'),
@@ -141,6 +142,7 @@ class Posts(SqlInterface) :
 			Field('posts', 'uploader'),
 			Field('posts', 'privacy'),
 			Field('posts', 'thumbhash'),
+			Field('posts', 'locked'),
 		)
 
 		return self.parse_response
@@ -168,10 +170,10 @@ class Posts(SqlInterface) :
 
 	@timed
 	async def post(self: Self, ipost: InternalPost, user: KhUser) -> Post :
-		post_id: PostId = PostId(ipost.post_id)
-		upl: Task[InternalUser] = ensure_future(users._get_user(ipost.user_id))
-		tags: Task[TagGroups] = ensure_future(tagger._fetch_tags_by_post(post_id))
-		score: Task[Optional[Score]] = ensure_future(self.getScore(user, post_id))
+		post_id: PostId                = PostId(ipost.post_id)
+		upl:     Task[InternalUser]    = ensure_future(users._get_user(ipost.user_id))
+		tags:    Task[TagGroups]       = ensure_future(tagger._fetch_tags_by_post(post_id))
+		score:   Task[Optional[Score]] = ensure_future(self.getScore(user, post_id))
 
 		uploader: InternalUser = await upl
 		upl_portable: Task[UserPortable] = ensure_future(users.portable(user, uploader))
@@ -342,7 +344,12 @@ class Posts(SqlInterface) :
 		:return: boolean - True if the user has permission, otherwise False
 		"""
 
-		if ipost.privacy == await privacy_map.get(Privacy.public) :
+		if (
+			(
+				ipost.privacy == await privacy_map.get(Privacy.public) or
+				ipost.privacy == await privacy_map.get(Privacy.unlisted)
+			) and not ipost.locked
+		) :
 			return True
 
 		if not await user.authenticated(raise_error=False) :

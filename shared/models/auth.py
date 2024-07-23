@@ -1,26 +1,26 @@
 from datetime import datetime
 from enum import Enum, IntEnum, unique
-from typing import Any, Dict, NamedTuple, Optional, Set
+from typing import Any, NamedTuple, Optional
 from uuid import UUID
 
 from pydantic import BaseModel
 
 
 class AuthToken(NamedTuple) :
-	user_id: int
-	expires: datetime
-	guid: UUID
-	data: Dict[str, Any]
+	user_id:      int
+	expires:      datetime
+	guid:         UUID
+	data:         dict[str, Any]
 	token_string: str
 
 
 @unique
 class Scope(IntEnum) :
-	default = 0
-	bot = 1
-	user = 2
-	mod = 3
-	admin = 4
+	default  = 0
+	bot      = 1
+	user     = 2
+	mod      = 3
+	admin    = 4
 	internal = 5
 
 	def all_included_scopes(self) :
@@ -28,9 +28,10 @@ class Scope(IntEnum) :
 
 
 class KhUser(NamedTuple) :
-	user_id: int = -1
-	token: Optional[AuthToken] = None
-	scope: Set[Scope] = set()
+	user_id: int                 = -1
+	token:   Optional[AuthToken] = None
+	scope:   set[Scope]          = set()
+	banned:  bool                = False
 
 	def __hash__(self) -> int :
 		return hash(f'{self.user_id}{self.scope}')
@@ -43,26 +44,26 @@ class KhUser(NamedTuple) :
 
 class PublicKeyResponse(BaseModel) :
 	algorithm: str
-	key: str
+	key:       str
 	signature: str
-	issued: datetime
-	expires: datetime
+	issued:    datetime
+	expires:   datetime
 
 
 @unique
 class AuthState(IntEnum) :
-	active = 0
+	active   = 0
 	inactive = 1
 
 
 class TokenMetadata(BaseModel) :
-	state: AuthState
-	key_id: int
-	user_id: int
-	version: bytes
-	algorithm: str
-	expires: datetime
-	issued: datetime
+	state:       AuthState
+	key_id:      int
+	user_id:     int
+	version:     bytes
+	algorithm:   str
+	expires:     datetime
+	issued:      datetime
 	fingerprint: bytes
 
 
@@ -72,17 +73,17 @@ class AuthAlgorithm(Enum) :
 
 
 class TokenResponse(BaseModel) :
-	version: str
+	version:   str
 	algorithm: AuthAlgorithm
-	key_id: int
-	issued: datetime
-	expires: datetime
-	token: str
+	key_id:    int
+	issued:    datetime
+	expires:   datetime
+	token:     str
 
 
 class LoginResponse(BaseModel) :
 	user_id: int
-	handle: str
-	name: Optional[str]
-	mod: bool
-	token: TokenResponse
+	handle:  str
+	name:    Optional[str]
+	mod:     bool
+	token:   TokenResponse

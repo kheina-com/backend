@@ -34,17 +34,27 @@ class InvalidToken(ValueError) :
 
 
 class KhUser(KhUser) :
-	async def authenticated(self, raise_error: bool = True) :
+	async def authenticated(self, raise_error: bool = True) -> bool :
+		if self.banned :
+			if raise_error :
+				raise Forbidden('User has been banned.', user=self)
+
+			return False
+
 		if not self.token or self.token != await verifyToken(self.token.token_string) :
 			if raise_error :
 				raise Unauthorized('User is not authenticated.', user=self, token=(await verifyToken(self.token.token_string) if self.token else None))
+
 			return False
+
 		return True
 
-	async def verify_scope(self, scope: Scope, raise_error: bool = True) :
+	async def verify_scope(self, scope: Scope, raise_error: bool = True) -> bool :
 		await self.authenticated(raise_error)
+
 		if scope not in self.scope :
 			raise Forbidden('User is not authorized to access this resource.', user=self)
+
 		return True
 
 
