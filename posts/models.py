@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, validator
 
-from shared.base64 import b64encode
+from shared.base64 import b64decode, b64encode
 from shared.config.constants import environment
 from shared.config.repo import short_hash
 from shared.datetime import datetime as dt
@@ -94,15 +94,16 @@ class TagGroups(Dict[TagGroupPortable, List[str]]) :
 	pass
 
 
-def _thumbhash_converter(value: Any) -> Any :
+def _thumbhash_converter(value: Any) -> Optional[str] :
 	if value :
 		if isinstance(value, memoryview) :
 			value = bytes(value)
 
 		if isinstance(value, bytes) :
-			return b64encode(value)
+			return b64encode(value).decode()
 
-	return value
+	if isinstance(value, str) :
+		return value
 
 
 class Post(BaseModel) :
@@ -134,9 +135,21 @@ class SearchResults(BaseModel) :
 	total: int
 
 
+def _bytes_converter(value: Any) -> Optional[bytes] :
+	if value :
+		if isinstance(value, memoryview) :
+			value = bytes(value)
+
+		if isinstance(value, bytes) :
+			return value
+
+	if isinstance(value, str) :
+		return b64decode(value)
+
+
 class InternalPost(BaseModel) :
 	__table_name__: Table = Table('kheina.public.posts')
-	_thumbhash_converter = validator('thumbhash', pre=True, always=True, allow_reuse=True)(_thumbhash_converter)
+	_thumbhash_converter = validator('thumbhash', pre=True, always=True, allow_reuse=True)(_bytes_converter)
 
 	class Config:
 		validate_assignment = True
@@ -156,7 +169,7 @@ class InternalPost(BaseModel) :
 	filename:    Optional[str]      = None
 	media_type:  Optional[int]      = None
 	size:        Optional[PostSize] = Field(None, description='orm:"map[width:width,height:height]"')
-	thumbhash:   Optional[str]      = None
+	thumbhash:   Optional[bytes]    = None
 	locked:      bool               = False
 
 

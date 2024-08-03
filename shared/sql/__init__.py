@@ -165,6 +165,7 @@ class ConnectionPool :
 				self.available.append(self.used.pop(key))
 			self.logger.info({
 				'op': 'ConnectionPool._free',
+				'key': key,
 				'available': len(self.available),
 				'used': list(self.used.keys()),
 				'total': ConnectionPool.total,
@@ -481,7 +482,11 @@ class SqlInterface :
 
 					if param :
 						for k in m[0] :
-							param = getattr(param, k)
+							if isinstance(param, dict) :
+								param = param.get(k)
+
+							else :
+								param = getattr(param, k, None)
 
 					if attrs.default is not None and param == field.default :
 						ret.append(m[1])
@@ -675,7 +680,11 @@ class SqlInterface :
 
 					if param :
 						for k in m[0] :
-							param = getattr(param, k, None)
+							if isinstance(param, dict) :
+								param = param.get(k)
+
+							else :
+								param = getattr(param, k, None)
 
 					cols.append(m[1])
 					vals.append(Value(param))

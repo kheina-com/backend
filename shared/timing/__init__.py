@@ -1,12 +1,12 @@
 from asyncio.coroutines import _is_coroutine  # type: ignore
 from enum import Enum
 from functools import wraps
-from inspect import Parameter, iscoroutinefunction, signature
+from inspect import FullArgSpec, Parameter, getfullargspec, iscoroutinefunction, signature
 from logging import getLogger
 from sys import _getframe
 from time import time
 from types import FrameType
-from typing import Any, Callable, Coroutine, Optional, Self
+from typing import Any, Callable, Coroutine, Hashable, Literal, Optional, Self
 
 
 class TimeUnit(Enum) :
@@ -75,16 +75,13 @@ class Timer :
 		self._start = None
 		self._end = None
 
-
 	def start(self) :
 		self._start = time()
 		return self
 
-
 	def end(self) :
 		self._end = time()
 		return self
-
 
 	def elapsed(self, unit: TimeUnit = TimeUnit.second) :
 		end = self._end or time()
@@ -100,12 +97,11 @@ class Time(float) :
 
 class Execution :
 
-	def __init__(self, name: Optional[str] = None) -> None :
+	def __init__(self, name: str) -> None :
 		self.total:  Time                   = Time()
 		self.count:  int                    = 0
 		self.nested: dict[str, 'Execution'] = { }
-		self._name:  Optional[str]          = name
-
+		self._name:  str                    = name
 
 	def __repr__(self: Self) -> str :
 		return (
@@ -118,11 +114,9 @@ class Execution :
 			')'
 		)
 
-
 	def record(self: Self, time: float) :
 		self.total = Time(self.total + time)
 		self.count += 1
-
 
 	def dict(self: Self) -> dict :
 		ret: dict[str, Any] = { 'total': self.total, 'count': self.count }
@@ -130,7 +124,7 @@ class Execution :
 		return ret
 
 
-EXEC: str = '__timed_execution__'
+EXEC: Literal['__timed_execution__'] = '__timed_execution__'
 
 def _get_parent(frame: Optional[FrameType]) -> Optional[Execution] :
 	while frame :
@@ -147,7 +141,7 @@ def _get_parent(frame: Optional[FrameType]) -> Optional[Execution] :
 
 
 # it's required for timed and decorator to not be annotated otherwise it fucks up @wraps(func), don't ask me why.
-def timed(root) :
+def timed(root, key_format = None) :
 	"""
 	times the passed function.
 
@@ -161,16 +155,22 @@ def timed(root) :
 		timed.logger = lambda n, x : logger.info({ n: x.dict() })
 
 	def decorator(func) :
-		start:     Callable[[Optional[Execution]], float]
+		argspec: FullArgSpec = getfullargspec(func)
+		kw: dict[str, Hashable] = dict(zip(argspec.args[-len(argspec.defaults):], argspec.defaults)) if argspec.defaults else { }
+		arg_spec: tuple[str, ...] = tuple(argspec.args)
+		del argspec
+
+		start:     Callable[[Optional[Execution], Optional[str]], float]
 		completed: Callable[[float], None]
 
 		name = f'{func.__module__}.{func.__qualname__}'
 
 		if root :
-			def s(_: Optional[Execution]) -> float :
+			def s(_: Optional[Execution], key: Optional[str] = None) -> float :
+				n = f'{name}[{key}]' if key else name
 				frame = _getframe().f_back
 				assert frame
-				frame.f_locals[EXEC] = Execution(name)
+				frame.f_locals[EXEC] = Execution(n)
 
 				return time()
 
@@ -180,24 +180,25 @@ def timed(root) :
 				exec: Optional[Execution] = frame.f_locals[EXEC]
 				assert exec
 				exec.record(time() - start)
-				timed.logger(name, exec)
+				timed.logger(exec._name, exec)
 
 			start     = s
 			completed = c
 
 		else :
-			def s(parent: Optional[Execution]) -> float :
-				# print(f'==>    exec: {name}')
+			def s(parent: Optional[Execution], key: Optional[str] = None) -> float :
+				n = f'{name}[{key}]' if key else name
+				# print(f'==>    exec: {n}')
 				if not parent :
 					return time()
 
-				# print(f'===> got parent: {name} -> {parent._name}')
+				# print(f'===> got parent: {n} -> {parent._name}')
 
-				if name in parent.nested :
-					exec = parent.nested[name]
+				if n in parent.nested :
+					exec = parent.nested[n]
 
 				else :
-					exec = parent.nested[name] = Execution(name)
+					exec = parent.nested[n] = Execution(n)
 
 				frame = _getframe().f_back
 				assert frame
@@ -217,7 +218,7 @@ def timed(root) :
 
 		if iscoroutinefunction(func) :
 			async def coro(parent: Optional[Execution], args: tuple[Any], kwargs: dict[str, Any]) -> Any :
-				s: float = start(parent)
+				s: float = start(parent, key_format.format(**{ **kw, **dict(zip(arg_spec, args)), **kwargs }) if key_format else None)
 
 				try :
 					return await func(*args, **kwargs)
@@ -239,7 +240,7 @@ def timed(root) :
 		else :
 			@wraps(func)
 			def wrapper(*args: Any, **kwargs: Any) -> Any :
-				s: float = start(_get_parent(_getframe()))
+				s: float = start(_get_parent(_getframe()), key_format.format(**{ **kw, **dict(zip(arg_spec, args)), **kwargs }) if key_format else None)
 
 				try :
 					return func(*args, **kwargs)
@@ -250,17 +251,17 @@ def timed(root) :
 				finally :
 					completed(s)
 
-		# sig = signature(func)
-		# dec_params = [p for p in sig.parameters.values() if p.kind is Parameter.POSITIONAL_OR_KEYWORD]
+		sig = signature(func)
+		dec_params = [p for p in sig.parameters.values() if p.kind is Parameter.POSITIONAL_OR_KEYWORD]
 
-		# wrapper.__annotations__ = func.__annotations__
-		# wrapper.__signature__ = sig.replace(parameters=dec_params)
-		# wrapper.__name__ = func.__name__
-		# wrapper.__doc__ = func.__doc__
-		# wrapper.__wrapped__ = func
-		# wrapper.__qualname__ = func.__qualname__
-		# wrapper.__kwdefaults__ = getattr(func, '__kwdefaults__', None)
-		# wrapper.__dict__.update(func.__dict__)
+		wrapper.__annotations__ = func.__annotations__
+		wrapper.__signature__ = sig.replace(parameters=dec_params) # type: ignore
+		wrapper.__name__ = func.__name__
+		wrapper.__doc__ = func.__doc__
+		wrapper.__wrapped__ = func
+		wrapper.__qualname__ = func.__qualname__
+		wrapper.__kwdefaults__ = getattr(func, '__kwdefaults__', None) # type: ignore
+		wrapper.__dict__.update(func.__dict__)
 
 		return wrapper
 
@@ -273,8 +274,7 @@ def timed(root) :
 		return decorator
 
 	else :
-		raise TypeError(
-			'Expected first argument to be a bool, a callable, or None')
+		raise TypeError('Expected first argument to be a bool, a callable, or None')
 
 timed.root = timed(True)
 timed.logger: Callable[[str, Execution], None] = None

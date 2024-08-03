@@ -263,10 +263,18 @@ class Uploader(SqlInterface, B2Interface) :
 
 	@HttpErrorHandler('creating populated post')
 	@timed
-	async def createPostWithFields(self: 'Uploader', user: KhUser, reply_to: Optional[PostId], title: Optional[str], description: Optional[str], privacy: Optional[Privacy], rating: Optional[Rating]) -> Post :
+	async def createPostWithFields(
+		self:       'Uploader',
+		user:        KhUser,
+		reply_to:    Optional[PostId],
+		title:       Optional[str],
+		description: Optional[str],
+		privacy:     Optional[Privacy],
+		rating:      Optional[Rating],
+	) -> Post :
 		explicit = await rating_map.get(Rating.explicit)
-		draft = await privacy_map.get(Privacy.draft)
 		assert isinstance(explicit, int)
+		draft = await privacy_map.get(Privacy.draft)
 		assert isinstance(draft, int)
 
 		post: InternalPost = InternalPost(
@@ -365,11 +373,11 @@ class Uploader(SqlInterface, B2Interface) :
 
 	@timed
 	async def uploadImage(
-		self: 'Uploader',
-		user: KhUser,
+		self:     'Uploader',
+		user:      KhUser,
 		file_data: bytes,
-		filename: str,
-		post_id: PostId,
+		filename:  str,
+		post_id:   PostId,
 		emoji_name: Optional[str] = None,
 		web_resize: Optional[int] = None,
 	) -> Dict[str, Union[Optional[str], int, Dict[str, str]]] :
@@ -524,13 +532,13 @@ class Uploader(SqlInterface, B2Interface) :
 	@HttpErrorHandler('updating post metadata')
 	@timed
 	async def updatePostMetadata(
-		self: 'Uploader',
-		user: KhUser,
+		self:   'Uploader',
+		user:    KhUser,
 		post_id: PostId,
-		title: Optional[str] = None,
-		description: Optional[str] = None,
-		privacy: Optional[Privacy] = None,
-		rating: Optional[Rating] = None,
+		title:       Optional[str]     = None,
+		description: Optional[str]     = None,
+		privacy:     Optional[Privacy] = None,
+		rating:      Optional[Rating]  = None,
 	) -> None :
 		#TODO: check for active actions on post and determine if update satisfies the required action
 		self._validateTitle(title)
@@ -538,6 +546,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 		update: bool         = False
 		post:   InternalPost = await posts._get_post(post_id)
+		print('post:', post)
 
 		if post.user_id != user.user_id :
 			raise Forbidden('You are not allowed to modify this resource.')
@@ -563,7 +572,14 @@ class Uploader(SqlInterface, B2Interface) :
 
 
 	@timed
-	async def _update_privacy(self: 'Uploader', user: KhUser, post_id: PostId, privacy: Privacy, transaction: Optional[Transaction] = None, commit: bool = True) -> bool :
+	async def _update_privacy(
+		self:   'Uploader',
+		user:    KhUser,
+		post_id: PostId,
+		privacy: Privacy,
+		transaction: Optional[Transaction] = None,
+		commit:      bool                  = True,
+	) -> bool :
 		if privacy == Privacy.unpublished :
 			raise BadRequest('post privacy cannot be updated to unpublished.')
 

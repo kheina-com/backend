@@ -61,7 +61,7 @@ class KhAuthMiddleware:
 				scope['user'] = KhUser(
 					user_id = token_data.user_id,
 					token   = token_data,
-					scope   = { Scope.user } | set(map(Scope.__getitem__, token_data.data.get('scope', []))),  # TODO: double check this doesn't add the user scope to bots
+					scope   = set(map(Scope.__getitem__, token_data.data.get('scope', []))) or { Scope.default },
 					banned  = False,
 				)
 
@@ -76,7 +76,7 @@ class KhAuthMiddleware:
 				user_id = -1,
 				token   = None,
 				scope   = { Scope.default },
-				banned  = False,
+				banned  = None,
 			)
 
 		except Exception as e :

@@ -20,7 +20,7 @@ from shared.sql.query import Field, Operator, Order, Query, Value, Where
 from users.repository import Users
 
 from .models.mod_queue import InternalModQueueEntry, ModQueueEntry
-from .models.reports import BaseReport, CopyrightReport, InternalReport, InternalReportType, Report
+from .models.reports import BaseReport, BaseReportHistory, CopyrightReport, HistoryMask, InternalReport, InternalReportType, Report
 
 
 repo:       SchemaRepository = SchemaRepository()
@@ -55,7 +55,7 @@ class Reporting(SqlInterface) :
 
 	@AsyncLRU(maxsize=0)
 	async def _get_serializer(self: Self, report_type: InternalReportType) -> tuple[bytes, AvroSerializer] :
-		model = Reporting._report_type_map[report_type]		
+		model = Reporting._report_type_map[report_type]
 		return AvroMarker + await repo.addSchema(convert_schema(model)), AvroSerializer(model)
 
 
@@ -161,14 +161,25 @@ class Reporting(SqlInterface) :
 		if all([report_data.message == report.data.message, report_data.post == report.data.post, report_data.url == report.data.url]) :
 			raise BadRequest('no change has been made to the report', report=await self.report(user, ireport))
 
-		report.data.prev = report_data
+		data = report.data.dict()
+		prev = report_data.dict()
+		print('incoming data:', data, 'prev:', prev)
+		for k, v in data.items() :
+			if prev.get(k) == v :
+				del prev[k]
+
+		mask = list(map(HistoryMask, prev.keys() & HistoryMask._member_map_))
+		if not mask :
+			raise BadRequest('no change has been made to the report', report=await self.report(user, ireport))
+
+		report.data.prev = BaseReportHistory.parse_obj({ 'mask': mask, **prev })
 		fp, serializer = await self._get_serializer(report.report_type.internal())
 
 		ireport = InternalReport(
-			report_id   = report.report_id,
-			report_type = report.report_type.internal(),
-			created     = report.created,
-			reporter    = user.user_id,
+			report_id   = ireport.report_id,
+			report_type = ireport.report_type,
+			created     = ireport.created,
+			reporter    = ireport.reporter,	
 			assignee    = ireport.assignee,
 			data        = fp + serializer(report.data),
 			response    = ireport.response,

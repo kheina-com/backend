@@ -27,7 +27,7 @@ actionsRouter = APIRouter(
 )
 
 queueRouter = APIRouter(
-	prefix='/queue',
+	prefix='/mod',
 )
 
 bansRouter = APIRouter(

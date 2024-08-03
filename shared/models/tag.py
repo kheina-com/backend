@@ -28,10 +28,10 @@ class TagGroups(Dict[TagGroupPortable, List[str]]) :
 
 
 class Tag(BaseModel) :
-	tag: str
-	owner: Optional[UserPortable]
-	group: TagGroupPortable
-	deprecated: bool
+	tag:            str
+	owner:          Optional[UserPortable]
+	group:          TagGroupPortable
+	deprecated:     bool
 	inherited_tags: List[str]
-	description: Optional[str]
-	count: int
+	description:    Optional[str]
+	count:          int

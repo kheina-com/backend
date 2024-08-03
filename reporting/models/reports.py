@@ -42,13 +42,27 @@ assert set(InternalReportType.__members__.keys()) == set(ReportType.__members__.
 assert set(InternalReportType.__members__.keys()) == set(map(lambda x : x.value, ReportType.__members__.values()))
 
 
+class HistoryMask(Enum) :
+	post    = 'post'
+	message = 'message'
+	url     = 'url'
+
+
+class BaseReportHistory(BaseModel) :
+	mask:    list[HistoryMask]
+	post:    Optional[PostId]              = None
+	message: Optional[str]                 = None
+	url:     Optional[str]                 = None
+	prev:    Optional['BaseReportHistory'] = None
+
+
 class BaseReport(BaseModel) :
 	_post_id_converter = validator('post', pre=True, always=True, allow_reuse=True)(_post_id_converter)
 
 	post:    Optional[PostId] = None
 	message: str
 	url:     str
-	prev:    Optional['BaseReport'] = None
+	prev:    Optional[BaseReportHistory] = None
 
 
 class CopyrightReport(BaseReport) :

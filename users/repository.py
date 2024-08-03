@@ -134,7 +134,7 @@ class Users(SqlInterface) :
 	@timed
 	@AerospikeCache('kheina', 'users', '{user_id}', _kvs=UserKVS)
 	async def _get_user(self: Self, user_id: int) -> InternalUser :
-		data: tuple[int, str, str, int, Optional[int], Optional[str], datetime, Optional[str], Optional[int], bool, bool, bool, list[int]] = await self.query_async("""
+		data: Optional[tuple[int, str, str, int, Optional[int], Optional[str], datetime, Optional[str], Optional[int], bool, bool, bool, list[int]]] = await self.query_async("""
 			SELECT
 				users.user_id,
 				users.display_name,
