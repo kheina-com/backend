@@ -32,6 +32,17 @@ def cli() :
 	pass
 
 
+AerospikeSets = ['token', 'avro_schemas', 'configs', 'score', 'votes', 'posts', 'sets', 'tag_count', 'tags', 'users', 'following', 'user_handle_map']
+
+@cli.command('nuke-cache')
+def nukeCache() -> None :
+	# wipe all caching first, just in case
+	# TODO: fetch all the sets or have a better method of clearing aerospike than this
+	for set in AerospikeSets :
+		kvs = KeyValueStore('kheina', set)
+		kvs.truncate()
+
+
 @cli.command('db')
 @click.option(
     '-u',
@@ -46,11 +57,7 @@ def execSql(unlock: bool = False) -> None :
 	files within those folders are treated the same.
 	"""
 
-	# wipe all caching first, just in case
-	# TODO: fetch all the sets or have a better method of clearing aerospike than this
-	for set in ['token', 'avro_schemas', 'configs', 'score', 'votes', 'posts', 'sets', 'tag_count', 'tags', 'users', 'following', 'user_handle_map'] :
-		kvs = KeyValueStore('kheina', set)
-		kvs.truncate()
+	nukeCache()
 
 	sql = SqlInterface()
 	with sql.pool.conn() as conn :
