@@ -21,6 +21,7 @@ kubectl create secret generic credentials \
 read a secret
 ```sh
 kubectl get secret kh-aes -o jsonpath='{.data.value}' | base64 -d
+kubectl get secret credentials -o jsonpath='{.data}' | jq -r '."creds.json"' | base64 -d | jq -r '.value' > credentials/creds.aes
 ```
 
 send deployment to gke

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import json
 from os import listdir, remove
 from os.path import isdir, isfile, join
 from secrets import token_bytes
@@ -14,6 +15,7 @@ from authenticator.models import LoginRequest
 from shared.backblaze import B2Interface
 from shared.base64 import b64encode
 from shared.caching.key_value_store import KeyValueStore
+from shared.config.credentials import decryptCredentialFile, fetch
 from shared.sql import SqlInterface
 
 
@@ -205,6 +207,23 @@ def encryptCredentials() -> None :
 				writeAesFile(file, keys.encrypt(ujson.dumps(cred).encode()))
 
 			# remove(f'credentials/{filename}')
+
+
+@cli.command('secret')
+@click.option('--secret', '-S', help='Read a secret.')
+@click.option('--filename', '-F', help='Read an entire credential file.')
+def readSecret(secret: Optional[str], filename: Optional[str]) -> None :
+	"""
+	reads an encrypted secret
+	"""
+	if not any([secret, filename]) :
+		return click.echo('requires at least one parameter')
+
+	if secret :
+		click.echo(f'{secret}: {json.dumps(fetch(secret), indent=4)}')
+
+	if filename :
+		click.echo(json.dumps(decryptCredentialFile(open(f'credentials/{filename}', 'rb').read()), indent='\t'))
 
 
 if __name__ == "__main__":
