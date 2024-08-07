@@ -5,7 +5,7 @@ from shared.server import Request
 from shared.timing import timed
 
 from .emoji import Emojis
-from .models import AliasRequest, CreateRequest, Emoji
+from .models import AliasRequest, CreateRequest, Emoji, UpdateRequest
 
 
 emojiRouter = APIRouter(
@@ -30,6 +30,13 @@ async def v1CreateEmoji(req: Request, body: CreateRequest) -> Emoji :
 async def v1CreateAlias(req: Request, body: AliasRequest) -> Emoji :
 	await req.user.verify_scope(Scope.admin)
 	return await emojis.alias(req.user, body)
+
+
+@emojiRouter.patch('/{emoji}')
+@timed.root
+async def v1UpdateEmoji(req: Request, emoji: str, body: UpdateRequest) -> Emoji :
+	await req.user.verify_scope(Scope.admin)
+	return await emojis.update(req.user, emoji, body)
 
 
 @emojiRouter.get('/{emoji}')

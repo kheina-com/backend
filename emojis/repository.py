@@ -111,7 +111,7 @@ class EmojiRepository(SqlInterface) :
 		return await self.insert(iemoji)
 
 
-	async def update(self: Self, emoji: InternalEmoji) -> None :
+	async def update(self: Self, emoji: InternalEmoji) -> Emoji :
 		"""
 		updates an emoji and all of its aliases
 		aliases cannot be updated

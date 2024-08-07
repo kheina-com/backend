@@ -42,7 +42,16 @@ class CreateRequest(BaseModel) :
 	emoji:    str
 	owner:    Optional[str]    = None
 	post_id:  Optional[PostId] = None
+	alt:      Optional[str]    = None
 	filename: str
+
+
+class UpdateRequest(BaseModel) :
+	mask:     list[str]
+	owner:    Optional[str]    = None
+	post_id:  Optional[PostId] = None
+	alt:      Optional[str]    = None
+	filename: Optional[str]    = None
 
 
 class AliasRequest(BaseModel) :
