@@ -15,12 +15,9 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fontTools.ttLib import TTFont
 
 from authenticator.models import LoginRequest
-from emojis.models import InternalEmoji
-from emojis.repository import EmojiRepository
 from shared.base64 import b64encode
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import decryptCredentialFile, fetch
-from shared.sql import SqlInterface
 from fontTools.ttLib.tables.sbixStrike import Strike
 
 
@@ -68,6 +65,7 @@ def execSql(unlock: bool = False, file: str = '') -> None :
 	folders under db are sorted numberically and run in descending order
 	files within those folders are treated the same.
 	"""
+	from shared.sql import SqlInterface
 
 	nukeCache()
 
@@ -124,6 +122,8 @@ EmojiMapUrl = r'https://github.com/kheina-com/EmojiMap/releases/download/v15.1/e
 @cli.command('emojis')
 async def uploadEmojis() -> None :
 	from shared.backblaze import B2Interface
+	from emojis.models import InternalEmoji
+	from emojis.repository import EmojiRepository
 
 	click.echo('checking for map file...')
 	map_file = 'images/emoji_map.json'

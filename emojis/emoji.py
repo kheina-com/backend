@@ -29,6 +29,7 @@ class Emojis(EmojiRepository) :
 			emoji    = req.emoji,
 			owner    = await users._handle_to_user_id(req.owner) if req.owner else None,
 			post_id  = req.post_id.int() if req.post_id else None,
+			alt      = req.alt,
 			filename = req.filename,
 		)
 		await super().create(iemoji)
