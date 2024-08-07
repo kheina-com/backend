@@ -1,5 +1,7 @@
-from dataclasses import dataclass
 import json
+import re
+import shutil
+from dataclasses import dataclass
 from os import listdir, remove
 from os.path import isdir, isfile, join
 from secrets import token_bytes
@@ -10,13 +12,16 @@ import ujson
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from fontTools.ttLib import TTFont
 
 from authenticator.models import LoginRequest
-from shared.backblaze import B2Interface
+from emojis.models import InternalEmoji
+from emojis.repository import EmojiRepository
 from shared.base64 import b64encode
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import decryptCredentialFile, fetch
 from shared.sql import SqlInterface
+from fontTools.ttLib.tables.sbixStrike import Strike
 
 
 def isint(value: Any) -> Optional[int] :
@@ -34,7 +39,6 @@ def cli() :
 
 AerospikeSets = ['token', 'avro_schemas', 'configs', 'score', 'votes', 'posts', 'sets', 'tag_count', 'tags', 'users', 'following', 'user_handle_map']
 
-@cli.command('nuke-cache')
 def nukeCache() -> None :
 	# wipe all caching first, just in case
 	# TODO: fetch all the sets or have a better method of clearing aerospike than this
@@ -43,14 +47,22 @@ def nukeCache() -> None :
 		kvs.truncate()
 
 
+cli.command('nuke-cache')(nukeCache)
+
+
 @cli.command('db')
 @click.option(
-    '-u',
-    '--unlock',
-    is_flag=True,
-    default=False,
+	'-u',
+	'--unlock',
+	is_flag=True,
+	default=False,
 )
-def execSql(unlock: bool = False) -> None :
+@click.option(
+	'-f',
+	'--file',
+	default='',
+)
+def execSql(unlock: bool = False, file: str = '') -> None :
 	"""
 	connects to the database and runs all files stored under the db folder
 	folders under db are sorted numberically and run in descending order
@@ -67,6 +79,20 @@ def execSql(unlock: bool = False) -> None :
 		if not unlock and isfile('sql.lock') :
 			sqllock = int(open('sql.lock').read().strip())
 			click.echo(f'==> sql.lock: {sqllock}')
+
+		if file :
+			if not isfile(file) :
+				return
+
+			if not file.endswith('.sql') :
+				return
+
+			with open(file) as f :
+				click.echo(f'==> exec: {file}')
+				cur.execute(f.read())
+
+			conn.commit()
+			return
 
 		dirs = sorted(int(i) for i in listdir('db') if isdir(f'db/{i}') and i == str(isint(i)))
 		dir = ""
@@ -92,21 +118,132 @@ def execSql(unlock: bool = False) -> None :
 			f.write(str(dir))
 
 
-@cli.command('icon')
-def uploadDefaultIcon() -> None :
-	"""
-	uploads the default user icon to the cdn
-	"""
+EmojiFontURL = r'https://github.com/PoomSmart/EmojiFonts/releases/download/15.1.0/AppleColorEmoji-HD.ttc'
+EmojiMapUrl = r'https://github.com/kheina-com/EmojiMap/releases/download/v15.1/emoji_map.json'
+
+@cli.command('emojis')
+async def uploadEmojis() -> None :
+	from shared.backblaze import B2Interface
+
+	click.echo('checking for map file...')
+	map_file = 'images/emoji_map.json'
+
+	if not isfile(map_file) :
+		click.echo(f'downloading {EmojiMapUrl}...')
+		from aiohttp import request
+		async with request('GET', EmojiMapUrl) as r :
+			assert r.status == 200
+			with open(map_file, 'wb') as f :
+				total = r.content_length
+				assert total
+				completed = 0
+				async for chunk, _ in r.content.iter_chunks() :
+					f.write(chunk)
+					completed += len(chunk)
+					w = shutil.get_terminal_size((100,10)).columns - 9
+					filled = round((completed / total) * w)
+					empty = w - filled
+					print('[', '#' * filled, ' ' * empty, '] ', f'{completed / total * 100:00.01f}%', sep='', end='\r')
+		click.echo('done.' + ' ' * (shutil.get_terminal_size((100,10)).columns - 5))
+
+	emoji_map: dict[str, dict[str, str]] = json.load(open(map_file))
+	click.echo(f'loaded {map_file}.')
+
+	click.echo('checking for font file...')
+	font_file = 'images/AppleColorEmoji-HD.ttc'
+
+	if not isfile(font_file) :
+		click.echo(f'downloading {EmojiFontURL}...')
+		from aiohttp import request
+		async with request('GET', EmojiFontURL) as r :
+			assert r.status == 200
+			with open(font_file, 'wb') as f :
+				total = r.content_length
+				assert total
+				completed = 0
+				async for chunk, _ in r.content.iter_chunks() :
+					f.write(chunk)
+					completed += len(chunk)
+					w = shutil.get_terminal_size((100,10)).columns - 9
+					filled = round((completed / total) * w)
+					empty = w - filled
+					print('[', '#' * filled, ' ' * empty, '] ', f'{completed / total * 100:00.01f}%', sep='', end='\r')
+		click.echo('done.' + ' ' * (shutil.get_terminal_size((100,10)).columns - 5))
+
 	b2 = B2Interface()
-	file_data: bytes
+	repo = EmojiRepository()
 
-	with open('images/default-icon.png', 'rb') as file :
-		file_data = file.read()
+	with TTFont(font_file, fontNumber=0) as ttfont :
+		click.echo(f'loaded {font_file}.')
+		glyphs = set()
+		cmap = ttfont.getBestCmap()
 
-	b2.b2_upload(file_data, 'default-icon.png', 'image/png')
+		for key in cmap:
+			glyphs.add(key)
+
+		svgs = ttfont.get('SVG ')
+		if svgs is not None :
+			print(svgs)
+
+		size = 256
+
+		not_found = 0
+		total_emojis = 0
+		uploaded = 0
+
+		sbix = ttfont.get('sbix')
+		if sbix is not None :
+			strikes: dict[int, Strike] = sbix.strikes  # type: ignore
+			sizes = list(strikes.keys())
+			size = max(sizes)
+
+			for key, glyph in strikes[size].glyphs.items() :
+				if glyph.graphicType == 'png ':
+					total_emojis += 1
+					key = None
+
+					text: str = glyph.glyphName
+					alt: Optional[str] = None
+					suffix = ''
+
+					if text.find('.') > 0 :
+						suffix = text[text.index('.'):].lower().replace('.0', '')
+						text = text[:text.index('.')]
+
+					if text not in emoji_map :
+						click.echo(f'emoji "{text}" not found in map')
+						not_found += 1
+
+					else :
+						info = emoji_map[text]
+						text = re.sub(r'\W+', '-', info['name']).strip('-').lower()
+						alt = info['chars'].strip()
+
+					print('name:', text)
+					filename = f'{text}{suffix}.png'
+
+					await b2.upload_async(glyph.imageData, f'emoji/{filename}', 'image/png')
+					await repo.create(InternalEmoji(
+						emoji    = f'{text}{suffix}',
+						alt      = alt,
+						filename = filename,
+					))
+					uploaded += 1
+					glyphs.discard(key)
+
+		if not_found :
+			click.echo(f'extracted {not_found:,} (of {total_emojis:,}) emojis that had no names')
+
+		# imagefont = ImageFont.truetype(font_file, size)
+
+		if glyphs :
+			click.echo(f'did not extract {len(glyphs):,} glyphs from the emoji font')
+
+		await repo.alias('red-heart', 'heart')
+		click.echo(f'uploaded {uploaded:,} emojis to the cdn')
 
 
-@cli.command('admin')
+@cli.command('admin')	
 async def createAdmin() -> LoginRequest :
 	from authenticator.authenticator import Authenticator
 	"""

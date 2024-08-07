@@ -13,7 +13,7 @@ from shared.server import Request, Response
 from shared.timing import timed
 from users.users import Users
 
-from .models import BaseFetchRequest, FetchCommentsRequest, FetchPostsRequest, GetUserPostsRequest, InternalPost, InternalScore, Post, PostId, RssDateFormat, RssDescription, RssFeed, RssItem, RssMedia, RssTitle, Score, SearchResults, TimelineRequest, VoteRequest
+from .models import BaseFetchRequest, FetchCommentsRequest, FetchPostsRequest, GetUserPostsRequest, Post, PostId, RssDateFormat, RssDescription, RssFeed, RssItem, RssMedia, RssTitle, Score, SearchResults, TimelineRequest, VoteRequest
 from .posts import Posts
 
 
@@ -60,7 +60,7 @@ users = Users()
 @postRouter.post('/vote', responses={ 200: { 'model': Score } })
 @timed.root
 async def v1Vote(req: Request, body: VoteRequest) -> Score :
-	await req.user.authenticated(Scope.user)
+	await req.user.verify_scope(Scope.user)
 	vote = True if body.vote > 0 else False if body.vote < 0 else None
 	return await posts.vote(req.user, body.post_id, vote)
 
@@ -118,7 +118,7 @@ async def get_post_media(post: Post) -> str :
 @postsRouter.get('/feed.rss', response_model=str)
 @timed.root
 async def v1Rss(req: Request) -> Response :
-	await req.user.authenticated(Scope.user)
+	await req.user.verify_scope(Scope.user)
 
 	timeline = ensure_future(posts.RssFeedPosts(req.user))
 	user = ensure_future(users.getSelf(req.user))

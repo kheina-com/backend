@@ -200,7 +200,7 @@ class Posts(SqlInterface) :
 			media_type=await media_type_map.get(ipost.media_type),
 			size=ipost.size,
 			blocked=await blocked,
-			thumbhash=ipost.thumbhash,
+			thumbhash=ipost.thumbhash,  # type: ignore
 		)
 
 
@@ -685,7 +685,7 @@ class Posts(SqlInterface) :
 				size=post.size,
 				# only the first call retrieves blocked info, all the rest should be cached and not actually await
 				blocked=await is_post_blocked(user, uploaders[post.user_id].internal, tags[post_id]),
-				thumbhash=post.thumbhash,
+				thumbhash=post.thumbhash,  # type: ignore
 			))
 		
 		return posts

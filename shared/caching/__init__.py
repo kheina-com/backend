@@ -181,6 +181,25 @@ def KwargsCache(TTL_seconds:float=0, TTL_minutes:float=0, TTL_hours:float=0, TTL
 	return decorator
 
 
+# def deepTypecheck(type_: type | tuple, instance: Any) -> bool :
+# 	if isinstance(type_, tuple) :
+# 		if type(instance) not in type_ :
+# 			print(instance, type(instance), type_)
+# 			return False	
+
+# 	else :
+# 		t = getattr(type_, '__origin__', type_)
+# 		if type(instance) is not t :
+# 			print(instance, type(instance), type_)
+# 			return False
+
+# 	match instance :
+# 		case list() | tuple() :
+# 			return all(map(partial(deepTypecheck, type_.__args__), instance))  # type: ignore
+
+# 	return True
+
+
 def AerospikeCache(
 	namespace: str,
 	set: str,
@@ -244,12 +263,12 @@ def AerospikeCache(
 					if writable :
 						await decorator.kvs.put_async(key, data, TTL)
 
-				else :
-					if type(data) != return_type :
-						data = await func(*args, **kwargs)
+				# else :
+				# 	if not deepTypecheck(return_type, data) :
+				# 		data = await func(*args, **kwargs)
 
-						if writable :
-							await decorator.kvs.put_async(key, data, TTL)
+				# 		if writable :
+				# 			await decorator.kvs.put_async(key, data, TTL)
 
 				return data
 
@@ -269,12 +288,12 @@ def AerospikeCache(
 					if writable :
 						decorator.kvs.put(key, data, TTL)
 
-				else :
-					if type(data) != return_type :
-						data = func(*args, **kwargs)
+				# else :
+				# 	if not deepTypecheck(return_type, data) :
+				# 		data = func(*args, **kwargs)
 
-						if writable :
-							decorator.kvs.put(key, data, TTL)
+				# 		if writable :
+				# 			decorator.kvs.put(key, data, TTL)
 
 				return data
 

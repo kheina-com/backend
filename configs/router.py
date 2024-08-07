@@ -51,7 +51,7 @@ async def v1Funding() -> FundingResponse :
 
 @app.patch('/user', status_code=204)
 async def v1UpdateUserConfig(req: Request, body: UserConfigRequest) -> None :
-	await req.user.authenticated(Scope.user)
+	await req.user.verify_scope(Scope.user)
 	await configs.setUserConfig(
 		req.user,
 		body,

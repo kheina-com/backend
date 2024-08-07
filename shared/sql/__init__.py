@@ -139,7 +139,7 @@ class ConnectionPool :
 	def _sql_connect(self: Self) -> Connection :
 		try :
 			conn: Connection = dbConnect(**ConnectionPool.db) # type: ignore
-			self.logger.info({
+			self.logger.debug({
 				'op': 'ConnectionPool._sql_connect',
 				'available': len(self.available),
 				'used': list(self.used.keys()),
@@ -163,7 +163,7 @@ class ConnectionPool :
 		with self.lock :
 			if key in self.used :
 				self.available.append(self.used.pop(key))
-			self.logger.info({
+			self.logger.debug({
 				'op': 'ConnectionPool._free',
 				'key': key,
 				'available': len(self.available),
@@ -186,7 +186,7 @@ class ConnectionPool :
 		key: Hashable = self._id()
 		self.used[key] = conn
 		assert len(self.available) + len(self.used) == ConnectionPool.total
-		self.logger.info({
+		self.logger.debug({
 			'op': 'ConnectionPool._get_conn',
 			'key': key,
 			'available': len(self.available),

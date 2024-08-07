@@ -4,12 +4,19 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from starlette.middleware.exceptions import ExceptionMiddleware
 
+from ..auth import KhUser
 from ..config.constants import environment
 from ..exceptions.base_error import BaseError
 from ..exceptions.handler import jsonErrorHandler
 
 
 NoContentResponse = Response(None, status_code=204)
+
+
+class Request(Request) :
+	@property
+	def user(self) -> KhUser :
+		return super().user
 
 
 def ServerApp(

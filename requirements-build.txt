@@ -1,2 +1,5 @@
 isort>=5.8.0
 pytest>=8.2.2
+fonttools>=4.53.1
+cairosv>=2.7.1
+pillow>=10.4.0

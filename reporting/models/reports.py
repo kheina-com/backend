@@ -73,6 +73,7 @@ class InternalReport(BaseModel) :
 	__table_name__ = Table('kheina.public.reports')
 
 	report_id:   int = Field(description='orm:"pk;gen"')
+	parent:      Optional[int] = None
 	report_type: InternalReportType
 	created:     datetime = Field(description='orm:"default[now()]"')
 	reporter:    Optional[int]
