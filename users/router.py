@@ -58,14 +58,14 @@ async def v1FetchUsers(req: Request) -> List[User] :
 	return await users.getUsers(req.user)
 
 
-@userRouter.post('/set_mod', status_code=204)
+@userRouter.patch('/mod', status_code=204)
 @timed.root
 async def v1SetMod(req: Request, body: SetMod) -> None :
 	await req.user.verify_scope(Scope.admin)
 	await users.setMod(body.handle, body.mod)
 
 
-@userRouter.post('/set_verified', status_code=204)
+@userRouter.patch('/verified', status_code=204)
 @timed.root
 async def v1Verify(req: Request, body: SetVerified) -> None :
 	await req.user.verify_scope(Scope.admin)
@@ -78,21 +78,21 @@ async def v1Badges() -> List[Badge] :
 	return await users.fetchBadges()
 
 
-@userRouter.post('/add_badge', status_code=204)
+@userRouter.put('/badge', status_code=204)
 @timed.root
 async def v1AddBadge(req: Request, body: Badge) -> None :
 	await req.user.authenticated()
 	await users.addBadge(req.user, body)
 
 
-@userRouter.post('/remove_badge', status_code=204)
+@userRouter.delete('/badge', status_code=204)
 @timed.root
 async def v1RemoveBadge(req: Request, body: Badge) -> None :
 	await req.user.authenticated()
 	await users.removeBadge(req.user, body)
 
 
-@usersRouter.post('/create_badge', status_code=204)
+@usersRouter.put('/badge', status_code=204)
 @timed.root
 async def v1CreateBadge(req: Request, body: Badge) -> None :
 	await req.user.verify_scope(Scope.mod)

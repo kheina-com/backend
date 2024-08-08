@@ -42,7 +42,7 @@ class CreateRequest(BaseModel) :
 	_post_id_converter = validator('post_id', pre=True, always=True, allow_reuse=True)(_post_id_converter)
 
 	emoji:    str
-	owner:    Optional[str]    = None		
+	owner:    Optional[str]    = None
 	post_id:  Optional[PostId] = None
 	alt:      Optional[str]    = None
 	filename: str
