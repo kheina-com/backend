@@ -23,6 +23,7 @@ class EmojiRepository(SqlInterface) :
 			raise BadRequest('cannot create an emoji with an alias')
 
 		await self.insert(emoji)
+		await kvs.put_async(emoji.emoji, emoji)
 
 
 	@AerospikeCache('kheina', 'emojis', '{emoji}')
@@ -111,7 +112,7 @@ class EmojiRepository(SqlInterface) :
 		return await self.insert(iemoji)
 
 
-	async def update(self: Self, emoji: InternalEmoji) -> Emoji :
+	async def update(self: Self, emoji: str, iemoji: InternalEmoji) -> None :
 		"""
 		updates an emoji and all of its aliases
 		aliases cannot be updated

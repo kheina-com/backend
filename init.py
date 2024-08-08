@@ -1,6 +1,8 @@
 import json
+import random
 import re
 import shutil
+import time
 from dataclasses import dataclass
 from os import listdir, remove
 from os.path import isdir, isfile, join
@@ -13,12 +15,12 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fontTools.ttLib import TTFont
+from fontTools.ttLib.tables.sbixStrike import Strike
 
 from authenticator.models import LoginRequest
 from shared.base64 import b64encode
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import decryptCredentialFile, fetch
-from fontTools.ttLib.tables.sbixStrike import Strike
 
 
 def isint(value: Any) -> Optional[int] :
@@ -29,9 +31,39 @@ def isint(value: Any) -> Optional[int] :
 		return None
 
 
+def progress_bar(total: float, completed: float, title: str = '') -> None :
+	if completed >= total :
+		click.echo('done.' + ' ' * (shutil.get_terminal_size((100,10)).columns - 5))
+		return
+
+	if not title :
+		title = f'{completed / total * 100:04.01f}%'
+
+	w = shutil.get_terminal_size((100,10)).columns - (len(title) + 3)
+	filled = round((completed / total) * w)
+	empty = w - filled
+	print('[', '#' * filled, ' ' * empty, '] ', title, sep='', end='\r')
+
+
 @click.group()
 def cli() :
 	pass
+
+
+@cli.command('pbtest')
+@click.option(
+	'-t',
+	default=10,
+)
+def pbtest(t: int) -> None :
+	timer = 0
+	while timer < t :
+		progress_bar(t, timer)
+		sleeper = random.random() * 0.01
+		time.sleep(sleeper)
+		timer += sleeper
+
+	progress_bar(t, timer)
 
 
 AerospikeSets = ['token', 'avro_schemas', 'configs', 'score', 'votes', 'posts', 'sets', 'tag_count', 'tags', 'users', 'following', 'user_handle_map']
@@ -121,9 +153,9 @@ EmojiMapUrl = r'https://github.com/kheina-com/EmojiMap/releases/download/v15.1/e
 
 @cli.command('emojis')
 async def uploadEmojis() -> None :
-	from shared.backblaze import B2Interface
 	from emojis.models import InternalEmoji
 	from emojis.repository import EmojiRepository
+	from shared.backblaze import B2Interface
 
 	click.echo('checking for map file...')
 	map_file = 'images/emoji_map.json'
@@ -140,11 +172,7 @@ async def uploadEmojis() -> None :
 				async for chunk, _ in r.content.iter_chunks() :
 					f.write(chunk)
 					completed += len(chunk)
-					w = shutil.get_terminal_size((100,10)).columns - 9
-					filled = round((completed / total) * w)
-					empty = w - filled
-					print('[', '#' * filled, ' ' * empty, '] ', f'{completed / total * 100:00.01f}%', sep='', end='\r')
-		click.echo('done.' + ' ' * (shutil.get_terminal_size((100,10)).columns - 5))
+					progress_bar(total, completed)
 
 	emoji_map: dict[str, dict[str, str]] = json.load(open(map_file))
 	click.echo(f'loaded {map_file}.')
@@ -164,11 +192,7 @@ async def uploadEmojis() -> None :
 				async for chunk, _ in r.content.iter_chunks() :
 					f.write(chunk)
 					completed += len(chunk)
-					w = shutil.get_terminal_size((100,10)).columns - 9
-					filled = round((completed / total) * w)
-					empty = w - filled
-					print('[', '#' * filled, ' ' * empty, '] ', f'{completed / total * 100:00.01f}%', sep='', end='\r')
-		click.echo('done.' + ' ' * (shutil.get_terminal_size((100,10)).columns - 5))
+					progress_bar(total, completed)
 
 	b2 = B2Interface()
 	repo = EmojiRepository()
@@ -354,8 +378,8 @@ def encryptCredentials() -> None :
 
 
 @cli.command('secret')
-@click.option('--secret', '-S', help='Read a secret.')
-@click.option('--filename', '-F', help='Read an entire credential file.')
+@click.option('--secret', '-s', help='Read a secret.')
+@click.option('--filename', '-f', help='Read an entire credential file.')
 def readSecret(secret: Optional[str], filename: Optional[str]) -> None :
 	"""
 	reads an encrypted secret

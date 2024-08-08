@@ -41,24 +41,20 @@ class UnprocessableEntity(HttpError) :
 	status: int = 422
 
 
+class InternalServerError(HttpError) :
+	pass
+
+
+class NotImplemented(HttpError) :
+	status: int = 501
+
+
 class BadGateway(HttpError) :
 	status: int = 502
 
 
 class ServiceUnavailable(HttpError) :
 	status: int = 503
-
-
-class InternalServerError(HttpError) :
-	pass
-
-
-class ResponseNotOk(HttpError) :
-	pass
-
-
-class BadOrMalformedResponse(HttpError) :
-	pass
 
 
 def HttpErrorHandler(message: str, exclusions: Iterable[str] = ['self'], handlers: Dict[Type[Exception], Tuple[Type[Exception], str]] = { }) -> Callable :
@@ -73,84 +69,56 @@ def HttpErrorHandler(message: str, exclusions: Iterable[str] = ['self'], handler
 
 	def decorator(func: Callable) -> Callable :
 
+		if not iscoroutinefunction(func) :
+			raise NotImplementedError('all http handlers should be defined as async')
+
 		arg_spec: FullArgSpec = getfullargspec(func)
 
-		if iscoroutinefunction(func) :
-			@wraps(func)
-			async def wrapper(*args: Any, **kwargs: Any) -> Any :
-				try :
-					return await func(*args, **kwargs)
+		@wraps(func)
+		async def wrapper(*args: Any, **kwargs: Any) -> Any :
+			try :
+				return await func(*args, **kwargs)
 
-				except HttpError :
-					raise
+			except HttpError :
+				raise
 
-				except Exception as e :
-					for cls in type(e).__mro__ :
-						if cls in handlers :
-							Error, custom_message = handlers[cls]
-							raise Error(custom_message)
+			except Exception as e :
+				for cls in type(e).__mro__ :
+					if cls in handlers :
+						Error, custom_message = handlers[cls]
+						raise Error(custom_message)
 
-					kwargs.update(zip(arg_spec.args, args))
-					refid: str = uuid4().hex
+				kwargs.update(zip(arg_spec.args, args))
+				refid: str = uuid4().hex
 
-					logdata = {
-						key: kwargs[key]
-						for key in kwargs.keys() - exclusions
-					}
-					logger.exception({ 'params': logdata, 'refid': refid })
+				logdata = {
+					key: kwargs[key]
+					for key in kwargs.keys() - exclusions
+				}
+				logger.exception({ 'params': logdata, 'refid': refid })
 
-					if isinstance(e, ClientError) :
-						raise BadGateway(
-							f'{BadGateway.__name__}: received an invalid response from an upstream server while {message}.',
+				match e :
+					case NotImplementedError() :
+						raise NotImplemented(  # noqa: F901
+							f'{message} has not been implemented.',
 							refid = refid,
 							logdata = logdata,
 						)
 
-					raise InternalServerError(
-						f'an unexpected error occurred while {message}.',
-						refid = refid,
-						logdata = logdata,
-					)
-
-			wrapper._is_coroutine = _is_coroutine # type: ignore
-
-		else :
-			@wraps(func)
-			def wrapper(*args: Any, **kwargs: Any) -> Any :
-				try :
-					return func(*args, **kwargs)
-
-				except HttpError :
-					raise
-
-				except Exception as e :
-					for cls in type(e).__mro__ :
-						if cls in handlers :
-							Error, custom_message = handlers[cls]
-							raise Error(custom_message)
-
-					kwargs.update(zip(arg_spec.args, args))
-					refid: str = uuid4().hex
-
-					logdata = {
-						key: kwargs[key]
-						for key in kwargs.keys() - exclusions
-					}
-					logger.exception({ 'params': logdata, 'refid': refid })
-
-					if isinstance(e, ClientError) :
-						raise BadGateway(
-							f'{BadGateway.__name__}: received an invalid response from an upstream server while {message}.',
+					case ClientError() :
+						raise ServiceUnavailable(
+							f'{ServiceUnavailable.__name__}: received an invalid response from an upstream server while {message}.',
 							refid = refid,
 							logdata = logdata,
 						)
 
-					raise InternalServerError(
-						f'an unexpected error occurred while {message}.',
-						refid = refid,
-						logdata = logdata,
-					)
+				raise InternalServerError(
+					f'an unexpected error occurred while {message}.',
+					refid = refid,
+					logdata = logdata,
+				)
 
+		wrapper._is_coroutine = _is_coroutine # type: ignore
 		return wrapper
 
 	return decorator

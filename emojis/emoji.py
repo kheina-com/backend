@@ -1,11 +1,13 @@
 from typing import Self
 
+from psycopg2.errors import UniqueViolation
+
 from shared.auth import KhUser
-from shared.exceptions.http_error import Conflict, HttpErrorHandler, NotFound
+from shared.exceptions.http_error import BadRequest, Conflict, Forbidden, HttpErrorHandler, NotFound
+from shared.models.auth import Scope
 
 from .models import AliasRequest, CreateRequest, Emoji, InternalEmoji, UpdateRequest
 from .repository import EmojiRepository, users
-from psycopg2.errors import UniqueViolation
 
 
 class Emojis(EmojiRepository) :
@@ -45,12 +47,42 @@ class Emojis(EmojiRepository) :
 		return await self.emoji(user, iemoji)
 
 
+	@HttpErrorHandler('updating emoji')
 	async def update(self: Self, user: KhUser, emoji: str, req: UpdateRequest) -> Emoji :
-		return await super().update(
-			InternalEmoji(
-				emoji    = emoji,
-				owner    = await users._handle_to_user_id(req.owner) if req.owner and "owner" in req.mask else None,
-				post_id  = req.post_id.int() if req.post_id else None,
-				filename = "req.filename" if "filename" in req.mask else "",
-			),
-		)
+		iemoji = await self._read(emoji)
+
+		if not iemoji :
+			raise NotFound('emoji does not exist')
+
+		if iemoji.alias :
+			raise BadRequest('cannot edit an alias')
+
+		# set fields
+
+		if "owner" in req.mask :
+			if req.owner :
+				iemoji.owner = await users._handle_to_user_id(req.owner)
+
+			else :
+				iemoji.owner = None
+
+		if "post_id" in req.mask :
+			if req.post_id :
+				iemoji.post_id = req.post_id.int()
+
+			else :
+				iemoji.post_id = None
+
+		if "alt" in req.mask :
+			if req.alt :
+				iemoji.alt = req.alt
+
+			else :
+				iemoji.alt = None
+
+		if "filename" in req.mask :
+			assert req.filename
+			iemoji.filename = req.filename
+
+		await super().update(emoji, iemoji)
+		return await self.emoji(user, iemoji)

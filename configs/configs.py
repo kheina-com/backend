@@ -63,7 +63,7 @@ class Configs(SqlInterface) :
 
 	@HttpErrorHandler('retrieving patreon campaign info')
 	@AerospikeCache('kheina', 'configs', 'patreon-campaign-funds', TTL_minutes=10)
-	def getFunding(self) -> int :
+	async def getFunding(self) -> int :
 		if environment.is_local() :
 			return 1500
 

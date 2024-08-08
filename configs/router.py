@@ -44,8 +44,8 @@ async def v1Banner() -> BannerResponse :
 async def v1Funding() -> FundingResponse :
 	costs: Task[CostsStore] = ensure_future(configs.getConfig(ConfigType.costs, CostsStore))
 	return FundingResponse(
-		funds=configs.getFunding(),
-		costs=(await costs).costs,
+		funds = await configs.getFunding(),
+		costs = (await costs).costs,
 	)
 
 

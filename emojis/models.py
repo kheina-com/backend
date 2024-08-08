@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, validator
 
@@ -33,6 +33,8 @@ class Emoji(BaseModel) :
 
 	@validator('url', pre=True, always=True)
 	def validate_url(cls, v, values) :
+		if values['post_id'] :
+			return values['post_id'] + '/emoji/' + values['filename']
 		return 'emoji/' + values['filename']
 
 
@@ -40,14 +42,16 @@ class CreateRequest(BaseModel) :
 	_post_id_converter = validator('post_id', pre=True, always=True, allow_reuse=True)(_post_id_converter)
 
 	emoji:    str
-	owner:    Optional[str]    = None
+	owner:    Optional[str]    = None		
 	post_id:  Optional[PostId] = None
 	alt:      Optional[str]    = None
 	filename: str
 
 
 class UpdateRequest(BaseModel) :
-	mask:     list[str]
+	_post_id_converter = validator('post_id', pre=True, always=True, allow_reuse=True)(_post_id_converter)
+
+	mask:     set[Literal["owner"] | Literal["post_id"] | Literal["alt"] | Literal["filename"]]
 	owner:    Optional[str]    = None
 	post_id:  Optional[PostId] = None
 	alt:      Optional[str]    = None

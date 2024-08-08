@@ -1,7 +1,6 @@
-from asyncio.coroutines import _is_coroutine  # type: ignore
 from enum import Enum
 from functools import wraps
-from inspect import FullArgSpec, Parameter, getfullargspec, iscoroutinefunction, signature
+from inspect import FullArgSpec, Parameter, getfullargspec, iscoroutinefunction, signature, markcoroutinefunction
 from logging import getLogger
 from sys import _getframe
 from time import time
@@ -235,7 +234,7 @@ def timed(root, key_format = None) :
 				return coro(parent, args, kwargs)
 
 			# this is necessary to mark wrapper as an async function
-			wrapper._is_coroutine = _is_coroutine # type: ignore
+			markcoroutinefunction(wrapper)
 
 		else :
 			@wraps(func)
@@ -255,12 +254,12 @@ def timed(root, key_format = None) :
 		dec_params = [p for p in sig.parameters.values() if p.kind is Parameter.POSITIONAL_OR_KEYWORD]
 
 		wrapper.__annotations__ = func.__annotations__
-		wrapper.__signature__ = sig.replace(parameters=dec_params) # type: ignore
+		wrapper.__signature__ = sig.replace(parameters=dec_params)      # type: ignore
 		wrapper.__name__ = func.__name__
 		wrapper.__doc__ = func.__doc__
 		wrapper.__wrapped__ = func
 		wrapper.__qualname__ = func.__qualname__
-		wrapper.__kwdefaults__ = getattr(func, '__kwdefaults__', None) # type: ignore
+		wrapper.__kwdefaults__ = getattr(func, '__kwdefaults__', None)  # type: ignore
 		wrapper.__dict__.update(func.__dict__)
 
 		return wrapper
@@ -283,7 +282,7 @@ timed.logger: Callable[[str, Execution], None] = None
 def link(func: Callable) -> Callable :
 	# assert iscoroutinefunction(func)
 
-	# @wraps(func)
+	@wraps(func)
 	def wrapper(*args: Any, **kwargs: Any) -> Coroutine[Any, Any, Any] :
 		parent = _get_parent(_getframe())
 
@@ -300,14 +299,14 @@ def link(func: Callable) -> Callable :
 	dec_params = [p for p in sig.parameters.values() if p.kind is Parameter.POSITIONAL_OR_KEYWORD]
 
 	wrapper.__annotations__ = func.__annotations__
-	wrapper.__signature__ = sig.replace(parameters=dec_params)
+	wrapper.__signature__ = sig.replace(parameters=dec_params)      # type: ignore
 	wrapper.__name__ = func.__name__
 	wrapper.__doc__ = func.__doc__
 	wrapper.__wrapped__ = func
 	wrapper.__qualname__ = func.__qualname__
-	wrapper.__kwdefaults__ = getattr(func, '__kwdefaults__', None)
+	wrapper.__kwdefaults__ = getattr(func, '__kwdefaults__', None)  # type: ignore
 	wrapper.__dict__.update(func.__dict__)
-	wrapper._is_coroutine = _is_coroutine
+	markcoroutinefunction(wrapper)
 
 	return wrapper
 
