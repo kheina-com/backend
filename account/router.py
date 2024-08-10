@@ -10,6 +10,7 @@ from shared.server import Request
 
 from .account import Account, auth
 from .models import ChangeHandle, CreateAccountRequest, FinalizeAccountRequest
+from shared.auth import deactivateAuthToken
 
 
 app = APIRouter(
@@ -40,6 +41,12 @@ async def v1Login(req: Request, body: LoginRequest) :
 @app.delete('/logout', status_code=204)
 async def v1Logout(req: Request) :
 	await req.user.authenticated()
+	assert req.user.token
+	await deactivateAuthToken(req.user.token.token_string)
+	response = Response(status_code=204)
+	secure = not environment.is_local()
+	response.delete_cookie('kh-auth', secure=secure, httponly=secure, samesite='strict')
+	return response
 
 
 @app.post('/create', status_code=204)

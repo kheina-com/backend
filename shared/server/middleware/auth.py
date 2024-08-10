@@ -14,10 +14,10 @@ from ...exceptions.handler import jsonErrorHandler
 from ...exceptions.http_error import BadRequest, Forbidden, HttpError, Unauthorized
 
 
-class KhAuthMiddleware:
+class KhAuthMiddleware :
 
 	def __init__(self, app: ASGIApp, required: bool = True) -> None :
-		self.app = app
+		self.app           = app
 		self.auth_required = required
 		self.ban_repo      = ModActions()
 

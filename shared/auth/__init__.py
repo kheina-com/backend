@@ -152,6 +152,17 @@ async def verifyToken(token: str) -> AuthToken :
 	raise InvalidToken('The given token uses a version that is unable to be decoded.')
 
 
+async def deactivateAuthToken(token: str, guid: Optional[bytes] = None) -> None :
+	atoken = await verifyToken(token)
+
+	if not guid :
+		return await KVS.remove_async(atoken.guid.bytes)
+
+	tm = await KVS.get_async(guid, TokenMetadata)
+	if tm.user_id == atoken.user_id :
+		return await KVS.remove_async(guid)
+
+
 async def retrieveAuthToken(request: Request) -> AuthToken :
 	token: Optional[str] = request.headers.get('Authorization') or request.cookies.get('kh-auth')
 
