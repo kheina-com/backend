@@ -74,7 +74,7 @@ class Configs(SqlInterface) :
 	@HttpErrorHandler('retrieving config')
 	@AerospikeCache('kheina', 'configs', '{config}', _kvs=KVS)
 	async def getConfig[T: BaseModel](self, config: ConfigType, _: Type[T]) -> T :
-		data: tuple[memoryview] = await self.query_async("""
+		data: Optional[tuple[memoryview]] = await self.query_async("""
 			SELECT bytes
 			FROM kheina.public.configs
 			WHERE key = %s;
@@ -114,7 +114,7 @@ class Configs(SqlInterface) :
 			),
 			commit=True,
 		)
-		KVS.put(config, value)
+		await KVS.put_async(str(config), value)
 
 
 	@staticmethod
@@ -191,7 +191,7 @@ class Configs(SqlInterface) :
 			commit=True,
 		)
 
-		KVS.put(config_key, user_config)
+		await KVS.put_async(config_key, user_config)
 
 
 	@AerospikeCache('kheina', 'configs', UserConfigKeyFormat, _kvs=KVS)
