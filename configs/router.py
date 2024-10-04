@@ -24,7 +24,7 @@ async def startup() :
 
 @app.on_event('shutdown')
 async def shutdown() :
-	configs.close()
+	await configs.close()
 
 
 ################################################## INTERNAL ##################################################

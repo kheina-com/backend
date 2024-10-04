@@ -144,7 +144,7 @@ app = APIRouter(
 
 @app.on_event('shutdown')
 async def shutdown() :
-	tagger.close()
+	await tagger.close()
 
 app.include_router(tagRouter)
 app.include_router(tagsRouter)

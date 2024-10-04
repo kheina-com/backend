@@ -824,7 +824,7 @@ class Posts(Posts) :
 				Value(await privacy_map.get(Privacy.draft)),
 			),
 		).order(
-			Field('posts', 'created'),
+			Field('posts', 'updated'),
 			Order.descending_nulls_first,
 		)
 

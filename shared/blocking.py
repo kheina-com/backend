@@ -13,8 +13,8 @@ class UserBlocking(SqlInterface, Hashable) :
 
 
 	@ArgsCache(60)
-	def user_blocked_tags(self, user_id: int) -> Set[str] :
-		data = self.query(
+	async def user_blocked_tags(self, user_id: int) -> Set[str] :
+		data = await self.query_async(
 			"""
 			SELECT tags.tag
 			FROM kheina.public.tag_blocking
@@ -31,8 +31,8 @@ class UserBlocking(SqlInterface, Hashable) :
 
 
 	@ArgsCache(60)
-	def user_blocked_users(self, user_id: int) -> Set[str] :
-		data = self.query(
+	async def user_blocked_users(self, user_id: int) -> Set[str] :
+		data = await self.query_async(
 			"""
 			SELECT users.handle
 			FROM kheina.public.user_blocking

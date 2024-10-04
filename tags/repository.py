@@ -2,7 +2,7 @@ from asyncio import Task, ensure_future, wait
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Self, Sequence, Tuple
 
-from psycopg2.errors import NotNullViolation, UniqueViolation
+from psycopg.errors import NotNullViolation, UniqueViolation
 
 from posts.models import PostId, Privacy
 from shared.auth import KhUser, Scope
@@ -140,5 +140,5 @@ class Tags(SqlInterface) :
 				)
 
 			if adding or removing :
-				transaction.commit()
+				await transaction.commit()
 				await BlockingKVS.remove_async(f'tags.{user_id}')

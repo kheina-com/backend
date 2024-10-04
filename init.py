@@ -91,7 +91,7 @@ cli.command('nuke-cache')(nukeCache)
 	'--file',
 	default='',
 )
-def execSql(unlock: bool = False, file: str = '') -> None :
+async def execSql(unlock: bool = False, file: str = '') -> None :
 	"""
 	connects to the database and runs all files stored under the db folder
 	folders under db are sorted numberically and run in descending order
@@ -102,50 +102,49 @@ def execSql(unlock: bool = False, file: str = '') -> None :
 	nukeCache()
 
 	sql = SqlInterface()
-	with sql.pool.conn() as conn :
-		cur = conn.cursor()
+	async with sql.pool.connection() as conn :
+		async with conn.cursor() as cur :
+			sqllock = None
+			if not unlock and isfile('sql.lock') :
+				sqllock = int(open('sql.lock').read().strip())
+				click.echo(f'==> sql.lock: {sqllock}')
 
-		sqllock = None
-		if not unlock and isfile('sql.lock') :
-			sqllock = int(open('sql.lock').read().strip())
-			click.echo(f'==> sql.lock: {sqllock}')
-
-		if file :
-			if not isfile(file) :
-				return
-
-			if not file.endswith('.sql') :
-				return
-
-			with open(file) as f :
-				click.echo(f'==> exec: {file}')
-				cur.execute(f.read())
-
-			conn.commit()
-			return
-
-		dirs = sorted(int(i) for i in listdir('db') if isdir(f'db/{i}') and i == str(isint(i)))
-		dir = ""
-		for dir in dirs :
-			if sqllock and sqllock >= dir :
-				continue
-
-			files = [join('db', str(dir), file) for file in sorted(listdir(join('db', str(dir))))]
-			for file in files :
+			if file :
 				if not isfile(file) :
-					continue
+					return
 
 				if not file.endswith('.sql') :
-					continue
+					return
 
 				with open(file) as f :
 					click.echo(f'==> exec: {file}')
-					cur.execute(f.read())
+					await cur.execute(f.read()) # type: ignore
 
-		conn.commit()
+				await conn.commit()
+				return
 
-		with open('sql.lock', 'w') as f :
-			f.write(str(dir))
+			dirs = sorted(int(i) for i in listdir('db') if isdir(f'db/{i}') and i == str(isint(i)))
+			dir = ""
+			for dir in dirs :
+				if sqllock and sqllock >= dir :
+					continue
+
+				files = [join('db', str(dir), file) for file in sorted(listdir(join('db', str(dir))))]
+				for file in files :
+					if not isfile(file) :
+						continue
+
+					if not file.endswith('.sql') :
+						continue
+
+					with open(file) as f :
+						click.echo(f'==> exec: {file}')
+						await cur.execute(f.read()) # type: ignore
+
+			await conn.commit()
+
+	with open('sql.lock', 'w') as f :
+		f.write(str(dir))
 
 
 EmojiFontURL = r'https://github.com/PoomSmart/EmojiFonts/releases/download/15.1.0/AppleColorEmoji-HD.ttc'

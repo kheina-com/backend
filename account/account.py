@@ -1,7 +1,7 @@
 from re import IGNORECASE
 from re import compile as re_compile
 
-from psycopg2.errors import UniqueViolation
+from psycopg.errors import UniqueViolation
 
 from authenticator.authenticator import Authenticator
 from authenticator.models import LoginResponse, TokenResponse

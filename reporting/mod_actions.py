@@ -279,7 +279,7 @@ class ModActions(SqlInterface) :
 					await kvs.put_async(f'ban={iban.user_id}', iban)
 					await kvs.put_async(f'user_id={user_id}', iaction)
 
-			t.commit()
+			await t.commit()
 
 		await reporting_kvs.put_async(str(ireport.report_id), ireport)
 		await kvs.put_async(f'report_id={iaction.report_id}', iaction)
@@ -288,7 +288,7 @@ class ModActions(SqlInterface) :
 
 	@AerospikeCache('kheina', 'actions', 'report_id={report_id}', _kvs=kvs)
 	async def _read(self: Self, report_id: int) -> Optional[InternalModAction] :
-		data: Optional[tuple[int, int, Optional[int], Optional[int], Optional[int], datetime, Optional[datetime], str, int, memoryview]] = await self.query_async(Query(InternalModAction.__table_name__).select(
+		data: Optional[tuple[int, int, Optional[int], Optional[int], Optional[int], datetime, Optional[datetime], str, int, bytes]] = await self.query_async(Query(InternalModAction.__table_name__).select(
 			Field('mod_actions', 'action_id'),
 			Field('mod_actions', 'report_id'),
 			Field('mod_actions', 'post_id'),
@@ -417,7 +417,7 @@ class ModActions(SqlInterface) :
 
 	@AerospikeCache('kheina', 'actions', 'active_action={post_id}', _kvs=kvs)
 	async def _active_action(self: Self, post_id: PostId) -> Optional[InternalModAction] :
-		data: Optional[tuple[int, int, Optional[int], Optional[int], Optional[int], datetime, Optional[datetime], str, int, memoryview]] = await self.query_async(Query(InternalModAction.__table_name__).select(
+		data: Optional[tuple[int, int, Optional[int], Optional[int], Optional[int], datetime, Optional[datetime], str, int, bytes]] = await self.query_async(Query(InternalModAction.__table_name__).select(
 			Field('mod_actions', 'action_id'),
 			Field('mod_actions', 'report_id'),
 			Field('mod_actions', 'post_id'),
@@ -455,7 +455,7 @@ class ModActions(SqlInterface) :
 
 	@AerospikeCache('kheina', 'actions', 'active_action={post_id}', _kvs=kvs)
 	async def _actions(self: Self, post_id: PostId) -> list[InternalModAction] :
-		data: list[tuple[int, int, Optional[int], Optional[int], Optional[int], datetime, Optional[datetime], str, int, memoryview]] = await self.query_async(Query(InternalModAction.__table_name__).select(
+		data: list[tuple[int, int, Optional[int], Optional[int], Optional[int], datetime, Optional[datetime], str, int, bytes]] = await self.query_async(Query(InternalModAction.__table_name__).select(
 			Field('mod_actions', 'action_id'),
 			Field('mod_actions', 'report_id'),
 			Field('mod_actions', 'post_id'),

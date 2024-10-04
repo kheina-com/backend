@@ -96,9 +96,6 @@ class TagGroups(Dict[TagGroupPortable, List[str]]) :
 
 def _thumbhash_converter(value: Any) -> Optional[str] :
 	if value :
-		if isinstance(value, memoryview) :
-			value = bytes(value)
-
 		if isinstance(value, bytes) :
 			return b64encode(value).decode()
 
@@ -137,9 +134,6 @@ class SearchResults(BaseModel) :
 
 def _bytes_converter(value: Any) -> Optional[bytes] :
 	if value :
-		if isinstance(value, memoryview) :
-			value = bytes(value)
-
 		if isinstance(value, bytes) :
 			return value
 

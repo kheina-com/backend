@@ -20,6 +20,10 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.podIP
+        - name: pod_name
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
         - name: pod_host
           value: "*.fuzz.ly"
         - name: kh_aes

@@ -22,7 +22,7 @@ account = Account()
 
 @app.on_event('shutdown')
 async def shutdown() :
-	account.close()
+	await account.close()
 
 
 @app.post('/login', response_model=LoginResponse)

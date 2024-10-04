@@ -1,6 +1,6 @@
 from typing import Self
 
-from psycopg2.errors import UniqueViolation
+from psycopg.errors import UniqueViolation
 
 from shared.auth import KhUser
 from shared.exceptions.http_error import BadRequest, Conflict, Forbidden, HttpErrorHandler, NotFound

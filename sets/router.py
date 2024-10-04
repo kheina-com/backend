@@ -19,7 +19,7 @@ sets = Sets()
 
 @app.on_event('shutdown')
 async def shutdown() :
-	sets.close()
+	await sets.close()
 
 
 ################################################## INTERNAL ##################################################

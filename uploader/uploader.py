@@ -253,7 +253,7 @@ class Uploader(SqlInterface, B2Interface) :
 				fetch_one=True,
 			)
 
-			transaction.commit()
+			await transaction.commit()
 
 		return {
 			'user_id': user.user_id,
@@ -324,7 +324,7 @@ class Uploader(SqlInterface, B2Interface) :
 				assert isinstance(p, int)
 				post.privacy = p
 
-			transaction.commit()
+			await transaction.commit()
 
 		await PostKVS.put_async(post_id, post)
 
@@ -509,7 +509,7 @@ class Uploader(SqlInterface, B2Interface) :
 				# TODO: implement emojis
 				emoji: Optional[str] = None
 
-				transaction.commit()
+				await transaction.commit()
 
 			post.updated    = updated
 			post.media_type = media_type
@@ -677,7 +677,7 @@ class Uploader(SqlInterface, B2Interface) :
 				raise
 
 			if commit :
-				t.commit()
+				await t.commit()
 
 			if vote_task :
 				await vote_task

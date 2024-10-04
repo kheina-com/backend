@@ -3,7 +3,7 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional, Self, Sequence, Tuple
 
 import aerospike
-from psycopg2.errors import NotNullViolation, UniqueViolation
+from psycopg.errors import NotNullViolation, UniqueViolation
 
 from posts.models import InternalPost, PostId, Privacy
 from posts.repository import Posts
@@ -34,10 +34,10 @@ class Tagger(Tags) :
 			raise BadRequest('the given description is invalid, description cannot be over 1,000 characters in length.', description=description)
 
 
-	def _populate_tag_cache(self, tag: str) -> None :
-		if not CountKVS.exists(tag) :
+	async def _populate_tag_cache(self, tag: str) -> None :
+		if not await CountKVS.exists_async(tag) :
 			# we gotta populate it here (sad)
-			data = self.query("""
+			data = await self.query_async("""
 				SELECT COUNT(1)
 				FROM kheina.public.tags
 					INNER JOIN kheina.public.tag_post
@@ -50,16 +50,16 @@ class Tagger(Tags) :
 				(tag,),
 				fetch_one=True,
 			)
-			CountKVS.put(tag, int(data[0]), -1)
+			await CountKVS.put_async(tag, int(data[0]), -1)
 
 
-	def _get_tag_count(self, tag: str) -> int :
-		self._populate_tag_cache(tag)
-		return CountKVS.get(tag)
+	async def _get_tag_count(self, tag: str) -> int :
+		await self._populate_tag_cache(tag)
+		return await CountKVS.get_async(tag)
 
 
-	def _increment_tag_count(self, tag: str) -> None :
-		self._populate_tag_cache(tag)
+	async def _increment_tag_count(self, tag: str) -> None :
+		await self._populate_tag_cache(tag)
 		KeyValueStore._client.increment( # type: ignore
 			(CountKVS._namespace, CountKVS._set, tag),
 			'data',
@@ -73,8 +73,8 @@ class Tagger(Tags) :
 		)
 
 
-	def _decrement_tag_count(self, tag: str) -> None :
-		self._populate_tag_cache(tag)
+	async def _decrement_tag_count(self, tag: str) -> None :
+		await self._populate_tag_cache(tag)
 		KeyValueStore._client.increment( # type: ignore
 			(CountKVS._namespace, CountKVS._set, tag),
 			'data',
@@ -122,7 +122,7 @@ class Tagger(Tags) :
 		if post.privacy == await privacy_map.get(Privacy.public) :
 			existing = set(flatten(await self._fetch_tags_by_post(post_id)))
 			for tag in set(tags) - existing :  # increment tags that didn't already exist
-				self._increment_tag_count(tag)
+				await self._increment_tag_count(tag)
 
 		try :
 			await TagKVS.remove_async(f'post.{post_id}')
@@ -144,9 +144,9 @@ class Tagger(Tags) :
 		if post.privacy == await privacy_map.get(Privacy.public) :
 			existing = set(flatten(await self._fetch_tags_by_post(post_id)))
 			for tag in set(tags) & existing :  # decrement only the tags that already existed
-				self._decrement_tag_count(tag)
+				await self._decrement_tag_count(tag)
 
-		TagKVS.remove(f'post.{post_id}')
+		await TagKVS.remove_async(f'post.{post_id}')
 
 
 	@HttpErrorHandler('inheriting a tag')
@@ -163,7 +163,7 @@ class Tagger(Tags) :
 		itag: InternalTag = await TagKVS.get_async(parent_tag)
 		if itag :
 			itag.inherited_tags.append(child_tag)
-			TagKVS.put(itag.name, itag)
+			await TagKVS.put_async(itag.name, itag)
 
 
 	@HttpErrorHandler('removing tag inheritance')
@@ -186,7 +186,7 @@ class Tagger(Tags) :
 		itag: InternalTag = await TagKVS.get_async(parent_tag)
 		if itag :
 			itag.inherited_tags.remove(child_tag)
-			TagKVS.put(itag.name, itag)
+			await TagKVS.put_async(itag.name, itag)
 
 
 	@HttpErrorHandler('updating a tag', handlers = {
@@ -252,9 +252,9 @@ class Tagger(Tags) :
 
 		if tag != name :
 			# the tag name was updated, so we need to delete the old one
-			TagKVS.remove(tag)
+			await TagKVS.remove_async(tag)
 
-		TagKVS.put(itag.name, itag)
+		await TagKVS.put_async(itag.name, itag)
 
 
 	@AerospikeCache('kheina', 'tags', 'user.{user_id}', _kvs=TagKVS)

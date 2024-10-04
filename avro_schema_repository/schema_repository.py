@@ -33,7 +33,7 @@ class SchemaRepository(SqlInterface) :
 		"""
 		fp: int = int_from_bytes(fingerprint)
 
-		data: List[memoryview] = await self.query_async("""
+		data: List[bytes] = await self.query_async("""
 			SELECT schema
 			FROM kheina.public.avro_schemas
 			WHERE fingerprint = %s;
@@ -46,7 +46,7 @@ class SchemaRepository(SqlInterface) :
 		if not data :
 			raise NotFound('no data was found for the provided schema fingerprint.')
 
-		return data[0].tobytes()
+		return data[0]
 
 
 	@HttpErrorHandler('saving schema')

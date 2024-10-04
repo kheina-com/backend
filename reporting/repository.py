@@ -244,7 +244,7 @@ class Reporting(SqlInterface) :
 			ireport.assignee = user.user_id
 			ireport = await t.update(ireport)
 
-			t.commit()
+			await t.commit()
 
 		await kvs.put_async(str(ireport.report_id), ireport)
 		return await self.report(user, ireport)

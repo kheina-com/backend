@@ -128,3 +128,7 @@ app.include_router(actionRouter)
 app.include_router(actionsRouter)
 app.include_router(queueRouter)
 app.include_router(bansRouter)
+
+@app.on_event('shutdown')
+async def shutdown() :
+	await reporting.close()

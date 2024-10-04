@@ -15,7 +15,7 @@ from avrofastapi.serialization import AvroDeserializer, AvroSerializer
 from cache import AsyncLRU
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from psycopg2.errors import UniqueViolation
+from psycopg.errors import UniqueViolation
 
 from shared import logging
 from shared.base64 import b64decode, b64encode
@@ -268,12 +268,6 @@ class Authenticator(SqlInterface, Hashable) :
 		)
 
 
-	async def logout(self, guid: RefId) :
-		# since this endpoint is behind user.authenticated, we already know that the
-		# token exists and all the information is correct. we just need to delete it.
-		await Authenticator.KVS.remove_async(guid)
-
-
 	async def fetchPublicKey(self, key_id, algorithm: Optional[AuthAlgorithm] = None) -> PublicKeyResponse :
 		algo = algorithm.name if algorithm else self._token_algorithm
 		lookup_key = (algo, key_id)
@@ -284,7 +278,7 @@ class Authenticator(SqlInterface, Hashable) :
 				public_key = self._public_keyring[lookup_key]
 
 			else :
-				data: tuple[memoryview, memoryview, datetime, datetime] = await self.query_async("""
+				data: tuple[bytes, bytes, datetime, datetime] = await self.query_async("""
 					SELECT public_key, signature, issued, expires
 					FROM kheina.auth.token_keys
 					WHERE algorithm = %s AND key_id = %s;
@@ -336,7 +330,7 @@ class Authenticator(SqlInterface, Hashable) :
 		try :
 			email_dict: Dict[str, str] = self._validateEmail(email)
 			email_hash = self._hash_email(email)
-			data: tuple[int, memoryview, int, str, str, bool] = await self.query_async("""
+			data: Optional[tuple[int, bytes, int, str, str, bool]] = await self.query_async("""
 				SELECT
 					user_login.user_id,
 					user_login.password,
@@ -357,7 +351,7 @@ class Authenticator(SqlInterface, Hashable) :
 				raise Unauthorized('login failed.')
 
 			user_id, pwhash, secret, handle, name, mod = data
-			password_hash = pwhash.tobytes().decode()
+			password_hash = pwhash.decode()
 
 			if not self._argon2.verify(password_hash, password.encode() + self._secrets[secret]) :
 				raise Unauthorized('login failed.')
@@ -402,7 +396,7 @@ class Authenticator(SqlInterface, Hashable) :
 
 
 	async def createBot(self, user: KhUser, bot_type: BotType) -> BotCreateResponse :
-		if type(bot_type) != BotType :
+		if type(bot_type) is not BotType :
 			# this should never run, thanks to pydantic/fastapi. just being extra careful.
 			raise BadRequest('bot_type must be a BotType value.')
 
@@ -464,7 +458,7 @@ class Authenticator(SqlInterface, Hashable) :
 		bot_type: BotType
 
 		try :
-			data: Tuple[int, memoryview, int, int] = await self.query_async("""
+			data: Tuple[int, bytes, int, int] = await self.query_async("""
 				SELECT
 					bot_login.user_id,
 					bot_login.password,
@@ -482,7 +476,7 @@ class Authenticator(SqlInterface, Hashable) :
 
 			bot_type_id: int
 			user_id, pw, secret, bot_type_id = data
-			password_hash = pw.tobytes().decode()
+			password_hash = pw.decode()
 			bot_type = await bot_type_map.get(bot_type_id)
 
 			if user_id != bot_login.user_id :
@@ -548,7 +542,7 @@ class Authenticator(SqlInterface, Hashable) :
 		try :
 
 			email_hash = self._hash_email(email)
-			data: tuple[memoryview, int] = await self.query_async("""
+			data: tuple[bytes, int] = await self.query_async("""
 				SELECT password, secret
 				FROM kheina.auth.user_login
 					INNER JOIN kheina.public.users
@@ -563,7 +557,7 @@ class Authenticator(SqlInterface, Hashable) :
 				raise Unauthorized('password change failed.')
 
 			pwhash, secret = data
-			password_hash = pwhash.tobytes()
+			password_hash = pwhash
 
 			if not self._argon2.verify(password_hash.decode(), old_password.encode() + self._secrets[secret]) :
 				raise Unauthorized('password change failed.')

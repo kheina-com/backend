@@ -2,6 +2,7 @@ import json
 from os import environ
 
 from fastapi import FastAPI
+from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 from starlette.middleware.exceptions import ExceptionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -20,7 +21,7 @@ from shared.exceptions.handler import jsonErrorHandler
 from shared.server.middleware import CustomHeaderMiddleware, HeadersToSet
 from shared.server.middleware.auth import KhAuthMiddleware
 from shared.server.middleware.cors import KhCorsMiddleware
-from shared.sql import ConnectionPool
+from shared.sql import SqlInterface
 from shared.timing import timed
 from tags.router import app as tags
 from uploader.router import app as uploader
@@ -93,6 +94,13 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=[
 app.add_middleware(KhAuthMiddleware, required=False)
 
 
+@app.on_event('startup')
+async def startup() :
+	if getattr(SqlInterface, 'pool', None) is None :
+		SqlInterface.pool = AsyncConnectionPool(' '.join(map('='.join, SqlInterface.db.items())), open=False)
+		await SqlInterface.pool.open()
+
+
 class VersionInfo(BaseModel) :
 	short: str
 	full:  str
@@ -100,6 +108,7 @@ class VersionInfo(BaseModel) :
 
 class ServiceInfo(BaseModel) :
 	name:        str
+	pod:         str
 	environment: Environment
 	version:     VersionInfo
 
@@ -108,6 +117,7 @@ class ServiceInfo(BaseModel) :
 def root() -> ServiceInfo :
 	return ServiceInfo(
 		name        = name,
+		pod         = environ.get('pod_name', 'none'),
 		environment = environment,
 		version = VersionInfo(
 			short = short_hash,
@@ -126,7 +136,3 @@ app.include_router(uploader)
 app.include_router(users)
 app.include_router(emoji)
 app.include_router(reporting)
-
-@app.on_event('shutdown')
-def shutdown() :
-	ConnectionPool().close_all()

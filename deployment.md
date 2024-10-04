@@ -7,7 +7,7 @@ docker push us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend:$(gi
 connect to gke from kubectl
 https://cloud.google.com/kubernetes-engine/docs/deploy-app-cluster#get_authentication_credentials_for_the_cluster
 ```sh
-gcloud container clusters get-credentials fuzzly-backend \                    
+gcloud container clusters get-credentials fuzzly-backend \
 	--location us-central1
 ```
 

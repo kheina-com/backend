@@ -459,7 +459,7 @@ class Posts(SqlInterface) :
 				),
 			)
 
-			transaction.commit()
+			await transaction.commit()
 
 		score: InternalScore = InternalScore(
 			up = up,
