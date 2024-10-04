@@ -6,7 +6,7 @@ from re import compile
 from types import TracebackType
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Self, Tuple, Type, Union
 
-from psycopg import AsyncConnection, Binary, AsyncCursor
+from psycopg import AsyncConnection, Binary, AsyncClientCursor, OperationalError
 from psycopg.errors import ConnectionException
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
@@ -111,7 +111,7 @@ class SqlInterface :
 		for _ in range(attempts) :
 			async with SqlInterface.pool.connection() as conn :
 				try :
-					async with conn.cursor() as cur :
+					async with AsyncClientCursor(conn) as cur :
 						# TODO: convert fuzzly's Query implementation into a psycopg composable
 						await cur.execute(sql, params) # type: ignore
 
@@ -128,6 +128,9 @@ class SqlInterface :
 							return await cur.fetchall()
 
 						return
+
+				except OperationalError :
+					pass
 
 				except Exception as e :
 					self.logger.warning({
@@ -537,10 +540,10 @@ class SqlInterface :
 class Transaction :
 
 	def __init__(self: 'Transaction', sql: SqlInterface) :
-		self._sql:   SqlInterface              = sql
-		self.cur:    Optional[AsyncCursor]     = None
-		self.conn:   Optional[AsyncConnection] = None
-		self.nested: int                       = 0
+		self._sql:   SqlInterface                = sql
+		self.cur:    Optional[AsyncClientCursor] = None
+		self.conn:   Optional[AsyncConnection]   = None
+		self.nested: int                         = 0
 
 		self.insert = partial(self._sql.insert, query=self.query_async)
 		self.select = partial(self._sql.select, query=self.query_async)
@@ -558,7 +561,7 @@ class Transaction :
 			self.conn = conn
 
 		if not self.cur :
-			self.cur = await self.conn.cursor().__aenter__()
+			self.cur = await AsyncClientCursor(self.conn).__aenter__()
 
 		return self
 
@@ -605,10 +608,12 @@ class Transaction :
 			await self.cur.execute(sql, params) # type: ignore
 
 			if fetch_one :
-				return self.cur.fetchone()
+				return await self.cur.fetchone()
 
 			elif fetch_all :
-				return self.cur.fetchall()
+				return await self.cur.fetchall()
+
+			return
 
 		except Exception as e :
 			self._sql.logger.warning({

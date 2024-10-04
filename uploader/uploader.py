@@ -244,12 +244,19 @@ class Uploader(SqlInterface, B2Interface) :
 				VALUES
 				(%s, %s, privacy_to_id('unpublished'))
 				ON CONFLICT (uploader, privacy) WHERE privacy = 4 DO NOTHING;
+				""", (
+					post_id,
+					user.user_id,
+		  		),
+			)
 
+			data: List[str] = await transaction.query_async("""
 				SELECT post_id FROM kheina.public.posts
 				WHERE uploader = %s
 					AND privacy = privacy_to_id('unpublished');
-				""",
-				(post_id, user.user_id, user.user_id),
+				""", (
+					user.user_id,
+				),
 				fetch_one=True,
 			)
 
