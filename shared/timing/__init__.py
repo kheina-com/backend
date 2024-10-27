@@ -1,6 +1,6 @@
 from enum import Enum
 from functools import wraps
-from inspect import FullArgSpec, Parameter, getfullargspec, iscoroutinefunction, signature, markcoroutinefunction
+from inspect import FullArgSpec, Parameter, getfullargspec, iscoroutinefunction, markcoroutinefunction, signature
 from logging import getLogger
 from sys import _getframe
 from time import time
@@ -142,11 +142,18 @@ def _get_parent(frame: Optional[FrameType]) -> Optional[Execution] :
 # it's required for timed and decorator to not be annotated otherwise it fucks up @wraps(func), don't ask me why.
 def timed(root, key_format = None) :
 	"""
-	times the passed function.
+	times the decorated function.
 
-	if root = True, timing values are logged on completion.
-	if root = False, timing values are stored in the root's callstack and logged upon the root's completion.
-	if timed is used without passing root, it is assumed to be false.
+	- if root = True, timing values are logged on completion.
+	- if root = False, timing values are stored in the root's callstack and logged upon the root's completion.
+	- if timed is used without passing root, it is assumed to be false.
+
+	`@timed.root` may be used as a shorthand for `@timed(True)`
+
+	a custom logging function can be set by overriding `timed.logger(name: str, exec: timing.Execution)`
+	- default: `lambda n, x : logging.getLogger('stats').info({ n: x.dict() })`
+
+	`@timed.link` may be used to attempt to create a link between the parent function and decorated function when called. usually optional.
 	"""
 
 	if getattr(timed, 'logger', None) is None :

@@ -12,8 +12,8 @@ lock:
 build:
 	docker build -t us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend:$(shell git rev-parse --short HEAD) . --progress=plain
 
-.PHONY: push-docker
-push-docker:
+.PHONY: push
+push:
 	docker push us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend:$(shell git rev-parse --short HEAD)
 
 .PHONY: apply

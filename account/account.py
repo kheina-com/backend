@@ -33,12 +33,12 @@ class Account(SqlInterface, Hashable) :
 		self._auth_timeout = 30
 
 		if environment.is_prod() :
-			self._finalize_link = 'https://fuzz.ly/account/finalize?token={token}'
-			self._recovery_link = 'https://fuzz.ly/account/recovery?token={token}'
+			self._finalize_link = 'https://fuzz.ly/a/finalize?token={token}'
+			self._recovery_link = 'https://fuzz.ly/a/recovery?token={token}'
 
 		else :
-			self._finalize_link = 'https://dev.fuzz.ly/account/finalize?token={token}'
-			self._recovery_link = 'https://dev.fuzz.ly/account/recovery?token={token}'
+			self._finalize_link = 'https://dev.fuzz.ly/a/finalize?token={token}'
+			self._recovery_link = 'https://dev.fuzz.ly/a/recovery?token={token}'
 
 
 	def _validateEmail(self: 'Account', email: str) :

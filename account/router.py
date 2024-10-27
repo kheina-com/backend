@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from fastapi.responses import Response
 
 from authenticator.models import BotCreateResponse, BotLoginRequest, BotType, ChangePasswordRequest, LoginRequest, LoginResponse
-from shared.auth import Scope
+from shared.auth import Scope, deactivateAuthToken
 from shared.config.constants import environment
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest
@@ -10,7 +10,6 @@ from shared.server import Request
 
 from .account import Account, auth
 from .models import ChangeHandle, CreateAccountRequest, FinalizeAccountRequest
-from shared.auth import deactivateAuthToken
 
 
 app = APIRouter(

@@ -6,7 +6,7 @@ from re import compile
 from types import TracebackType
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Self, Tuple, Type, Union
 
-from psycopg import AsyncConnection, Binary, AsyncClientCursor, OperationalError
+from psycopg import AsyncClientCursor, AsyncConnection, Binary, OperationalError
 from psycopg.errors import ConnectionException
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
