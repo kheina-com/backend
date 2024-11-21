@@ -11,7 +11,7 @@ lock:
 
 .PHONY: build
 build:
-	docker build -t us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend:$(shell git rev-parse --short HEAD) . --progress=plain
+	DOCKER_DEFAULT_PLATFORM="linux/amd64" docker build -t us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend:$(shell git rev-parse --short HEAD) . --progress=plain
 
 .PHONY: push
 push:
