@@ -21,6 +21,7 @@ from authenticator.models import LoginRequest
 from shared.base64 import b64encode
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import decryptCredentialFile, fetch
+from shared.sql import SqlInterface
 
 
 def isint(value: Any) -> Optional[int] :
@@ -97,11 +98,12 @@ async def execSql(unlock: bool = False, file: str = '') -> None :
 	folders under db are sorted numberically and run in descending order
 	files within those folders are treated the same.
 	"""
-	from shared.sql import SqlInterface
 
 	nukeCache()
 
 	sql = SqlInterface()
+	await sql.open()
+
 	async with sql.pool.connection() as conn :
 		async with conn.cursor() as cur :
 			sqllock = None
@@ -290,6 +292,22 @@ async def createAdmin() -> LoginRequest :
 		),
 		commit=True,
 	)
+
+	acct = LoginRequest(email=email, password=password)
+	click.echo(f'==> account: {acct}')
+	return acct
+
+
+@cli.command('pw')	
+async def updatePassword() -> LoginRequest :
+	from authenticator.authenticator import Authenticator
+	"""
+	resets admin's password incase you lost or forgot it
+	"""
+	auth = Authenticator()
+	email = 'localhost@kheina.com'
+	password = b64encode(token_bytes(18)).decode()
+	await auth.forceChangePassword(email,password)
 
 	acct = LoginRequest(email=email, password=password)
 	click.echo(f'==> account: {acct}')

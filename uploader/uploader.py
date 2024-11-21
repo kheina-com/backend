@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 import aerospike
 from aiohttp import ClientResponseError
 from exiftool import ExifToolAlpha as ExifTool
+from wand import resource
 from wand.image import Image
 
 from posts.models import InternalPost, Post, PostId, PostSize, Privacy, Rating
@@ -28,14 +29,16 @@ from shared.models import InternalUser
 from shared.sql import SqlInterface, Transaction
 from shared.timing import timed
 from shared.utilities import flatten, int_from_bytes
-from tags.models import TagGroups
-from tags.repository import Tags
+from shared.utilities.units import Byte
+from tags.models import InternalTag
+from tags.repository import CountKVS, Tags
 from users.repository import UserKVS, Users
 
 from .models import Coordinates
 
 
-CountKVS: KeyValueStore = KeyValueStore('kheina', 'tag_count')
+resource.limits.set_resource_limit('memory', Byte.kibibyte.value * 512)
+resource.limits.set_resource_limit('map', Byte.kibibyte.value * 512)
 UnpublishedPrivacies: Set[Privacy] = { Privacy.unpublished, Privacy.draft }
 posts = Posts()
 users = Users()
@@ -77,30 +80,6 @@ class Uploader(SqlInterface, B2Interface) :
 			if cls in self._conversions :
 				return self._conversions[cls](item)
 		return item
-
-
-	async def _populate_tag_cache(self, tag: str) -> None :
-		if not await CountKVS.exists_async(tag) :
-			# we gotta populate it here (sad)
-			data = await self.query_async("""
-				SELECT COUNT(1)
-				FROM kheina.public.tags
-					INNER JOIN kheina.public.tag_post
-						ON tags.tag_id = tag_post.tag_id
-					INNER JOIN kheina.public.posts
-						ON tag_post.post_id = posts.post_id
-							AND posts.privacy = privacy_to_id('public')
-				WHERE tags.tag = %s;
-				""",
-				(tag,),
-				fetch_one=True,
-			)
-			await CountKVS.put_async(tag, int(data[0]), -1)
-
-
-	async def _get_tag_count(self, tag: str) -> int :
-		await self._populate_tag_cache(tag)
-		return await CountKVS.get_async(tag)
 
 
 	async def _increment_total_post_count(self, value: int = 1) -> None :
@@ -185,21 +164,6 @@ class Uploader(SqlInterface, B2Interface) :
 			)
 
 
-	async def _increment_tag_count(self, tag: str, value: int = 1) -> None :
-		await self._populate_tag_cache(tag)
-		KeyValueStore._client.increment( # type: ignore
-			(CountKVS._namespace, CountKVS._set, tag),
-			'data',
-			value,
-			meta={
-				'ttl': -1,
-			},
-			policy={
-				'max_retries': 3,
-			},
-		)
-
-
 	async def kvs_get(self: 'Uploader', post_id: PostId) -> Optional[InternalPost] :
 		try :
 			return await PostKVS.get_async(post_id)
@@ -235,26 +199,30 @@ class Uploader(SqlInterface, B2Interface) :
 			for _ in range(100) :
 				post_id = int_from_bytes(token_bytes(6))
 				data = await transaction.query_async("SELECT count(1) FROM kheina.public.posts WHERE post_id = %s;", (post_id,), fetch_one=True)
+
 				if not data[0] :
 					break
 
-			data: List[str] = await transaction.query_async("""
-				INSERT INTO kheina.public.posts
-				(post_id, uploader, privacy)
-				VALUES
-				(%s, %s, privacy_to_id('unpublished'))
-				ON CONFLICT (uploader, privacy) WHERE privacy = 4 DO NOTHING;
-				""", (
-					post_id,
-					user.user_id,
-		  		),
-			)
-
-			data: List[str] = await transaction.query_async("""
-				SELECT post_id FROM kheina.public.posts
+			data: list[str] = await transaction.query_async("""
+				WITH input AS (
+					INSERT INTO kheina.public.posts
+					(post_id, uploader, privacy)
+					VALUES
+					(%s, %s, privacy_to_id('unpublished'))
+					ON CONFLICT (uploader, privacy)
+					WHERE privacy = 4 DO NOTHING
+					RETURNING post_id
+				)
+				SELECT post_id
+				FROM input
+				UNION
+				SELECT post_id
+				FROM kheina.public.posts
 				WHERE uploader = %s
 					AND privacy = privacy_to_id('unpublished');
 				""", (
+					post_id,
+					user.user_id,
 					user.user_id,
 				),
 				fetch_one=True,
@@ -338,7 +306,7 @@ class Uploader(SqlInterface, B2Interface) :
 		return await posts.post(post, user)
 
 
-	@timed
+	@timed.key('{size}')
 	def convert_image(self: 'Uploader', image: Image, size: int) -> Image :
 		long_side = 0 if image.size[0] > image.size[1] else 1
 		ratio = size / image.size[long_side]
@@ -443,12 +411,10 @@ class Uploader(SqlInterface, B2Interface) :
 					raise Forbidden('the post you are trying to upload to does not belong to this account.')
 
 				old_filename: str = data[0]
-				fullsize_image: bytes
 
 				with Image(file=open(file_on_disk, 'rb')) as image :
 					if web_resize :
 						image: Image = self.convert_image(image, web_resize)
-						fullsize_image = self.get_image_data(image, compress = False)
 
 					# optimize
 					upd: Tuple[datetime, int] = await transaction.query_async("""
@@ -485,14 +451,12 @@ class Uploader(SqlInterface, B2Interface) :
 
 				url: str = f'{post_id}/{filename}'
 
-				if not web_resize :
-					# this would have been populated earlier, if resized
-					fullsize_image = open(file_on_disk, 'rb').read()
-
 				# upload fullsize
-				await self.upload_async(fullsize_image, url, content_type=content_type)
+				if web_resize :
+					await self.upload_async(self.get_image_data(image, compress = False), url, content_type=content_type)
 
-				del fullsize_image
+				else :
+					await self.upload_async(open(file_on_disk, 'rb').read(), url, content_type=content_type)
 
 				# upload thumbnails
 				thumbnails = { }
@@ -526,9 +490,9 @@ class Uploader(SqlInterface, B2Interface) :
 			await PostKVS.put_async(post_id, post)
 
 			return {
-				'post_id': post_id,
-				'url': url,
-				'emoji': emoji,
+				'post_id':    post_id,
+				'url':        url,
+				'emoji':      emoji,
 				'thumbnails': thumbnails,
 			}
 
@@ -547,7 +511,7 @@ class Uploader(SqlInterface, B2Interface) :
 		privacy:     Optional[Privacy] = None,
 		rating:      Optional[Rating]  = None,
 	) -> None :
-		#TODO: check for active actions on post and determine if update satisfies the required action
+		# TODO: check for active actions on post and determine if update satisfies the required action
 		self._validateTitle(title)
 		self._validateDescription(description)
 
@@ -617,7 +581,7 @@ class Uploader(SqlInterface, B2Interface) :
 			if privacy == Privacy.draft and old_privacy != Privacy.unpublished :
 				raise BadRequest('only unpublished posts can be marked as drafts.')
 
-			tags_task: Task[TagGroups] = ensure_future(tagger._fetch_tags_by_post(post_id))
+			tags_task: Task[list[InternalTag]] = ensure_future(tagger._fetch_tags_by_post(post_id))
 			vote_task: Optional[Task] = None
 
 			if old_privacy in UnpublishedPrivacies and privacy not in UnpublishedPrivacies :
@@ -663,19 +627,19 @@ class Uploader(SqlInterface, B2Interface) :
 			await t.query_async(query, params)
 
 			try :
-				tags: TagGroups = await tags_task
+				tags: list[InternalTag] = await tags_task
 
 				if privacy == Privacy.public :
 					ensure_future(self._increment_total_post_count(1))
 					ensure_future(self._increment_user_count(user.user_id, 1))
 					for tag in filter(None, flatten(tags)) :
-						ensure_future(self._increment_tag_count(tag, 1))
+						ensure_future(tagger._increment_tag_count(tag))
 
 				elif old_privacy == Privacy.public :
 					ensure_future(self._increment_total_post_count(-1))
 					ensure_future(self._increment_user_count(user.user_id, -1))
 					for tag in filter(None, flatten(tags)) :
-						ensure_future(self._increment_tag_count(tag, -1))
+						ensure_future(tagger._decrement_tag_count(tag))
 
 			except ClientResponseError as e :
 				if e.status == 404 :

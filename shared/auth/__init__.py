@@ -129,11 +129,11 @@ async def v1token(token: str) -> AuthToken :
 		raise Unauthorized(str(e))
 
 	return AuthToken(
-		guid=guid,
-		user_id=user_id,
-		expires=expires,
-		data=json.loads(data),
-		token_string=token,
+		guid         = guid,
+		user_id      = user_id,
+		expires      = expires,
+		data         = json.loads(data),
+		token_string = token,
 	)
 
 

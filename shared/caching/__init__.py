@@ -270,6 +270,13 @@ def AerospikeCache(
 				# 		if writable :
 				# 			await decorator.kvs.put_async(key, data, TTL)
 
+				else :  # this is a stopgap, we should be doing the deep type check, but that's hard
+					if isinstance(data, bytearray) :
+						data = await func(*args, **kwargs)
+
+						if writable :
+							await decorator.kvs.put_async(key, data, TTL)
+
 				return data
 
 		else :
@@ -294,6 +301,13 @@ def AerospikeCache(
 
 				# 		if writable :
 				# 			decorator.kvs.put(key, data, TTL)
+
+				else :  # this is a stopgap, we should be doing the deep type check, but that's hard
+					if isinstance(data, bytearray) :
+						data = func(*args, **kwargs)
+
+						if writable :
+							decorator.kvs.put(key, data, TTL)
 
 				return data
 

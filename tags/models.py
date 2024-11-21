@@ -1,5 +1,5 @@
 from enum import Enum, unique
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel
 
@@ -8,7 +8,7 @@ from shared.models import UserPortable
 
 
 @unique
-class TagGroupPortable(Enum) :
+class TagGroup(Enum) :
 	artist  = 'artist'
 	subject = 'subject'
 	sponsor = 'sponsor'
@@ -17,25 +17,37 @@ class TagGroupPortable(Enum) :
 	misc    = 'misc'
 
 
-class TagGroups(dict[TagGroupPortable, list[str]]) :
-	# TODO: write a better docstr for this
-	"""
-```python
-class TagGroups(Dict[TagGroupPortable, list[str]]) :
-	pass
-```
-"""
-	pass
-
-
 class Tag(BaseModel) :
 	tag:            str
 	owner:          Optional[UserPortable]
-	group:          TagGroupPortable
+	group:          TagGroup
 	deprecated:     bool
 	inherited_tags: list[str]
 	description:    Optional[str]
 	count:          int
+
+	def __hash__(self) -> int:
+		return hash(self.tag)
+
+
+class TagPortable(BaseModel) :
+	tag:   str
+	owner: Optional[UserPortable]
+	group: TagGroup
+	count: int
+
+
+class TagGroups(BaseModel) :
+	artist:  Optional[list[TagPortable]]
+	subject: Optional[list[TagPortable]]
+	sponsor: Optional[list[TagPortable]]
+	species: Optional[list[TagPortable]]
+	gender:  Optional[list[TagPortable]]
+	misc:    Optional[list[TagPortable]]
+
+	# def dict(self, *args, **kwargs) -> Dict[str, Any] :
+	# 	kwargs.pop('exclude_none', None)
+	# 	return super().dict(*args, exclude_unset=True, **kwargs)
 
 
 class LookupRequest(BaseModel) :
@@ -64,20 +76,16 @@ class InheritRequest(RemoveInheritance) :
 
 class UpdateRequest(BaseModel) :
 	name:        Optional[str]
-	group:       Optional[TagGroupPortable]
+	group:       Optional[TagGroup]
 	owner:       Optional[str]
 	description: Optional[str]
 	deprecated:  Optional[bool] = None
 
 
-class TagPortable(str) :
-	pass
-
-
 class InternalTag(BaseModel) :
 	name: str
 	owner: Optional[int]
-	group: TagGroupPortable
+	group: TagGroup
 	deprecated: bool
 	inherited_tags: list[str]
 	description: Optional[str]

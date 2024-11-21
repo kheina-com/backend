@@ -16,15 +16,13 @@ from shared.models import UserPortable
 from shared.utilities import flatten
 from users.repository import Users
 
-from .models import InternalTag, Tag, TagGroupPortable, TagGroups
-from .repository import TagKVS, Tags
+from .models import InternalTag, Tag, TagGroup, TagGroups, TagPortable
+from .repository import CountKVS, TagKVS, Tags
 
 
 users = Users()
 posts = Posts()
-PostsBody = { 'sort': 'new', 'count': 64, 'page': 1 }
-Misc: TagGroupPortable = TagGroupPortable('misc')
-CountKVS: KeyValueStore = KeyValueStore('kheina', 'tag_count')
+Misc: TagGroup = TagGroup('misc')
 
 
 class Tagger(Tags) :
@@ -32,60 +30,6 @@ class Tagger(Tags) :
 	def _validateDescription(self, description: str) :
 		if len(description) > 1000 :
 			raise BadRequest('the given description is invalid, description cannot be over 1,000 characters in length.', description=description)
-
-
-	async def _populate_tag_cache(self, tag: str) -> None :
-		if not await CountKVS.exists_async(tag) :
-			# we gotta populate it here (sad)
-			data = await self.query_async("""
-				SELECT COUNT(1)
-				FROM kheina.public.tags
-					INNER JOIN kheina.public.tag_post
-						ON tags.tag_id = tag_post.tag_id
-					INNER JOIN kheina.public.posts
-						ON tag_post.post_id = posts.post_id
-							AND posts.privacy = privacy_to_id('public')
-				WHERE tags.tag = %s;
-				""",
-				(tag,),
-				fetch_one=True,
-			)
-			await CountKVS.put_async(tag, int(data[0]), -1)
-
-
-	async def _get_tag_count(self, tag: str) -> int :
-		await self._populate_tag_cache(tag)
-		return await CountKVS.get_async(tag)
-
-
-	async def _increment_tag_count(self, tag: str) -> None :
-		await self._populate_tag_cache(tag)
-		KeyValueStore._client.increment( # type: ignore
-			(CountKVS._namespace, CountKVS._set, tag),
-			'data',
-			1,
-			meta={
-				'ttl': -1,
-			},
-			policy={
-				'max_retries': 3,
-			},
-		)
-
-
-	async def _decrement_tag_count(self, tag: str) -> None :
-		await self._populate_tag_cache(tag)
-		KeyValueStore._client.increment( # type: ignore
-			(CountKVS._namespace, CountKVS._set, tag),
-			'data',
-			-1,
-			meta={
-				'ttl': -1,
-			},
-			policy={
-				'max_retries': 3,
-			},
-		)
 
 
 	async def _tag_owner(self: Self, user: KhUser, itag: InternalTag) -> Optional[UserPortable] :
@@ -97,7 +41,7 @@ class Tagger(Tags) :
 
 	async def tag(self: Self, user: KhUser, itag: InternalTag) -> Tag :
 		owner: Task[Optional[UserPortable]] = ensure_future(self._tag_owner(user, itag))
-		tag_count: Task[int] = ensure_future(self.tagCount(itag.name))
+		tag_count: Task[int] = ensure_future(self._get_tag_count(itag.name))
 		return Tag(
 			tag=itag.name,
 			owner=await owner,
@@ -106,6 +50,15 @@ class Tagger(Tags) :
 			inherited_tags=itag.inherited_tags,
 			description=itag.description,
 			count=await tag_count,
+		)
+
+
+	def portable(self: Self, tag: Tag) -> TagPortable :
+		return TagPortable(
+			tag   = tag.tag,
+			owner = tag.owner,
+			group = tag.group,
+			count = tag.count,
 		)
 
 
@@ -150,7 +103,7 @@ class Tagger(Tags) :
 
 
 	@HttpErrorHandler('inheriting a tag')
-	async def inheritTag(self, user: KhUser, parent_tag: str, child_tag: str, deprecate:bool=False) :
+	async def inheritTag(self, user: KhUser, parent_tag: str, child_tag: str, deprecate: bool = False) :
 		await user.verify_scope(Scope.admin)
 
 		await self.query_async("""
@@ -197,7 +150,7 @@ class Tagger(Tags) :
 		user: KhUser,
 		tag: str,
 		name: Optional[str],
-		group: Optional[TagGroupPortable],
+		group: Optional[TagGroup],
 		owner: Optional[str],
 		description: Optional[str],
 		deprecated: Optional[bool] = None,
@@ -265,7 +218,7 @@ class Tagger(Tags) :
 				tag_classes.class,
 				tags.deprecated,
 				array_agg(t2.tag),
-				users.user_id,
+				tags.owner,
 				tags.description
 			FROM tags
 				INNER JOIN tag_classes
@@ -276,8 +229,8 @@ class Tagger(Tags) :
 					ON t2.tag_id = tag_inheritance.child
 				LEFT JOIN users
 					ON users.user_id = tags.owner
-			WHERE users.user_id = %s
-			GROUP BY tags.tag_id, tag_classes.class_id, users.user_id;
+			WHERE tags.owner = %s
+			GROUP BY tags.tag_id, tag_classes.class_id;
 			""",
 			(user_id,),
 			fetch_all=True,
@@ -286,7 +239,7 @@ class Tagger(Tags) :
 		return [
 			InternalTag(
 				name=row[0],
-				group=TagGroupPortable(row[1]),
+				group=TagGroup(row[1]),
 				deprecated=row[2],
 				inherited_tags=list(filter(None, row[3])),
 				owner=row[4],
@@ -312,24 +265,50 @@ class Tagger(Tags) :
 	@HttpErrorHandler('fetching tags by post')
 	async def fetchTagsByPost(self, user: KhUser, post_id: PostId) -> TagGroups :
 		post_task: Task[InternalPost] = ensure_future(posts._get_post(post_id))
-		tags: Task[TagGroups] = ensure_future(self._fetch_tags_by_post(post_id))
+		tags_task: Task[list[InternalTag]] = ensure_future(self._fetch_tags_by_post(post_id))
+
+		nf: NotFound = NotFound("the provided post does not exist or you don't have access to it.", post_id=post_id)
 
 		try :
 			post: InternalPost = await post_task
 
 		except NotFound :
-			raise NotFound("the provided post does not exist or you don't have access to it.", post_id=post_id)
+			raise nf
 
 		if not await posts.authorized(post, user) :
 			# the post was found and returned, but the user shouldn't have access to it or isn't authenticated
-			raise NotFound("the provided post does not exist or you don't have access to it.", post_id=post_id)
+			raise nf
 
-		return await tags
+		itags: list[InternalTag] = await tags_task
+		tags: list[Task[Tag]] = [
+			ensure_future(self.tag(user, t))
+			for t in itags
+		]
+
+		tg: defaultdict[str, list[TagPortable]] = defaultdict(lambda : [])
+
+		for tt in tags :
+			t = await tt
+			tg[t.group.name].append(self.portable(t))
+
+		return TagGroups(**tg)
 
 
 	@HttpErrorHandler('fetching tag blocklist')
 	async def fetchBlockedTags(self, user: KhUser) -> TagGroups :
-		return await self._user_blocked_tags(user.user_id)
+		itags: list[InternalTag] = await self._user_blocked_tags(user.user_id)
+		tags: list[Task[Tag]] = [
+			ensure_future(self.tag(user, t))
+			for t in itags
+		]
+
+		tg = defaultdict(lambda : [])
+
+		for tt in tags :
+			t = await tt
+			tg[t.group.name].append(t)
+
+		return TagGroups(**tg)
 
 
 	@HttpErrorHandler('updating tag blocklist')
@@ -364,7 +343,7 @@ class Tagger(Tags) :
 		return {
 			row[0]: InternalTag(
 				name=row[0],
-				group=TagGroupPortable(row[1]),
+				group=TagGroup(row[1]),
 				deprecated=row[2],
 				inherited_tags=list(filter(None, row[3])),
 				owner=row[4],
@@ -421,7 +400,7 @@ class Tagger(Tags) :
 
 		return InternalTag(
 			name=data[0],
-			group=TagGroupPortable(data[1]),
+			group=TagGroup(data[1]),
 			deprecated=data[2],
 			inherited_tags=list(filter(None, data[3])),
 			owner=data[4],
@@ -435,48 +414,22 @@ class Tagger(Tags) :
 		return await self.tag(user, itag)
 
 
-	@AerospikeCache('kheina', 'tags', 'freq.{user_id}', TTL_days=1, _kvs=TagKVS)
-	async def _frequently_used(self, user_id: int) -> TagGroups :
-		data: list[tuple[str, list[str]]] = await self.query_async("""
-			WITH p AS (
-				SELECT
-					posts.post_id
-				FROM kheina.public.posts
-				WHERE posts.uploader = %s
-					AND posts.privacy = privacy_to_id('public')
-				ORDER BY posts.created DESC NULLS LAST
-				LIMIT %s
-			)
-			SELECT tag_classes.class, array_agg(tags.tag)
-			FROM p
-				LEFT JOIN kheina.public.tag_post
-					ON tag_post.post_id = p.post_id
-				LEFT JOIN kheina.public.tags
-					ON tags.tag_id = tag_post.tag_id
-						AND tags.deprecated = false
-				LEFT JOIN kheina.public.tag_classes
-					ON tag_classes.class_id = tags.class_id
-			GROUP BY tag_classes.class_id;
-			""",
-			(user_id, 64),
-			fetch_all=True,
-		)
-
-		tags: dict[TagGroupPortable, dict[str, int]] = defaultdict(lambda : defaultdict(lambda : 0))
-
-		for group, tag_list in data :
-			if not group :
-				continue
-
-			for tag in tag_list :
-				tags[TagGroupPortable(group)][tag] += 1
-
-		return TagGroups({
-			group: list(map(lambda x : x[0], sorted(tag_ranks.items(), key=lambda x : x[1], reverse=True)))[:(25 if group == Misc else 10)]
-			for group, tag_ranks in tags.items()
-		})
-
-
 	@HttpErrorHandler('fetching frequently used tags')
 	async def frequentlyUsed(self, user: KhUser) -> TagGroups :
-		return await self._frequently_used(user.user_id)
+		itags: list[InternalTag] = await self._frequently_used(user.user_id)
+		tag_tasks: list[Task[Tag]] = [
+			ensure_future(self.tag(user, t))
+			for t in itags
+		]
+
+		tags: dict[TagGroup, dict[Tag, int]] = defaultdict(lambda : defaultdict(lambda : 0))
+
+		for tt in tag_tasks :
+			t = await tt
+			# tg[t.group.name].append(t)
+			tags[t.group][t] += 1
+
+		return TagGroups(**{
+			group.name: list(map(lambda x : self.portable(x[0]), sorted(tag_ranks.items(), key=lambda x : x[1], reverse=True)))[:(25 if group == Misc else 10)]
+			for group, tag_ranks in tags.items()
+		})

@@ -1,3 +1,4 @@
+from typing import Optional
 from pydantic import BaseModel
 
 
@@ -15,3 +16,22 @@ class FinalizeAccountRequest(BaseModel) :
 
 class ChangeHandle(BaseModel) :
 	handle: str
+
+
+class OtpRequest(BaseModel) :
+	email:    str
+	password: str
+
+
+class OtpFinalizeRequest(BaseModel) :
+	token: str
+	otp:   str
+
+
+class OtpRemoveEmailRequest(BaseModel) :
+	email: str
+
+
+class OtpRemoveRequest(BaseModel) :
+	token: Optional[str]
+	otp:   Optional[str]

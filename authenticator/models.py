@@ -27,9 +27,9 @@ class PublicKeyRequest(BaseModel) :
 
 
 class LoginRequest(BaseModel) :
-	email: str
+	email:    str
 	password: str
-	token_data: Optional[Dict[str, Any]] = { }
+	otp:      Optional[str] = None
 
 
 class LogoutRequest(BaseModel) :
@@ -51,20 +51,31 @@ class LogoutRequest(BaseModel) :
 
 
 class TokenResponse(BaseModel) :
-	version: str
+	version:   str
 	algorithm: AuthAlgorithm
-	key_id: int
-	issued: datetime
-	expires: datetime
-	token: str
+	key_id:    int
+	issued:    datetime
+	expires:   datetime
+	token:     str
 
 
 class LoginResponse(BaseModel) :
 	user_id: int
-	handle: str
-	name: Optional[str]
-	mod: bool
-	token: TokenResponse
+	handle:  str
+	name:    Optional[str]
+	mod:     bool
+	token:   TokenResponse
+
+
+class OtpResponse(BaseModel) :
+	user_id: int
+	uri:     str
+	token:   TokenResponse
+
+
+class OtpAddedResponse(BaseModel) :
+	user_id:       int
+	recovery_keys: list[str]
 
 
 class CreateUserRequest(BaseModel) :

@@ -43,9 +43,14 @@
 	[Tue Jul  2 21:11:17 2024] INFO > connected to database.
 	==> account: email='localhost@kheina.com' password='very-secure-password-123'
 	```
-6. run server within venv
+6. setup minio server
+	1. navigate to http://localhost:9090 and login using [default credentials](./docker-compose.yml#l55-l56)
+	2. create a bucket named `kheina-content` with default settings
+		- you must add an anonymous access rule to allow read access to bucket contents
+	3. create an access key using the [sample credentials](./sample-creds.json#l26-l27)
+7. run server within venv
 	```shell
 	% source .venv/bin/activate
 	(.venv) % fastapi dev server.py
 	```
-7. run `deactivate` to exit venv
+8. run `deactivate` to exit venv

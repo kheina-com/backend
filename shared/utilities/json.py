@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from ..base64 import b64decode
 from ..crc import CRC
 from ..models.auth import AuthToken, KhUser
 from . import getFullyQualifiedClassName
@@ -37,8 +38,12 @@ _conversions: Dict[type, Callable] = {
 		'user_id': x.user_id,
 		'expires': json_stream(x.expires),
 		'guid': json_stream(x.guid),
-		'data': x.data,
-		'token': f'{crc(x.token_string.encode()):x}',
+		'data': json_stream(x.data),
+		'token': {
+			'len': len(x.token_string),
+			'version': int(b64decode(x.token_string[:x.token_string.find('.')]).decode()),
+			'hash': f'{crc(x.token_string.encode()):x}',
+		}
 	},
 	BaseModel: lambda x : json_stream(x.dict()),
 	bytes: bytes.hex,

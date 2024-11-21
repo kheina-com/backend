@@ -1,7 +1,7 @@
 from asyncio import Task, ensure_future
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Mapping, Optional, Self, Tuple, Union
+from typing import Callable, Mapping, Optional, Self, Tuple, Union
 
 from cache import AsyncLRU
 
@@ -16,7 +16,7 @@ from shared.sql import SqlInterface
 from shared.sql.query import Field, Query
 from shared.timing import timed
 from shared.utilities import flatten
-from tags.models import TagGroups
+from tags.models import InternalTag, TagGroups
 from tags.repository import Tags
 from users.repository import FollowKVS, UserKVS, Users, badge_map
 
@@ -100,8 +100,8 @@ class UserCombined:
 
 class Posts(SqlInterface) :
 
-	def parse_response(self: Self, data: List[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes, bool]]) -> List[InternalPost] :
-			posts: List[InternalPost] = []
+	def parse_response(self: Self, data: list[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes, bool]]) -> list[InternalPost] :
+			posts: list[InternalPost] = []
 
 			for row in data :
 				post = InternalPost(
@@ -126,7 +126,7 @@ class Posts(SqlInterface) :
 			return posts
 
 
-	def internal_select(self: Self, query: Query) -> Callable[[List[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes, bool]]], List[InternalPost]] :
+	def internal_select(self: Self, query: Query) -> Callable[[list[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes, bool]]], list[InternalPost]] :
 		query.select(
 			Field('posts', 'post_id'),
 			Field('posts', 'title'),
@@ -170,10 +170,10 @@ class Posts(SqlInterface) :
 
 	@timed
 	async def post(self: Self, ipost: InternalPost, user: KhUser) -> Post :
-		post_id: PostId                = PostId(ipost.post_id)
-		upl:     Task[InternalUser]    = ensure_future(users._get_user(ipost.user_id))
-		tags:    Task[TagGroups]       = ensure_future(tagger._fetch_tags_by_post(post_id))
-		score:   Task[Optional[Score]] = ensure_future(self.getScore(user, post_id))
+		post_id: PostId                  = PostId(ipost.post_id)
+		upl:     Task[InternalUser]      = ensure_future(users._get_user(ipost.user_id))
+		tags:    Task[list[InternalTag]] = ensure_future(tagger._fetch_tags_by_post(post_id))
+		score:   Task[Optional[Score]]   = ensure_future(self.getScore(user, post_id))
 
 		uploader: InternalUser = await upl
 		upl_portable: Task[UserPortable] = ensure_future(users.portable(user, uploader))
@@ -192,7 +192,7 @@ class Posts(SqlInterface) :
 			user=await upl_portable,
 			score=await score,
 			rating=r,
-			parent=ipost.parent, # type: ignore
+			parent=ipost.parent,  # type: ignore
 			privacy=p,
 			created=ipost.created,
 			updated=ipost.updated,
@@ -204,10 +204,10 @@ class Posts(SqlInterface) :
 		)
 
 
-	@timed.link
+	@timed
 	@AerospikeCache('kheina', 'score', '{post_id}', _kvs=ScoreKVS)
 	async def _get_score(self: Self, post_id: PostId) -> Optional[InternalScore] :
-		data: List[int] = await self.query_async("""
+		data: list[int] = await self.query_async("""
 			SELECT
 				post_scores.upvotes,
 				post_scores.downvotes
@@ -228,13 +228,14 @@ class Posts(SqlInterface) :
 		)
 
 
-	async def scores_many(self: Self, post_ids: List[PostId]) -> Dict[PostId, Optional[InternalScore]] :
-		scores: Dict[PostId, Optional[InternalScore]] = {
+	@timed
+	async def scores_many(self: Self, post_ids: list[PostId]) -> dict[PostId, Optional[InternalScore]] :
+		scores: dict[PostId, Optional[InternalScore]] = {
 			post_id: None
 			for post_id in post_ids
 		}
 
-		data: List[Tuple[int, int, int]] = await self.query_async("""
+		data: list[Tuple[int, int, int]] = await self.query_async("""
 			SELECT
 				post_scores.post_id,
 				post_scores.upvotes,
@@ -262,7 +263,7 @@ class Posts(SqlInterface) :
 		return scores
 
 
-	@timed.link
+	@timed
 	@AerospikeCache('kheina', 'votes', '{user_id}|{post_id}', _kvs=VoteKVS)
 	async def _get_vote(self: Self, user_id: int, post_id: PostId) -> int :
 		data: Optional[Tuple[bool]] = await self.query_async("""
@@ -282,12 +283,13 @@ class Posts(SqlInterface) :
 		return 1 if data[0] else -1
 
 
-	async def votes_many(self: Self, user_id: int, post_ids: List[PostId]) -> Dict[PostId, int] :
-		votes: Dict[PostId, int] = {
+	@timed
+	async def votes_many(self: Self, user_id: int, post_ids: list[PostId]) -> dict[PostId, int] :
+		votes: dict[PostId, int] = {
 			post_id: 0
 			for post_id in post_ids
 		}
-		data: List[Tuple[int, int]] = await self.query_async("""
+		data: list[Tuple[int, int]] = await self.query_async("""
 			SELECT
 				post_votes.post_id,
 				post_votes.upvote
@@ -329,6 +331,7 @@ class Posts(SqlInterface) :
 		)
 
 
+	@timed
 	async def authorized(self: Self, ipost: InternalPost, user: KhUser) -> bool :
 		"""
 		Checks if the given user is able to view this set. Follows the given rules:
@@ -366,12 +369,13 @@ class Posts(SqlInterface) :
 		return False
 
 
-	async def following_many(self: Self, user_id: int, targets: List[int]) -> Dict[int, bool] :
+	@timed
+	async def following_many(self: Self, user_id: int, targets: list[int]) -> dict[int, bool] :
 		"""
 		returns a map of target user id -> following bool
 		"""
 
-		data: List[Tuple[int, int]] = await self.query_async("""
+		data: list[Tuple[int, int]] = await self.query_async("""
 			SELECT following.follows, count(1)
 			FROM kheina.public.following
 			WHERE following.user_id = %s
@@ -382,7 +386,7 @@ class Posts(SqlInterface) :
 			fetch_all=True,
 		)
 
-		return_value: Dict[int, bool] = {
+		return_value: dict[int, bool] = {
 			target: False
 			for target in targets
 		}
@@ -400,10 +404,11 @@ class Posts(SqlInterface) :
 			raise BadRequest('the given vote is invalid (vote value must be integer. 1 = up, -1 = down, 0 or null to remove vote)')
 
 
+	@timed
 	async def _vote(self: Self, user: KhUser, post_id: PostId, upvote: Optional[bool]) -> Score :
 		self._validateVote(upvote)
 		async with self.transaction() as transaction :
-			data: Tuple[int, int, datetime] = await transaction.query_async("""
+			await transaction.query_async("""
 				INSERT INTO kheina.public.post_votes
 				(user_id, post_id, upvote)
 				VALUES
@@ -413,7 +418,13 @@ class Posts(SqlInterface) :
 						upvote = %s
 					WHERE post_votes.user_id = %s
 						AND post_votes.post_id = %s;
+				""", (
+					user.user_id, post_id.int(), upvote,
+					upvote, user.user_id, post_id.int(),
+				),
+			)
 
+			data: Tuple[int, int, datetime] = await transaction.query_async("""
 				SELECT COUNT(post_votes.upvote), SUM(post_votes.upvote::int), posts.created
 				FROM kheina.public.posts
 					LEFT JOIN kheina.public.post_votes
@@ -422,8 +433,6 @@ class Posts(SqlInterface) :
 				WHERE posts.post_id = %s
 				GROUP BY posts.post_id;
 				""", (
-					user.user_id, post_id.int(), upvote,
-					upvote, user.user_id, post_id.int(),
 					post_id.int(),
 				),
 				fetch_one=True,
@@ -479,9 +488,9 @@ class Posts(SqlInterface) :
 		)
 
 
-	async def users_many(self, user_ids: List[int]) -> Dict[int, InternalUser] :
-
-		data: List[tuple] = await self.query_async("""
+	@timed
+	async def users_many(self, user_ids: list[int]) -> dict[int, InternalUser] :
+		data: list[tuple] = await self.query_async("""
 			SELECT
 				users.user_id,
 				users.display_name,
@@ -510,7 +519,7 @@ class Posts(SqlInterface) :
 		if not data :
 			return { }
 
-		users: Dict[int, InternalUser] = { }
+		users: dict[int, InternalUser] = { }
 		for datum in data :
 			verified: Optional[Verified] = None
 
@@ -543,14 +552,14 @@ class Posts(SqlInterface) :
 
 
 	@timed
-	async def _uploaders(self: Self, iposts: List[InternalPost], user: KhUser) -> Dict[int, UserCombined] :
+	async def _uploaders(self: Self, iposts: list[InternalPost], user: KhUser) -> dict[int, UserCombined] :
 		"""
 		returns populated user objects for every uploader id provided
 
 		:return: dict in the form user id -> populated User object
 		"""
-		uploader_ids: List[int] = list(set(map(lambda x : x.user_id, iposts)))
-		users_task: Task[Dict[int, InternalUser]] = ensure_future(self.users_many(uploader_ids))
+		uploader_ids: list[int] = list(set(map(lambda x : x.user_id, iposts)))
+		users_task: Task[dict[int, InternalUser]] = ensure_future(self.users_many(uploader_ids))
 		following: Mapping[int, Optional[bool]]
 
 		if await user.authenticated(False) :
@@ -559,7 +568,7 @@ class Posts(SqlInterface) :
 		else :
 			following = defaultdict(lambda : None)
 
-		iusers: Dict[int, InternalUser] = await users_task
+		iusers: dict[int, InternalUser] = await users_task
 
 		return {
 			user_id: UserCombined(
@@ -578,14 +587,14 @@ class Posts(SqlInterface) :
 
 
 	@timed
-	async def _scores(self: Self, iposts: List[InternalPost], user: KhUser) -> Dict[PostId, Optional[Score]] :
+	async def _scores(self: Self, iposts: list[InternalPost], user: KhUser) -> dict[PostId, Optional[Score]] :
 		"""
 		returns populated score objects for every post id provided
 
 		:return: dict in the form post id -> populated Score object
 		"""
-		scores: Dict[PostId, Optional[Score]] = { }
-		post_ids: List[PostId] = []
+		scores: dict[PostId, Optional[Score]] = { }
+		post_ids: list[PostId] = []
 
 		for post in iposts :
 			post_id: PostId = PostId(post.post_id)
@@ -597,8 +606,8 @@ class Posts(SqlInterface) :
 			# but put all of them in the dict
 			scores[post_id] = None
 
-		iscores_task: Task[Dict[PostId, Optional[InternalScore]]] = ensure_future(self.scores_many(post_ids))
-		user_votes: Dict[PostId, int]
+		iscores_task: Task[dict[PostId, Optional[InternalScore]]] = ensure_future(self.scores_many(post_ids))
+		user_votes: dict[PostId, int]
 
 		if await user.authenticated(False) :
 			user_votes = await self.votes_many(user.user_id, post_ids)
@@ -606,7 +615,7 @@ class Posts(SqlInterface) :
 		else :
 			user_votes = defaultdict(lambda : 0)
 
-		iscores: Dict[PostId, Optional[InternalScore]] = await iscores_task
+		iscores: dict[PostId, Optional[InternalScore]] = await iscores_task
 
 		for post_id, iscore in iscores.items() :
 			# the score may still be None, technically
@@ -621,14 +630,15 @@ class Posts(SqlInterface) :
 		return scores
 
 
-	async def _tags_many(self: Self, post_ids: List[PostId]) -> Dict[PostId, List[str]] :
+	@timed
+	async def _tags_many(self: Self, post_ids: list[PostId]) -> dict[PostId, list[str]] :
 		# TODO: it may be worth doing a more complex query here for the tag classes
 		# so that the response data can be cached for future use
-		tags: Dict[PostId, List[str]] = {
+		tags: dict[PostId, list[str]] = {
 			post_id: []
 			for post_id in post_ids
 		}
-		data: List[Tuple[int, List[str]]] = await self.query_async("""
+		data: list[Tuple[int, list[str]]] = await self.query_async("""
 			SELECT tag_post.post_id, array_agg(tags.tag)
 			FROM kheina.public.tag_post
 				INNER JOIN kheina.public.tags
@@ -647,19 +657,20 @@ class Posts(SqlInterface) :
 		return tags
 
 
-	async def posts(self: Self, iposts: List[InternalPost], user: KhUser) -> List[Post] :
+	@timed
+	async def posts(self: Self, iposts: list[InternalPost], user: KhUser) -> list[Post] :
 		"""
 		returns a list of external post objects populated with user and other information
 		"""
 
-		uploaders_task: Task[Dict[int, UserCombined]] = ensure_future(self._uploaders(iposts, user))
-		scores_task: Task[Dict[PostId, Optional[Score]]] = ensure_future(self._scores(iposts, user))
+		uploaders_task: Task[dict[int, UserCombined]]       = ensure_future(self._uploaders(iposts, user))
+		scores_task:    Task[dict[PostId, Optional[Score]]] = ensure_future(self._scores(iposts, user))
 
-		tags: Dict[PostId, List[str]] = await self._tags_many(list(map(lambda x : PostId(x.post_id), iposts)))
-		uploaders: Dict[int, UserCombined] = await uploaders_task
-		scores: Dict[PostId, Optional[Score]] = await scores_task
+		tags:      dict[PostId, list[str]]       = await self._tags_many(list(map(lambda x : PostId(x.post_id), iposts)))
+		uploaders: dict[int, UserCombined]       = await uploaders_task
+		scores:    dict[PostId, Optional[Score]] = await scores_task
 
-		posts: List[Post] = []
+		posts: list[Post] = []
 		for post in iposts :
 			post_id: PostId = PostId(post.post_id)
 
@@ -670,22 +681,23 @@ class Posts(SqlInterface) :
 			assert isinstance(p, Privacy)
 
 			posts.append(Post(
-				post_id=post_id,
-				title=post.title,
-				description=post.description,
-				user=uploaders[post.user_id].portable,
-				score=scores[post_id],
-				rating=r,
-				parent=post.parent, # type: ignore
-				privacy=p,
-				created=post.created,
-				updated=post.updated,
-				filename=post.filename,
-				media_type=await media_type_map.get(post.media_type),
-				size=post.size,
+				post_id     = post_id,
+				title       = post.title,
+				description = post.description,
+				user        = uploaders[post.user_id].portable,
+				score       = scores[post_id],
+				rating      = r,
+				parent      = post.parent, # type: ignore
+				privacy     = p,
+				created     = post.created,
+				updated     = post.updated,
+				filename    = post.filename,
+				media_type  = await media_type_map.get(post.media_type),
+				size        = post.size,
+
 				# only the first call retrieves blocked info, all the rest should be cached and not actually await
-				blocked=await is_post_blocked(user, uploaders[post.user_id].internal, tags[post_id]),
-				thumbhash=post.thumbhash,  # type: ignore
+				blocked   = await is_post_blocked(user, uploaders[post.user_id].internal, tags[post_id]),
+				thumbhash = post.thumbhash,  # type: ignore
 			))
 		
 		return posts

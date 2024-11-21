@@ -1,20 +1,21 @@
-from hashlib import sha3_512
+from hashlib import sha3_512, sha256
 from math import ceil, floor
 from re import IGNORECASE
 from re import compile as re_compile
 from secrets import randbelow, token_bytes
 from time import time
-from typing import Any, Dict, List, Optional, Self, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Self, Tuple
 from uuid import UUID, uuid4
 
+import pyotp
 import ujson as json
 from argon2 import PasswordHasher as Argon2
 from argon2.exceptions import VerifyMismatchError
-from avrofastapi.models import RefId
 from avrofastapi.serialization import AvroDeserializer, AvroSerializer
 from cache import AsyncLRU
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from psycopg.errors import UniqueViolation
 
 from shared import logging
@@ -22,14 +23,15 @@ from shared.base64 import b64decode, b64encode
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import fetch
 from shared.datetime import datetime
-from shared.exceptions.http_error import BadRequest, Conflict, HttpError, InternalServerError, NotFound, Unauthorized
+from shared.exceptions.http_error import BadRequest, Conflict, HttpError, InternalServerError, NotFound, Unauthorized, UnprocessableEntity
 from shared.hashing import Hashable
 from shared.models import InternalUser
-from shared.models.auth import AuthState, KhUser, Scope, TokenMetadata
+from shared.models.auth import AuthState, KhUser, Scope, TokenMetadata, AuthToken
 from shared.sql import SqlInterface
+from shared.timing import timed
 from shared.utilities.json import json_stream
 
-from .models import AuthAlgorithm, BotCreateResponse, BotLogin, BotType, LoginResponse, PublicKeyResponse, TokenResponse
+from .models import AuthAlgorithm, BotCreateResponse, BotLogin, BotType, LoginResponse, OtpAddedResponse, PublicKeyResponse, TokenResponse
 
 
 """
@@ -98,9 +100,10 @@ class BotTypeMap(SqlInterface):
 			FROM kheina.auth.bot_type
 			WHERE bot_type.bot_type_id = %s
 			LIMIT 1;
-			""",
-			(key,),
-			fetch_one=True,
+			""", (
+				key,
+			),
+			fetch_one = True,
 		)
 		# key is the id, return privacy
 		return BotType(value=data[0])
@@ -113,9 +116,10 @@ class BotTypeMap(SqlInterface):
 			FROM kheina.auth.bot_type
 			WHERE bot_type.bot_type = %s
 			LIMIT 1;
-			""",
-			(key,),
-			fetch_one=True,
+			""", (
+				key,
+			),
+			fetch_one = True,
 		)
 		# key is the id, return privacy
 		return data[0]
@@ -133,7 +137,7 @@ class Authenticator(SqlInterface, Hashable) :
 		SqlInterface.__init__(self)
 		self.logger = logging.getLogger('auth')
 		self._initArgon2()
-		self._key_refresh_interval = 60 * 60 * 24  # 24 hours
+		self._key_refresh_interval = 60 * 60 * 24         # 24 hours
 		self._token_expires_interval = 60 * 60 * 24 * 30  # 30 days
 		self._token_version = '1'
 		self._token_algorithm = AuthAlgorithm.ed25519.name
@@ -165,18 +169,27 @@ class Authenticator(SqlInterface, Hashable) :
 		self._secrets = tuple(bytes.fromhex(salt) for salt in secrets)
 
 
-	def _hash_email(self, email) :
+	def _hash_email(self: Self, email: str) :
 		# always use the first secret since we can't retrieve the record without hashing it
 		return sha3_512(email.encode() + self._secrets[0]).digest()
+
+	def _otp_email_hash(self: Self, email: str, secret: int) :
+		return sha256(email.encode() + self._secrets[secret]).digest()
 
 
 	def _calc_timestamp(self, timestamp) :
 		return int(self._key_refresh_interval * floor(timestamp / self._key_refresh_interval))
 
 
-	async def generate_token(self, user_id: int, token_data: dict) -> TokenResponse :
+	async def generate_token(self, user_id: int, token_data: dict, ttl: Optional[int] = None) -> TokenResponse :
 		issued = time()
-		expires = self._calc_timestamp(issued) + self._token_expires_interval
+		expires: int
+
+		if ttl :
+			expires = floor(issued) + ttl
+
+		else :
+			expires = self._calc_timestamp(issued) + self._token_expires_interval
 
 		if self._active_private_key['start'] <= issued < self._active_private_key['end'] :
 			private_key = self._active_private_key['key']
@@ -215,8 +228,8 @@ class Authenticator(SqlInterface, Hashable) :
 					signature,
 					self._token_algorithm,
 				),
-				commit=True,
-				fetch_one=True,
+				commit    = True,
+				fetch_one = True,
 			)
 			key_id = self._active_private_key['id'] = data[0]
 			pk_issued = self._active_private_key['issued'] = data[1].timestamp()
@@ -251,7 +264,7 @@ class Authenticator(SqlInterface, Hashable) :
 			algorithm=self._token_algorithm,
 			fingerprint=token_data.get('fp', '').encode(),
 		)
-		await Authenticator.KVS.put_async(guid.bytes, token_info, self._token_expires_interval)
+		await Authenticator.KVS.put_async(guid.bytes, token_info, ttl or self._token_expires_interval)
 
 		version = self._token_version.encode()
 		content = b64encode(version) + b'.' + b64encode(load)
@@ -284,7 +297,7 @@ class Authenticator(SqlInterface, Hashable) :
 					WHERE algorithm = %s AND key_id = %s;
 					""",
 					lookup_key,
-					fetch_one=True,
+					fetch_one = True,
 				)
 
 				if not data :
@@ -311,7 +324,7 @@ class Authenticator(SqlInterface, Hashable) :
 		)
 
 
-	async def login(self, email: str, password: str, token_data:Dict[str, Any]={ }) -> LoginResponse :
+	async def login(self, email: str, password: str, otp: Optional[str], token_data: dict[str, Any] = { }) -> LoginResponse :
 		"""
 		returns user data on success otherwise raises Unauthorized
 		{
@@ -330,27 +343,54 @@ class Authenticator(SqlInterface, Hashable) :
 		try :
 			email_dict: Dict[str, str] = self._validateEmail(email)
 			email_hash = self._hash_email(email)
-			data: Optional[tuple[int, bytes, int, str, str, bool]] = await self.query_async("""
+			data: Optional[tuple[int, bytes, int, str, str, bool, Optional[int], Optional[bytes], Optional[bytes]]] = await self.query_async("""
 				SELECT
 					user_login.user_id,
 					user_login.password,
 					user_login.secret,
 					users.handle,
 					users.display_name,
-					users.mod
+					users.mod,
+					otp.secret,
+					otp.nonce,
+					otp.otp_secret
 				FROM kheina.auth.user_login
 					INNER JOIN kheina.public.users
 						ON users.user_id = user_login.user_id
+					LEFT JOIN kheina.auth.otp
+						ON otp.user_id = user_login.user_id
 				WHERE email_hash = %s;
-				""",
-				(email_hash,),
-				fetch_one=True,
+				""", (
+					email_hash,
+				),
+				fetch_one = True,
 			)
 
 			if not data :
 				raise Unauthorized('login failed.')
 
-			user_id, pwhash, secret, handle, name, mod = data
+			user_id, pwhash, secret, handle, name, mod, otp_secret_index, otp_nonce, otp_key = data
+			delete_otp: Optional[Callable[[], Awaitable[None]]] = None
+
+			if otp_key and not otp :
+				raise UnprocessableEntity('missing otp key')
+
+			elif otp and len(otp) != 6 :
+				delete_otp = await self.check_recovery_code(user_id, otp)
+
+			elif otp_key :
+				assert otp_secret_index is not None
+				assert otp_nonce
+				assert otp_key
+				assert otp
+
+				otp_email_hash  = self._otp_email_hash(email, otp_secret_index)
+				aeskey: AESGCM  = AESGCM(otp_email_hash)
+				otp_secret: str = aeskey.decrypt(otp_nonce, otp_key, self._secrets[otp_secret_index]).decode()
+
+				if not pyotp.TOTP(otp_secret).verify(otp) :
+					raise Unauthorized('login failed.')
+
 			password_hash = pwhash.decode()
 
 			if not self._argon2.verify(password_hash, password.encode() + self._secrets[secret]) :
@@ -362,9 +402,11 @@ class Authenticator(SqlInterface, Hashable) :
 					UPDATE kheina.auth.user_login
 					SET password = %s
 					WHERE email_hash = %s;
-					""",
-					(password_hash, email_hash),
-					commit=True,
+					""", (
+						password_hash,
+						email_hash,
+					),
+					commit = True,
 				)
 
 			if email_dict['domain'] in { 'kheina.com', 'fuzz.ly' } :
@@ -373,10 +415,13 @@ class Authenticator(SqlInterface, Hashable) :
 			elif mod :
 				token_data['scope'] = Scope.mod.all_included_scopes()
 
+			if delete_otp :
+				await delete_otp()
+
 			token: TokenResponse = await self.generate_token(user_id, token_data)
 
-		except VerifyMismatchError :
-			raise Unauthorized('login failed.')
+		except VerifyMismatchError as e :
+			raise Unauthorized('login failed.', err=e)
 
 		except HttpError :
 			raise
@@ -384,7 +429,7 @@ class Authenticator(SqlInterface, Hashable) :
 		except :  # noqa: E722
 			refid = uuid4().hex
 			self.logger.exception({ 'refid': refid })
-			raise InternalServerError('an error occurred during verification.', logdata={ 'refid': refid })
+			raise InternalServerError('an error occurred during verification.', refid=refid)
 
 		return LoginResponse(
 			user_id=user_id,
@@ -428,8 +473,8 @@ class Authenticator(SqlInterface, Hashable) :
 					user_id, password_hash, secret, await bot_type_map.get_id(bot_type), user.user_id,
 					user_id, password_hash, secret, await bot_type_map.get_id(bot_type), user.user_id,
 				),
-				commit=True,
-				fetch_one=True,
+				commit    = True,
+				fetch_one = True,
 			)
 
 			bot_login: BotLogin = BotLogin(
@@ -466,9 +511,10 @@ class Authenticator(SqlInterface, Hashable) :
 					bot_login.bot_type_id
 				FROM kheina.auth.bot_login
 				WHERE bot_id = %s;
-				""",
-				(bot_login.bot_id,),
-				fetch_one=True,
+				""", (
+					bot_login.bot_id,
+				),
+				fetch_one = True,
 			)
 
 			if not data :
@@ -491,8 +537,10 @@ class Authenticator(SqlInterface, Hashable) :
 					UPDATE kheina.auth.bot_login
 					SET password = %s
 					WHERE bot_id = %s;
-					""",
-					(new_pw_hash, bot_login.bot_id),
+					""", (
+						new_pw_hash,
+						bot_login.bot_id,
+					),
 					commit=True,
 				)
 
@@ -512,19 +560,19 @@ class Authenticator(SqlInterface, Hashable) :
 
 		if user_id :
 			iuser = await self.select(InternalUser(
-				user_id=user_id,
-				name='',
-				handle='',
-				privacy=-1,
-				created=datetime.zero(),
+				user_id = user_id,
+				name    = '',
+				handle  = '',
+				privacy = -1,
+				created = datetime.zero(),
 			)) # type: ignore
 
 			return LoginResponse(
-				user_id=user_id,
-				handle=iuser.handle,
-				name=iuser.name,
-				mod=False,
-				token=await self.generate_token(user_id, { 'scope': scope }),
+				user_id = user_id,
+				handle  = iuser.handle,
+				name    = iuser.name,
+				mod     = False,
+				token   = await self.generate_token(user_id, { 'scope': scope }),
 			) # type: ignore
 
 		return LoginResponse(
@@ -548,16 +596,17 @@ class Authenticator(SqlInterface, Hashable) :
 					INNER JOIN kheina.public.users
 						ON users.user_id = user_login.user_id
 				WHERE email_hash = %s;
-				""",
-				(email_hash,),
-				fetch_one=True,
+				""", (
+					email_hash,
+				),
+				fetch_one = True,
 			)
 
 			if not data :
 				raise Unauthorized('password change failed.')
 
 			pwhash, secret = data
-			password_hash = pwhash
+			password_hash  = pwhash
 
 			if not self._argon2.verify(password_hash.decode(), old_password.encode() + self._secrets[secret]) :
 				raise Unauthorized('password change failed.')
@@ -581,9 +630,34 @@ class Authenticator(SqlInterface, Hashable) :
 			SET password = %s,
 				secret = %s
 			WHERE email_hash = %s;
-			""",
-			(new_password_hash, secret, email_hash),
-			commit=True,
+			""", (
+				new_password_hash,
+				secret,
+				email_hash,
+			),
+			commit = True,
+		)
+
+
+	async def forceChangePassword(self, email: str, new_password: str) -> None :
+		"""
+		changes a user's password
+		"""
+		email_hash: bytes = self._hash_email(email)
+		secret:     int   = randbelow(len(self._secrets))
+		new_password_hash = self._argon2.hash(new_password.encode() + self._secrets[secret]).encode()
+
+		await self.query_async("""
+			UPDATE kheina.auth.user_login
+			SET password = %s,
+				secret = %s
+			WHERE email_hash = %s;
+			""", (
+				new_password_hash,
+				secret,
+				email_hash,
+			),
+			commit = True,
 		)
 
 
@@ -592,10 +666,10 @@ class Authenticator(SqlInterface, Hashable) :
 		returns user data on success otherwise raises Bad Request
 		"""
 		try :
-			email_hash = self._hash_email(email)
-			secret = randbelow(len(self._secrets))
-			password_hash = self._argon2.hash(password.encode() + self._secrets[secret]).encode()
-			data: tuple[int] = await self.query_async("""
+			email_hash:    bytes      = self._hash_email(email)
+			secret:        int        = randbelow(len(self._secrets))
+			password_hash: bytes      = self._argon2.hash(password.encode() + self._secrets[secret]).encode()
+			data:          tuple[int] = await self.query_async("""
 				WITH new_user AS (
 					INSERT INTO kheina.public.users
 					(handle, display_name)
@@ -612,16 +686,16 @@ class Authenticator(SqlInterface, Hashable) :
 					handle, name,
 					email_hash, password_hash, secret,
 				),
-				commit=True,
-				fetch_one=True,
+				commit    = True,
+				fetch_one = True,
 			)
 
 			return LoginResponse(
-				user_id=data[0],
-				handle=handle,
-				name=name,
-				mod=False,
-				token=await self.generate_token(data[0], token_data),
+				user_id = data[0],
+				handle  = handle,
+				name    = name,
+				mod     = False,
+				token   = await self.generate_token(data[0], token_data),
 			)
 
 		except UniqueViolation :
@@ -633,3 +707,197 @@ class Authenticator(SqlInterface, Hashable) :
 			refid = uuid4().hex
 			self.logger.exception({ 'refid': refid })
 			raise InternalServerError('an error occurred during user creation.', logdata={ 'refid': refid })
+
+
+	async def create_otp(self: Self, user: KhUser) -> str :
+		return pyotp.random_base32()
+
+
+	async def add_otp(self: Self, user: KhUser, email: str, otp_secret: str, otp: str) -> OtpAddedResponse :
+		if not pyotp.TOTP(otp_secret).verify(otp) :
+			raise BadRequest('failed to add OTP', email=email, user=user)
+
+		email_hash = self._hash_email(email)
+
+		data: Optional[tuple[int]] = await self.query_async("""
+			SELECT
+				count(1)
+			FROM kheina.auth.user_login
+				INNER JOIN kheina.public.users
+					ON users.user_id = user_login.user_id
+			WHERE email_hash = %s
+				AND user_login.user_id = %s;
+			""", (
+				email_hash,
+				user.user_id,
+			),
+			fetch_one = True,
+		)
+
+		if not data :
+			raise BadRequest('user or email incorrect.')
+
+		secret:         int       = randbelow(len(self._secrets))
+		otp_email_hash: bytes     = self._otp_email_hash(email, secret)
+		aeskey:         AESGCM    = AESGCM(otp_email_hash)
+		nonce:          bytes     = token_bytes(12)
+		otp_encrypted:  bytes     = aeskey.encrypt(nonce, otp_secret.encode(), self._secrets[secret])
+		keys:           list[str] = []
+
+		async with self.transaction() as t :
+			await t.query_async("""
+				INSERT INTO kheina.auth.otp
+				(user_id, secret, nonce, otp_secret)
+				VALUES
+				(%s, %s, %s, %s);
+				""", (
+					user.user_id,
+					secret,
+					nonce,
+					otp_encrypted,
+				),
+			)
+
+			params = []
+			query = """
+			INSERT INTO kheina.auth.otp_recovery
+			(user_id, secret, recovery_key, key_id)
+			VALUES
+			"""
+
+			# now insert recovery keys
+			for i in range(16) :
+				secret: int  = randbelow(len(self._secrets))
+				code:   str  = (((ord(token_bytes(1)) & 0xf0) | i).to_bytes() + token_bytes(5)).hex()  # inject the keyid into the key for easy retrieval
+				recovery_key = self._argon2.hash(code.encode() + self._secrets[secret]).encode()
+				keys.append(code)
+				query  += '(%s, %s, %s, %s),'
+				params += [
+					user.user_id,
+					secret,
+					recovery_key,
+					i,
+				]
+
+			await t.query_async(query[:-1] + ';', tuple(params))
+			await t.commit()
+
+		return OtpAddedResponse(
+			user_id       = user.user_id,
+			recovery_keys = keys,
+		)
+
+
+	@timed
+	async def check_recovery_code(self: Self, user_id: int, otp: str) -> Callable[[], Awaitable[None]] :
+		"""
+		on success, returns a function used to delete the recovery token, as they should only be able to be used once.
+
+		on failure, raises argon2.exceptions.VerifyMismatchError
+		"""
+
+		otp_key_id = (bytes.fromhex(otp)[0]) & 0x0f
+		otp_data: Optional[tuple[bytes, int]] = await self.query_async("""
+			select recovery_key, secret
+			from kheina.auth.otp_recovery
+			where user_id = %s
+				and key_id = %s;
+			""", (
+				user_id,
+				otp_key_id,
+			),
+			fetch_one = True,
+		)
+
+		if not otp_data :
+			raise Unauthorized('login failed.')
+
+		otp_hash: str    = otp_data[0].decode()
+		otp_secret_index = otp_data[1]
+
+		if not self._argon2.verify(otp_hash, otp.encode() + self._secrets[otp_secret_index]) :
+			raise VerifyMismatchError('login failed.')
+
+		async def delete_otp() :
+			await self.query_async("""
+				delete from kheina.auth.otp_recovery
+				where user_id = %s
+					and key_id = %s;
+				""", (
+					user_id,
+					otp_key_id,
+				),
+				commit = True,
+			)
+
+		return delete_otp
+
+
+	async def remove_otp(self: Self, email: str, otp: Optional[str], token: Optional[AuthToken]) -> None :
+		if not any([otp, token]) :
+			raise BadRequest('requires valid otp or email token to remove otp auth.')
+
+		email_hash = self._hash_email(email)
+		uid: Optional[tuple[int]] = await self.query_async("""
+			SELECT
+				user_login.user_id
+			FROM kheina.auth.user_login
+				INNER JOIN kheina.public.users
+					ON users.user_id = user_login.user_id
+				LEFT JOIN kheina.auth.otp
+					ON otp.user_id = user_login.user_id
+			WHERE email_hash = %s;
+			""", (
+				email_hash,
+			),
+			fetch_one = True,
+		)
+
+		if not uid :
+			raise BadRequest('failed to removed otp authenticator.')
+
+		user_id: int = uid[0]
+
+		if otp :
+			if len(otp) != 6 :
+				await self.check_recovery_code(user_id, otp)
+
+			else :
+				data: Optional[tuple[int, bytes, bytes]] = await self.query_async("""
+					select
+						otp.secret,
+						otp.nonce,
+						otp.otp_secret
+					from kheina.auth.otp
+					where otp.user_id = %s;
+					""", (
+						user_id,
+					),
+					fetch_one = True,
+				)
+
+				if not data :
+					raise BadRequest('failed to removed otp authenticator.')
+
+				otp_secret_index, otp_nonce, otp_key = data
+
+				otp_email_hash  = self._otp_email_hash(email, otp_secret_index)
+				aeskey: AESGCM  = AESGCM(otp_email_hash)
+				otp_secret: str = aeskey.decrypt(otp_nonce, otp_key, self._secrets[otp_secret_index]).decode()
+
+				if not pyotp.TOTP(otp_secret).verify(otp) :
+					raise BadRequest('failed to removed otp authenticator.')
+
+		else :
+			# the token has already been authenticated, so we just need to let it go through
+			assert token
+
+		await self.query_async("""
+			delete
+			from kheina.auth.otp
+			where otp.user_id = %s;
+			""", (
+				user_id,
+			),
+			commit = True,
+		)

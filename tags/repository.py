@@ -1,23 +1,15 @@
-from asyncio import Task, ensure_future, wait
-from collections import defaultdict
-from typing import Any, Dict, List, Optional, Self, Sequence, Tuple
+from typing import Optional, Self, Sequence
 
-from psycopg.errors import NotNullViolation, UniqueViolation
-
-from posts.models import PostId, Privacy
-from shared.auth import KhUser, Scope
-from shared.caching import AerospikeCache, SimpleCache
+from posts.models import PostId
+from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
-from shared.exceptions.http_error import BadRequest, Conflict, Forbidden, HttpErrorHandler, NotFound
 from shared.sql import SqlInterface
 from shared.timing import timed
 from shared.utilities import flatten
 
-from .models import InternalTag, Tag, TagGroupPortable, TagGroups
+from .models import InternalTag, TagGroup
 
 
-PostsBody = { 'sort': 'new', 'count': 64, 'page': 1 }
-Misc: TagGroupPortable = TagGroupPortable('misc')
 CountKVS: KeyValueStore = KeyValueStore('kheina', 'tag_count')
 TagKVS: KeyValueStore = KeyValueStore('kheina', 'tags')
 BlockingKVS: KeyValueStore = KeyValueStore('kheina', 'blocking', local_TTL=30)
@@ -28,68 +20,111 @@ class Tags(SqlInterface) :
 	# TODO: figure out a way that we can increase this TTL (updating inheritance won't be reflected in cache)
 	@timed
 	@AerospikeCache('kheina', 'tags', 'post.{post_id}', TTL_minutes=1, _kvs=TagKVS)
-	async def _fetch_tags_by_post(self: Self, post_id: PostId) -> TagGroups :
-		data = await self.query_async("""
-			SELECT tag_classes.class, array_agg(tags.tag)
+	async def _fetch_tags_by_post(self: Self, post_id: PostId) -> list[InternalTag] :
+		data: list[tuple[str, str, bool, Optional[int]]] = await self.query_async("""
+			SELECT
+				tags.tag,
+				tag_classes.class,
+				tags.deprecated,
+				tags.owner
 			FROM kheina.public.tag_post
-				LEFT JOIN kheina.public.tags
+				INNER JOIN kheina.public.tags
 					ON tags.tag_id = tag_post.tag_id
 						AND tags.deprecated = false
-				LEFT JOIN kheina.public.tag_classes
+				INNER JOIN kheina.public.tag_classes
 					ON tag_classes.class_id = tags.class_id
-			WHERE tag_post.post_id = %s
-			GROUP BY tag_classes.class_id;
-			""",
-			(post_id.int(),),
+			WHERE tag_post.post_id = %s;
+			""", (
+				post_id.int(),
+			),
 			fetch_all=True,
 		)
 
 		if not data :
-			return TagGroups()
+			return []
 
-		return TagGroups({
-			TagGroupPortable(i[0]): sorted(filter(None, i[1]))
-			for i in data
-			if i[0]
-		})
+		return [
+			InternalTag(
+				name           = row[0],
+				owner          = row[3],
+				group          = TagGroup(row[1]),
+				deprecated     = row[2],
+				inherited_tags = [],   # in this case, we don't care about this field
+				description    = None, # in this case, we don't care about this field
+			)
+			for row in data
+		]
 
 
-	@AerospikeCache('kheina', 'tag_count', '{tag}', _kvs=CountKVS)
-	async def tagCount(self: Self, tag: str) -> int :
-		data = await self.query_async("""
-			SELECT COUNT(1)
-			FROM kheina.public.tags
-				INNER JOIN kheina.public.tag_post
-					ON tags.tag_id = tag_post.tag_id
-				INNER JOIN kheina.public.posts
-					ON tag_post.post_id = posts.post_id
-						AND posts.privacy = privacy_to_id('public')
-			WHERE tags.tag = %s;
-			""",
-			(tag,),
-			fetch_one=True,
+	async def _populate_tag_cache(self, tag: str) -> None :
+		if not await CountKVS.exists_async(tag) :
+			# we gotta populate it here (sad)
+			data = await self.query_async("""
+				SELECT COUNT(1)
+				FROM kheina.public.tags
+					INNER JOIN kheina.public.tag_post
+						ON tags.tag_id = tag_post.tag_id
+					INNER JOIN kheina.public.posts
+						ON tag_post.post_id = posts.post_id
+							AND posts.privacy = privacy_to_id('public')
+				WHERE tags.tag = %s;
+				""",
+				(tag,),
+				fetch_one=True,
+			)
+			await CountKVS.put_async(tag, int(data[0]), -1)
+
+
+	async def _get_tag_count(self, tag: str) -> int :
+		await self._populate_tag_cache(tag)
+		return await CountKVS.get_async(tag)
+
+
+	async def _increment_tag_count(self, tag: str, value: int = 1) -> None :
+		await self._populate_tag_cache(tag)
+		KeyValueStore._client.increment( # type: ignore
+			(CountKVS._namespace, CountKVS._set, tag),
+			'data',
+			value,
+			meta={
+				'ttl': -1,
+			},
+			policy={
+				'max_retries': 3,
+			},
 		)
 
-		if not data :
-			return 0
 
-		return data[0]
+	async def _decrement_tag_count(self, tag: str, value: int = 1) -> None :
+		await self._populate_tag_cache(tag)
+		KeyValueStore._client.increment( # type: ignore
+			(CountKVS._namespace, CountKVS._set, tag),
+			'data',
+			value * -1,
+			meta={
+				'ttl': -1,
+			},
+			policy={
+				'max_retries': 3,
+			},
+		)
 
 
 	@timed
 	@AerospikeCache('kheina', 'blocking', 'tags.{user_id}', _kvs=BlockingKVS)
-	async def _user_blocked_tags(self: Self, user_id: int) -> TagGroups :
-		data: list[tuple[str, list[str]]] = await self.query_async("""
+	async def _user_blocked_tags(self: Self, user_id: int) -> list[InternalTag] :
+		data: list[tuple[str, str, bool, Optional[int]]] = await self.query_async("""
 			SELECT
+				tags.tag,
 				tag_classes.class,
-				array_agg(tags.tag)
+				tags.deprecated,
+				tags.owner
 			FROM kheina.public.tag_blocking
 				INNER JOIN tags
 					ON tags.tag_id = tag_blocking.blocked
 				INNER JOIN tag_classes
 					ON tag_classes.class_id = tags.class_id
-			WHERE tag_blocking.user_id = %s
-			GROUP BY tag_classes.class_id, tags.class_id;
+			WHERE tag_blocking.user_id = %s;
 			""", (
 				user_id,
 			),
@@ -97,13 +132,19 @@ class Tags(SqlInterface) :
 		)
 
 		if not data :
-			return TagGroups()
+			return []
 
-		return TagGroups({
-			TagGroupPortable(i[0]): sorted(filter(None, i[1]))
-			for i in data
-			if i[0]
-		})
+		return [
+			InternalTag(
+				name           = row[0],
+				owner          = row[3],
+				group          = TagGroup(row[1]),
+				deprecated     = row[2],
+				inherited_tags = [],   # in this case, we don't care about this field
+				description    = None, # in this case, we don't care about this field
+			)
+			for row in data
+		]
 
 
 	@timed
@@ -142,3 +183,51 @@ class Tags(SqlInterface) :
 			if adding or removing :
 				await transaction.commit()
 				await BlockingKVS.remove_async(f'tags.{user_id}')
+
+
+	@AerospikeCache('kheina', 'tags', 'freq.{user_id}', TTL_days=1, _kvs=TagKVS)
+	async def _frequently_used(self, user_id: int) -> list[InternalTag] :
+		data: list[tuple[str, str, bool, Optional[int]]] = await self.query_async("""
+			WITH p AS (
+				SELECT
+					posts.post_id
+				FROM kheina.public.posts
+				WHERE posts.uploader = %s
+					AND posts.privacy = privacy_to_id('public')
+				ORDER BY posts.created DESC NULLS LAST
+				LIMIT %s
+			)
+			SELECT
+				tags.tag,
+				tag_classes.class,
+				tags.deprecated,
+				tags.owner
+			FROM p
+				LEFT JOIN kheina.public.tag_post
+					ON tag_post.post_id = p.post_id
+				LEFT JOIN kheina.public.tags
+					ON tags.tag_id = tag_post.tag_id
+						AND tags.deprecated = false
+				LEFT JOIN kheina.public.tag_classes
+					ON tag_classes.class_id = tags.class_id;
+			""", (
+				user_id,
+				64,
+			),
+			fetch_all=True,
+		)
+
+		if not data :
+			return []
+
+		return [
+			InternalTag(
+				name           = row[0],
+				owner          = row[3],
+				group          = TagGroup(row[1]),
+				deprecated     = row[2],
+				inherited_tags = [],   # in this case, we don't care about this field
+				description    = None, # in this case, we don't care about this field
+			)
+			for row in data
+		]

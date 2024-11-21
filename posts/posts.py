@@ -45,6 +45,7 @@ class Posts(Posts) :
 		return await self._vote(user, PostId(post_id), upvote)
 
 
+	@timed
 	@AerospikeCache('kheina', 'tag_count', '{tag}', TTL_seconds=-1, local_TTL=600)
 	async def post_count(self, tag: str) -> int :
 		"""
@@ -110,6 +111,7 @@ class Posts(Posts) :
 		return round(count)
 
 
+	@timed
 	async def total_results(self, tags: Iterable[str]) -> int :
 		"""
 		returns an estimate on the total number of results available for a given query
@@ -162,6 +164,7 @@ class Posts(Posts) :
 		return ceil(count)
 
 
+	@timed
 	@ArgsCache(60)
 	async def _fetch_posts(self, sort: PostSort, tags: Optional[Tuple[str, ...]], count: int, page: int) -> List[InternalPost] :
 		idk = { }
@@ -538,6 +541,7 @@ class Posts(Posts) :
 
 
 	@HttpErrorHandler('fetching posts')
+	@timed
 	async def fetchPosts(self, user: KhUser, sort: PostSort, tags: Optional[List[str]], count:int=64, page:int=1) -> SearchResults :
 		self._validatePageNumber(page)
 		self._validateCount(count)

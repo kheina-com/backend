@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum, IntEnum, unique
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional, Self
 from uuid import UUID
 
 from pydantic import BaseModel

@@ -1,6 +1,7 @@
+from datetime import datetime
 from re import Match, Pattern
 from re import compile as re_compile
-from typing import Dict, List, Optional, Tuple, Type, Union
+from typing import Dict, List, Optional, Self, Tuple, Type, Union
 
 from avrofastapi.schema import convert_schema
 from avrofastapi.serialization import AvroDeserializer, AvroSerializer, Schema, parse_avro_schema
@@ -16,8 +17,9 @@ from shared.config.constants import environment
 from shared.config.credentials import fetch
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
 from shared.sql import SqlInterface
+from shared.timing import timed
 
-from .models import BannerStore, ConfigType, CostsStore, CssProperty, UserConfig, UserConfigKeyFormat, UserConfigRequest, UserConfigResponse
+from .models import OTP, BannerStore, ConfigType, CostsStore, CssProperty, OtpType, UserConfig, UserConfigKeyFormat, UserConfigRequest, UserConfigResponse
 
 
 repo: SchemaRepository = SchemaRepository()
@@ -196,7 +198,7 @@ class Configs(SqlInterface) :
 
 	@AerospikeCache('kheina', 'configs', UserConfigKeyFormat, _kvs=KVS)
 	async def _getUserConfig(self, user_id: int) -> UserConfig :
-		data: List[bytes] = await self.query_async("""
+		data: list[bytes] = await self.query_async("""
 			SELECT bytes
 			FROM kheina.public.configs
 			WHERE key = %s;
@@ -211,8 +213,32 @@ class Configs(SqlInterface) :
 		value: bytes = bytes(data[0])
 		assert value[:2] == AvroMarker
 
-		deserializer: AvroDeserializer = AvroDeserializer(read_model=UserConfig, write_model=await Configs.getSchema(value[2:10]))
+		deserializer: AvroDeserializer[UserConfig] = AvroDeserializer(read_model=UserConfig, write_model=await Configs.getSchema(value[2:10]))
 		return deserializer(value[10:])
+
+
+	@timed
+	async def _getUserOTP(self: Self, user_id: int) -> Optional[list[OTP]] :
+		data: list[tuple[datetime, str]] = await self.query_async("""
+			select created, 'totp'
+			from kheina.auth.otp
+			where user_id = %s;
+			""", (
+				user_id,
+			),
+			fetch_all = True,
+		)
+
+		if not data :
+			return None
+
+		return [
+			OTP(
+				created = row[0],
+				type    = OtpType(row[1]),
+			)
+			for row in data
+		]
 
 
 	@HttpErrorHandler('retrieving user config')
@@ -220,11 +246,12 @@ class Configs(SqlInterface) :
 		user_config: UserConfig = await self._getUserConfig(user.user_id)
 
 		return UserConfigResponse(
-			blocking_behavior=user_config.blocking_behavior,
-			blocked_tags=list(map(set, user_config.blocked_tags)) if user_config.blocked_tags else [],
-			# TODO: internal tokens need to be added so that we can convert user ids to handles
-			blocked_users=None,
-			wallpaper=user_config.wallpaper.decode() if user_config.wallpaper else None,
+			blocking_behavior = user_config.blocking_behavior,
+			blocked_tags      = list(map(set, user_config.blocked_tags)) if user_config.blocked_tags else [],
+			# TODO: convert user ids to handles
+			blocked_users = None,
+			wallpaper     = user_config.wallpaper.decode() if user_config.wallpaper else None,
+			otp           = await self._getUserOTP(user.user_id),
 		)
 
 

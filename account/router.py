@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from fastapi.responses import Response
 
-from authenticator.models import BotCreateResponse, BotLoginRequest, BotType, ChangePasswordRequest, LoginRequest, LoginResponse
+from authenticator.models import BotCreateResponse, BotLoginRequest, BotType, ChangePasswordRequest, LoginRequest, LoginResponse, OtpAddedResponse, OtpResponse
 from shared.auth import Scope, deactivateAuthToken
 from shared.config.constants import environment
 from shared.datetime import datetime
@@ -9,7 +9,7 @@ from shared.exceptions.http_error import BadRequest
 from shared.server import Request
 
 from .account import Account, auth
-from .models import ChangeHandle, CreateAccountRequest, FinalizeAccountRequest
+from .models import ChangeHandle, CreateAccountRequest, FinalizeAccountRequest, OtpFinalizeRequest, OtpRemoveEmailRequest, OtpRemoveRequest, OtpRequest
 
 
 app = APIRouter(
@@ -26,7 +26,7 @@ async def shutdown() :
 
 @app.post('/login', response_model=LoginResponse)
 async def v1Login(req: Request, body: LoginRequest) :
-	auth = await account.login(body.email, body.password, req)
+	auth = await account.login(body.email, body.password, body.otp, req)
 	response = Response(auth.json(), headers={ 'content-type': 'application/json' })
 
 	if auth.token.token :
@@ -54,7 +54,7 @@ async def v1CreateAccount(body: CreateAccountRequest) :
 
 
 @app.post('/finalize', response_model=LoginResponse)
-async def v1FinalizeAccount(req: Request, body: FinalizeAccountRequest) :
+async def v1FinalizeAccount(req: Request, body: FinalizeAccountRequest):
 	if not req.client :
 		raise BadRequest('how')
 
@@ -78,6 +78,28 @@ async def v1ChangePassword(req: Request, body: ChangePasswordRequest) :
 async def v1ChangeHandle(req: Request, body: ChangeHandle) :
 	await req.user.verify_scope(Scope.user)
 	await account.changeHandle(req.user, body.handle)
+
+
+@app.put('/otp')
+async def v1AddOtp(req: Request, body: OtpRequest) -> OtpResponse :
+	await req.user.verify_scope(Scope.user)
+	return await account.create_otp(req.user, body.email, body.password)
+
+
+@app.patch('/otp')
+async def v1FinalizeOtp(req: Request, body: OtpFinalizeRequest) -> OtpAddedResponse :
+	await req.user.verify_scope(Scope.user)
+	return await account.finalize_otp(req.user, body.token, body.otp)
+
+
+@app.post('/otp/email', status_code = 204)
+async def v1RemoveOtpEmail(body: OtpRemoveEmailRequest) -> None :
+	return await account.request_remove_otp(body.email)
+
+
+@app.delete('/otp', status_code = 204)
+async def v1RemoveOtp(req: Request, body: OtpRemoveRequest) -> None :
+	return await account.remove_otp(req.user, body.token, body.otp)
 
 
 @app.post('/bot/login', response_model=LoginResponse)

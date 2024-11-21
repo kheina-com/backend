@@ -6,14 +6,14 @@ from re import compile
 from types import TracebackType
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Self, Tuple, Type, Union
 
-from psycopg import AsyncClientCursor, AsyncConnection, Binary, OperationalError
-from psycopg.errors import ConnectionException
+from psycopg import AsyncClientCursor, AsyncConnection, AsyncCursor, Binary, OperationalError
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 from pydantic.fields import ModelField
 
 from ..config.credentials import fetch
 from ..logging import Logger, getLogger
+from ..models._shared import PostId
 from ..timing import timed
 from .query import Field, Insert, Operator, Query, Table, Update, Value, Where
 
@@ -74,15 +74,22 @@ class SqlInterface :
 
 	_read_conversions = { }
 
-	def __init__(self: 'SqlInterface', long_query_metric: float = 1, conversions: Dict[type, Callable] = { }) -> None :
+	def __init__(self: Self, long_query_metric: float = 1, conversions: Dict[type, Callable] = { }) -> None :
 		self.logger: Logger = getLogger()
 		self._long_query = long_query_metric	
 		self._conversions: Dict[type, Callable] = {
 			tuple: list,
 			bytes: Binary,
 			Enum: lambda x : x.name,
+			PostId: PostId.int,
 			**conversions,
 		}
+
+
+	async def open(self: Self) :
+		if getattr(SqlInterface, 'pool', None) is None :
+			SqlInterface.pool = AsyncConnectionPool(' '.join(map('='.join, SqlInterface.db.items())), open=False)
+			await SqlInterface.pool.open()
 
 
 	def _convert_item(self: Self, item: Any) -> Any :
@@ -103,6 +110,8 @@ class SqlInterface :
 		fetch_all: bool            = False,
 		attempts:  int             = 3,
 	) -> Any :
+		await self.open()
+
 		if isinstance(sql, Query) :
 			sql, params = sql.build()
 
@@ -540,10 +549,10 @@ class SqlInterface :
 class Transaction :
 
 	def __init__(self: 'Transaction', sql: SqlInterface) :
-		self._sql:   SqlInterface                = sql
-		self.cur:    Optional[AsyncClientCursor] = None
-		self.conn:   Optional[AsyncConnection]   = None
-		self.nested: int                         = 0
+		self._sql:   SqlInterface               = sql
+		self._conn:  Optional[AsyncConnection]  = None
+		self.conn:   Optional[AsyncConnection]  = None
+		self.nested: int                        = 0
 
 		self.insert = partial(self._sql.insert, query=self.query_async)
 		self.select = partial(self._sql.select, query=self.query_async)
@@ -553,25 +562,25 @@ class Transaction :
 
 
 	async def __aenter__(self: Self) :
-		if self.conn :
+		if self._conn :
 			self.nested += 1
 
 		else :
-			conn: AsyncConnection = await self._sql.pool.connection().__aenter__()
-			self.conn = conn
-
-		if not self.cur :
-			self.cur = await AsyncClientCursor(self.conn).__aenter__()
+			self._conn = await self._sql.pool.getconn()
+			self.conn  = await self._conn.__aenter__()
 
 		return self
 
 
 	async def __aexit__(self: Self, exc_type: Optional[Type[BaseException]], exc_obj: Optional[BaseException], exc_tb: Optional[TracebackType]) :
 		if not self.nested :
-			if self.cur :
-				await self.cur.__aexit__(exc_type, exc_obj, exc_tb)
 			if self.conn :
 				await self.conn.__aexit__(exc_type, exc_obj, exc_tb)
+				self.conn = None
+
+			if self._conn :
+				await self._sql.pool.putconn(self._conn)
+				self._conn = None
 
 		else :
 			self.nested -= 1
@@ -598,22 +607,18 @@ class Transaction :
 		if isinstance(sql, Query) :
 			sql, params = sql.build()
 
+		assert self.conn
 		params = tuple(map(self._sql._convert_item, params))
-
-		if not self.cur :
-			raise ConnectionException('failed to connect to db.')
 
 		try :
 			# TODO: convert fuzzly's Query implementation into a psycopg composable
-			await self.cur.execute(sql, params) # type: ignore
+			cur: AsyncCursor = await self.conn.execute(sql, params) # type: ignore
 
 			if fetch_one :
-				return await self.cur.fetchone()
+				return await cur.fetchone()
 
 			elif fetch_all :
-				return await self.cur.fetchall()
-
-			return
+				return await cur.fetchall()
 
 		except Exception as e :
 			self._sql.logger.warning({
