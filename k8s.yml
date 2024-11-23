@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: fuzzly-backend
-        image: us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend@sha256:b084a1a840e5a8324f91ebc38f19bb72e3cfefd8fecabbff4d366b98401db3df
+        image: us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend@sha256:bab5a85bd1b8e0d9fa0b193a9a8803efdc9c3f36916ec63ab2e8460bba6a08c1
         env:
         - name: pod_ip
           valueFrom:
@@ -46,7 +46,7 @@ spec:
         resources:
           limits:
             cpu: "1"
-            memory: 2Gi
+            memory: 4Gi
           requests:
             cpu: "1"
             memory: 2Gi
