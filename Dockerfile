@@ -26,19 +26,19 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt update && \
 	apt upgrade -y && \
 	apt install -y \
-		build-essential \
-		libssl-dev \
-		libffi-dev \
-		git \
-		jq \
-		libpq-dev \
-		python3-dev \
-		libpng-dev \
-		libjpeg-dev \
-		libtiff-dev \
-		libwebp-dev \
-		imagemagick \
-		libimage-exiftool-perl && \
+	build-essential \
+	libssl-dev \
+	libffi-dev \
+	git \
+	jq \
+	libpq-dev \
+	python3-dev \
+	libpng-dev \
+	libjpeg-dev \
+	libtiff-dev \
+	libwebp-dev \
+	imagemagick \
+	libimage-exiftool-perl && \
 	rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -66,4 +66,4 @@ ENV PORT=80
 ENV ENVIRONMENT=DEV
 CMD jq '.fullchain' -r /etc/certs/cert.json > fullchain.pem && \
 	jq '.privkey'   -r /etc/certs/cert.json > privkey.pem && \
-	gunicorn -w 2 -k uvicorn.workers.UvicornWorker --certfile fullchain.pem --keyfile privkey.pem -b 0.0.0.0:443 server:app
+	gunicorn -w 2 -k uvicorn.workers.UvicornWorker --certfile fullchain.pem --keyfile privkey.pem -b 0.0.0.0:443 --timeout 1200 server:app

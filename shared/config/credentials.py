@@ -19,7 +19,7 @@ def decryptCredentialFile(cred: bytes) -> Any :
 	aes_contents = environ.get('kh_aes')
 
 	if aes_contents :
-			aesbytes, aes_sig = map(b64decode, aes_contents.split('.', 2))
+		aesbytes, aes_sig = map(b64decode, aes_contents.split('.', 2))
 
 	else :
 		with open('credentials/aes.key', 'rb') as file :

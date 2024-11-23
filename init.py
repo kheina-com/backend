@@ -4,10 +4,11 @@ import re
 import shutil
 import time
 from dataclasses import dataclass
-from os import listdir, remove
+from os import listdir, remove, environ
 from os.path import isdir, isfile, join
 from secrets import token_bytes
 from typing import Any, BinaryIO, Optional
+from subprocess import PIPE, Popen
 
 import asyncclick as click
 import ujson
@@ -18,7 +19,7 @@ from fontTools.ttLib import TTFont
 from fontTools.ttLib.tables.sbixStrike import Strike
 
 from authenticator.models import LoginRequest
-from shared.base64 import b64encode
+from shared.base64 import b64decode, b64encode
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import decryptCredentialFile, fetch
 from shared.sql import SqlInterface
@@ -411,5 +412,32 @@ def readSecret(secret: Optional[str], filename: Optional[str]) -> None :
 		click.echo(json.dumps(decryptCredentialFile(open(f'credentials/{filename}', 'rb').read()), indent='\t'))
 
 
-if __name__ == "__main__":
+@cli.command('kube-secret')
+@click.option('--secret', '-s', help='Read a secret.')
+def readSecret(secret: str) -> None :
+	"""
+	reads an encrypted kube secret
+	"""
+
+	out, err = Popen(['kubectl', 'get', 'secret', 'kh-aes', '-o', 'jsonpath={.data.value}'], stdout=PIPE, stderr=PIPE).communicate()
+	if err :
+		return click.echo(f'{err}: {err.decode()}')
+
+	environ['kh_aes'] = b64decode(out).decode()
+
+	out, err = Popen(['kubectl', 'get', 'secret', 'kh-ed25519', '-o', 'jsonpath={.data.value}'], stdout=PIPE, stderr=PIPE).communicate()
+	if err :
+		return click.echo(f'{err}: {err.decode()}')
+
+	environ['kh_ed25519'] = b64decode(out).decode()
+
+	out, err = Popen(['kubectl', 'get', 'secret', secret, '-o', 'jsonpath={.data}'], stdout=PIPE, stderr=PIPE).communicate()
+	if err :
+		return click.echo(f'{err}: {err.decode()}')
+
+	cred = b64decode(json.loads(out).values().__iter__().__next__())
+	click.echo(f'{secret}: {json.dumps(decryptCredentialFile(json.loads(cred)['value'].encode()), indent=4)}')
+
+
+if __name__ == '__main__' :
 	cli()
