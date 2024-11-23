@@ -53,6 +53,7 @@ class Tags(SqlInterface) :
 				description    = None, # in this case, we don't care about this field
 			)
 			for row in data
+			if row[0] and row[1] in TagGroup.__members__
 		]
 
 
@@ -144,6 +145,7 @@ class Tags(SqlInterface) :
 				description    = None, # in this case, we don't care about this field
 			)
 			for row in data
+			if row[0] and row[1] in TagGroup.__members__
 		]
 
 
@@ -230,4 +232,5 @@ class Tags(SqlInterface) :
 				description    = None, # in this case, we don't care about this field
 			)
 			for row in data
+			if row[0] and row[1] in TagGroup.__members__
 		]

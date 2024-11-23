@@ -246,6 +246,7 @@ class Tagger(Tags) :
 				description=row[5],
 			)
 			for row in data
+			if row[0] and row[1] in TagGroup.__members__
 		]
 
 
@@ -350,6 +351,7 @@ class Tagger(Tags) :
 				description=row[5],
 			)
 			for row in data
+			if row[0] and row[1] in TagGroup.__members__
 		}
 
 
@@ -397,6 +399,9 @@ class Tagger(Tags) :
 
 		if not data :
 			raise NotFound('the provided tag does not exist.', tag=tag)
+
+		if data[1] not in TagGroup.__members__ :
+			raise NotFound('tag group no longer exists.', tag=tag, data=data)
 
 		return InternalTag(
 			name=data[0],
