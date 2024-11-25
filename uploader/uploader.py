@@ -585,46 +585,65 @@ class Uploader(SqlInterface, B2Interface) :
 			vote_task: Optional[Task] = None
 
 			if old_privacy in UnpublishedPrivacies and privacy not in UnpublishedPrivacies :
-				query = """
+				await t.query_async("""
 					INSERT INTO kheina.public.post_votes
 					(user_id, post_id, upvote)
 					VALUES
 					(%s, %s, %s)
 					ON CONFLICT DO NOTHING;
+					""", (
+						user.user_id,
+						post_id.int(),
+						True,
+					),
+				)
 
+				await t.query_async("""
 					INSERT INTO kheina.public.post_scores
 					(post_id, upvotes, downvotes, top, hot, best, controversial)
 					VALUES
 					(%s, %s, %s, %s, %s, %s, %s)
 					ON CONFLICT DO NOTHING;
+					""", (
+						post_id.int(),
+						1,
+						0,
+						1,
+						calc_hot(1, 0, time()),
+						confidence(1, 1),
+						calc_cont(1, 0),
+					),
+				)
 
+				await t.query_async("""
 					UPDATE kheina.public.posts
-						SET created = NOW(),
-							updated = NOW(),
+						SET created = now(),
+							updated = now(),
 							privacy = privacy_to_id(%s)
 					WHERE posts.uploader = %s
 						AND posts.post_id = %s;
-				"""
-				params = (
-					user.user_id, post_id.int(), True,
-					post_id.int(), 1, 0, 1, calc_hot(1, 0, time()), confidence(1, 1), calc_cont(1, 0),
-					privacy.name, user.user_id, post_id.int(),
+					""", (
+						privacy.name,
+						user.user_id,
+						post_id.int(),
+					),
 				)
+
 				vote_task = ensure_future(VoteKVS.put_async(f'{user.user_id}|{post_id}', 1))
 
 			else :
-				query = """
+				await t.query_async("""
 					UPDATE kheina.public.posts
-						SET updated = NOW(),
+						SET updated = now(),
 							privacy = privacy_to_id(%s)
 					WHERE posts.uploader = %s
 						AND posts.post_id = %s;
-				"""
-				params = (
-					privacy.name, user.user_id, post_id.int(),
+					""",(
+						privacy.name,
+						user.user_id,
+						post_id.int(),
+					),
 				)
-
-			await t.query_async(query, params)
 
 			try :
 				tags: list[InternalTag] = await tags_task

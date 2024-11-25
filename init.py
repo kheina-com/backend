@@ -4,11 +4,11 @@ import re
 import shutil
 import time
 from dataclasses import dataclass
-from os import listdir, remove, environ
+from os import environ, listdir, remove
 from os.path import isdir, isfile, join
 from secrets import token_bytes
-from typing import Any, BinaryIO, Optional
 from subprocess import PIPE, Popen
+from typing import Any, BinaryIO, Optional
 
 import asyncclick as click
 import ujson
@@ -22,8 +22,8 @@ from authenticator.models import LoginRequest
 from shared.base64 import b64decode, b64encode
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import decryptCredentialFile, fetch
-from shared.sql import SqlInterface
 from shared.logging import TerminalAgent
+from shared.sql import SqlInterface
 
 
 def isint(value: Any) -> Optional[int] :

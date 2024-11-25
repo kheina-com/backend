@@ -26,7 +26,7 @@ from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, Conflict, HttpError, InternalServerError, NotFound, Unauthorized, UnprocessableEntity
 from shared.hashing import Hashable
 from shared.models import InternalUser
-from shared.models.auth import AuthState, KhUser, Scope, TokenMetadata, AuthToken
+from shared.models.auth import AuthState, AuthToken, KhUser, Scope, TokenMetadata
 from shared.sql import SqlInterface
 from shared.timing import timed
 from shared.utilities.json import json_stream
