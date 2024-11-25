@@ -23,6 +23,7 @@ from shared.base64 import b64decode, b64encode
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import decryptCredentialFile, fetch
 from shared.sql import SqlInterface
+from shared.logging import TerminalAgent
 
 
 def isint(value: Any) -> Optional[int] :
@@ -414,7 +415,8 @@ def readSecret(secret: Optional[str], filename: Optional[str]) -> None :
 
 @cli.command('kube-secret')
 @click.option('--secret', '-s', help='Read a secret.')
-def readSecret(secret: str) -> None :
+@click.option('--format', '-f', help='format')
+def readSecret(secret: str, format: str = "") -> None :
 	"""
 	reads an encrypted kube secret
 	"""
@@ -436,7 +438,11 @@ def readSecret(secret: str) -> None :
 		return click.echo(f'{err}: {err.decode()}')
 
 	cred = b64decode(json.loads(out).values().__iter__().__next__())
-	click.echo(f'{secret}: {json.dumps(decryptCredentialFile(json.loads(cred)['value'].encode()), indent=4)}')
+
+	if format == 'json' :
+		return click.echo(json.dumps(decryptCredentialFile(json.loads(cred)['value'].encode())))
+
+	click.echo(f'{secret}: ' + TerminalAgent('').pretty_struct(decryptCredentialFile(json.loads(cred)['value'].encode())))
 
 
 if __name__ == '__main__' :

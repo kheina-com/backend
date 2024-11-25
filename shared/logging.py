@@ -106,7 +106,7 @@ class TerminalAgent :
 
 		if isinstance(struct, str) :
 			remover = ''
-			match = self.re.match(r'\n*(\s+)(?=\S)', struct)
+			match   = self.re.match(r'\n*(\s+)(?=\S)', struct)
 
 			if match :
 				remover = match.group(1)
@@ -142,7 +142,7 @@ class TerminalAgent :
 			items  = []
 			def loop(s: str) -> str :
 				for k, v in items :
-					s += '\n' + ' ' * (indent + 2) + self.pretty_struct(k) + ':' + ' ' * (keylen - len(k) + 1)
+					s += '\n' + ' ' * (indent + 2) + str(k) + ':' + ' ' * (keylen - len(k) + 1)
 
 					if isinstance(v, str) :
 						s += self.pretty_struct(v, indent = indent + keylen + 4, nest = nest + 1)

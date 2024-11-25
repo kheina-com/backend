@@ -597,7 +597,8 @@ class Posts(Posts) :
 				posts.height,
 				posts.uploader,
 				posts.privacy,
-				posts.thumbhash
+				posts.thumbhash,
+				posts.locked
 			FROM kheina.public.posts
 				LEFT JOIN kheina.public.post_scores
 					ON post_scores.post_id = posts.post_id
