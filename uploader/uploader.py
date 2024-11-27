@@ -40,8 +40,9 @@ from .models import Coordinates
 resource.limits.set_resource_limit('memory', Byte.megabyte.value * 512)
 resource.limits.set_resource_limit('map',    Byte.gigabyte.value)
 UnpublishedPrivacies: Set[Privacy] = { Privacy.unpublished, Privacy.draft }
-posts = Posts()
-users = Users()
+
+posts  = Posts()
+users  = Users()
 tagger = Tags()
 
 
