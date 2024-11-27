@@ -247,18 +247,25 @@ class LogHandler(logging.Handler) :
 
 def getLogger(name: Optional[str] = None, level: int = logging.INFO, filter: Callable = lambda x : x, disable: list[str] = [], **kwargs: Any) -> Logger :
 	name = name or f'{repo_name}.{short_hash}'
+
 	for loggerName in disable :
 		logging.getLogger(loggerName).propagate = False
+
 	logging.root.setLevel(logging.NOTSET)
 
-	# TODO: check for names and add a handler for each name
-	if len(logging.root.handlers) == 1 and type(logging.root.handlers[0]) is LogHandler :
-		logging.root.handlers[0].level = min(logging.root.handlers[0].level, level)
+	# # TODO: check for names and add a handler for each name
+	# if len(logging.root.handlers) == 1 and type(logging.root.handlers[0]) is LogHandler :
+	# 	logging.root.handlers[0].level = min(logging.root.handlers[0].level, level)
 
-	else :
+	# else :
+	# 	handler: LogHandler = LogHandler(name, level=level)
+	# 	handler.addFilter(filter)
+	# 	logging.root.handlers.clear()
+	# 	logging.root.addHandler(handler)
+
+	if name not in { h.get_name() for h in logging.root.handlers } :
 		handler: LogHandler = LogHandler(name, level=level)
 		handler.addFilter(filter)
-		logging.root.handlers.clear()
 		logging.root.addHandler(handler)
 
 	return logging.getLogger(name)

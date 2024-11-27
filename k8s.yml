@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: fuzzly-backend
-        image: us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend@sha256:0a4d49e17d86cbfd1fc18ccaf760edc76206130b7d8c054e2f15f3e3036f7031
+        image: us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend@sha256:e9bc46e9566fb481eb5ee2d73f74bf890ef892b21dd7081fe8903eb163ca26d4
         env:
         - name: pod_ip
           valueFrom:

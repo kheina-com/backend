@@ -6,7 +6,7 @@ from os import makedirs, path, remove
 from secrets import token_bytes
 from subprocess import PIPE, Popen
 from time import time
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Self, Set, Tuple, Union
 from uuid import UUID, uuid4
 
 import aerospike
@@ -37,8 +37,8 @@ from users.repository import UserKVS, Users
 from .models import Coordinates
 
 
-resource.limits.set_resource_limit('memory', Byte.kibibyte.value * 512)
-resource.limits.set_resource_limit('map', Byte.kibibyte.value * 512)
+resource.limits.set_resource_limit('memory', Byte.megabyte.value * 512)
+resource.limits.set_resource_limit('map',    Byte.gigabyte.value)
 UnpublishedPrivacies: Set[Privacy] = { Privacy.unpublished, Privacy.draft }
 posts = Posts()
 users = Users()
@@ -51,7 +51,7 @@ if not path.isdir('images') :
 
 class Uploader(SqlInterface, B2Interface) :
 
-	def __init__(self: 'Uploader') -> None :
+	def __init__(self: Self) -> None :
 		SqlInterface.__init__(
 			self,
 			conversions={
@@ -61,17 +61,17 @@ class Uploader(SqlInterface, B2Interface) :
 		B2Interface.__init__(self, max_retries=5)
 		self.thumbnail_sizes: List[int] = [
 			# the length of the longest side, in pixels
-			100,
-			200,
-			400,
-			800,
 			1200,
+			800,
+			400,
+			200,
+			100,
 		]
-		self.web_size: int = 1500
-		self.emoji_size: int = 256
-		self.icon_size: int = 400
-		self.banner_size: int = 600
-		self.output_quality: int = 85
+		self.web_size:        int = 1500
+		self.emoji_size:      int = 256
+		self.icon_size:       int = 400
+		self.banner_size:     int = 600
+		self.output_quality:  int = 85
 		self.filter_function: str = 'catrom'
 
 
@@ -144,8 +144,9 @@ class Uploader(SqlInterface, B2Interface) :
 				FROM kheina.public.posts
 				WHERE posts.rating = rating_to_id(%s)
 					AND posts.privacy = privacy_to_id('public');
-				""",
-				(rating,),
+				""", (
+					rating,
+				),
 				fetch_one=True,
 			)
 			await CountKVS.put_async('_', int(data[0]) + value, -1)
@@ -164,7 +165,7 @@ class Uploader(SqlInterface, B2Interface) :
 			)
 
 
-	async def kvs_get(self: 'Uploader', post_id: PostId) -> Optional[InternalPost] :
+	async def kvs_get(self: Self, post_id: PostId) -> Optional[InternalPost] :
 		try :
 			return await PostKVS.get_async(post_id)
 
@@ -172,7 +173,7 @@ class Uploader(SqlInterface, B2Interface) :
 			return None
 
 
-	def delete_file(self: 'Uploader', path: str) :
+	def delete_file(self: Self, path: str) :
 		try :
 			remove(path)
 
@@ -180,19 +181,19 @@ class Uploader(SqlInterface, B2Interface) :
 			self.logger.exception(f'failed to delete local file, as it does not exist. path: {path}')
 
 
-	def _validateTitle(self: 'Uploader', title: Optional[str]) :
+	def _validateTitle(self: Self, title: Optional[str]) :
 		if title and len(title) > 100 :
 			raise BadRequest('the given title is invalid, title cannot be over 100 characters in length.', logdata={ 'title': title })
 
 
-	def _validateDescription(self: 'Uploader', description: Optional[str]) :
+	def _validateDescription(self: Self, description: Optional[str]) :
 		if description and len(description) > 10000 :
 			raise BadRequest('the given description is invalid, description cannot be over 10,000 characters in length.', logdata={ 'description': description })
 
 
 	@HttpErrorHandler('creating new post')
 	@timed
-	async def createPost(self: 'Uploader', user: KhUser) -> Dict[str, Union[str, int]] :
+	async def createPost(self: Self, user: KhUser) -> Dict[str, Union[str, int]] :
 		async with self.transaction() as transaction :
 			post_id: int
 
@@ -239,7 +240,7 @@ class Uploader(SqlInterface, B2Interface) :
 	@HttpErrorHandler('creating populated post')
 	@timed
 	async def createPostWithFields(
-		self:       'Uploader',
+		self:        Self,
 		user:        KhUser,
 		reply_to:    Optional[PostId],
 		title:       Optional[str],
@@ -307,7 +308,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 
 	@timed.key('{size}')
-	def convert_image(self: 'Uploader', image: Image, size: int) -> Image :
+	def convert_image(self: Self, image: Image, size: int) -> Image :
 		long_side = 0 if image.size[0] > image.size[1] else 1
 		ratio = size / image.size[long_side]
 
@@ -319,7 +320,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 
 	@timed
-	def thumbhash(self: 'Uploader', image: Image) -> bytes :
+	def thumbhash(self: Self, image: Image) -> bytes :
 		long_side = 0 if image.size[0] > image.size[1] else 1
 		size = 100
 		ratio = size / image.size[long_side]
@@ -337,7 +338,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 
 	@timed
-	def get_image_data(self: 'Uploader', image: Image, compress: bool = True) -> bytes :
+	def get_image_data(self: Self, image: Image, compress: bool = True) -> bytes :
 		if compress :
 			image.compression_quality = self.output_quality
 
@@ -348,24 +349,25 @@ class Uploader(SqlInterface, B2Interface) :
 
 	@timed
 	async def uploadImage(
-		self:     'Uploader',
-		user:      KhUser,
-		file_data: bytes,
-		filename:  str,
-		post_id:   PostId,
-		emoji_name: Optional[str] = None,
-		web_resize: Optional[int] = None,
+		self:         Self,
+		user:         KhUser,
+		file_on_disk: str,
+		filename:     str,
+		post_id:      PostId,
+		emoji_name:   Optional[str] = None,
+		web_resize:   Optional[int] = None,
 	) -> Dict[str, Union[Optional[str], int, Dict[str, str]]] :
+		run: str = uuid4().hex
+
 		# validate it's an actual photo
-		with Image(blob=file_data) as image :
-			pass
+		try :
+			with Image(file=open(file_on_disk, 'rb')) :
+				pass
 
-		file_on_disk: str = f'images/{uuid4().hex}_{filename}'
+		except :
+			self.delete_file(file_on_disk)
+			raise BadRequest('Uploaded file is not an image.')
 
-		with open(file_on_disk, 'wb') as file :
-			file.write(file_data)
-
-		del file_data
 		content_type: str
 
 		try :
@@ -390,10 +392,24 @@ class Uploader(SqlInterface, B2Interface) :
 				filename = filename[:dot_index] + '-web' + filename[dot_index:]
 
 		post: InternalPost = await posts._get_post(post_id)
+		self.logger.debug({
+			'run':          run,
+			'post':         post_id,
+			'file_on_disk': file_on_disk,
+			'content_type': content_type,
+			'filename':     filename,
+			'web_resize':   web_resize,
+		})
 
 		# thumbhash
 		with Image(file=open(file_on_disk, 'rb')) as image :
 			thumbhash = self.thumbhash(image)
+			del image
+
+		self.logger.debug({
+			'run':       run,
+			'thumbhash': thumbhash,
+		})
 
 		try :
 			async with self.transaction() as transaction :
@@ -401,8 +417,10 @@ class Uploader(SqlInterface, B2Interface) :
 					SELECT posts.filename from kheina.public.posts
 					WHERE posts.post_id = %s
 						AND uploader = %s;
-					""",
-					(post_id.int(), user.user_id),
+					""", (
+						post_id.int(),
+						user.user_id,
+					),
 					fetch_one=True,
 				)
 
@@ -411,71 +429,99 @@ class Uploader(SqlInterface, B2Interface) :
 					raise Forbidden('the post you are trying to upload to does not belong to this account.')
 
 				old_filename: str = data[0]
+				image_size: PostSize
 
 				with Image(file=open(file_on_disk, 'rb')) as image :
+					image_size: PostSize = PostSize(
+						width  = image.size[0],
+						height = image.size[1],
+					)
 					if web_resize :
 						image: Image = self.convert_image(image, web_resize)
 
-					# optimize
-					upd: Tuple[datetime, int] = await transaction.query_async("""
-						UPDATE kheina.public.posts
-							SET updated = NOW(),
-								media_type = media_mime_type_to_id(%s),
-								filename = %s,
-								width = %s,
-								height = %s,
-								thumbhash = %s
-						WHERE posts.post_id = %s
-							AND posts.uploader = %s
-						RETURNING posts.updated, media_type;
-						""", (
-							content_type,
-							filename,
-							image.size[0],
-							image.size[1],
-							thumbhash,
-							post_id.int(),
-							user.user_id,
-						),
-						fetch_one=True,
-					)
-					updated: datetime = upd[0]
-					media_type = upd[1]
-					image_size: PostSize = PostSize(
-						width=image.size[0],
-						height=image.size[1],
-					)
+						with open(file_on_disk, 'wb') as f :
+							f.write(self.get_image_data(image, compress = False))
+
+						self.logger.debug({
+							'run':     run,
+							'post':    post_id,
+							'message': 'resized for web',
+						})
+
+					del image
+
+				# optimize
+				upd: Tuple[datetime, int] = await transaction.query_async("""
+					UPDATE kheina.public.posts
+						SET updated = NOW(),
+							media_type = media_mime_type_to_id(%s),
+							filename = %s,
+							width = %s,
+							height = %s,
+							thumbhash = %s
+					WHERE posts.post_id = %s
+						AND posts.uploader = %s
+					RETURNING posts.updated, media_type;
+					""", (
+						content_type,
+						filename,
+						image_size.width,
+						image_size.height,
+						thumbhash,
+						post_id.int(),
+						user.user_id,
+					),
+					fetch_one=True,
+				)
+				updated: datetime = upd[0]
+				media_type = upd[1]
 
 				if old_filename :
 					await self.b2_delete_file_async(f'{post_id}/{old_filename}')
+					self.logger.debug({
+						'run':     run,
+						'post':    post_id,
+						'message': 'deleted old file from cdn',
+					})
 
 				url: str = f'{post_id}/{filename}'
 
 				# upload fullsize
-				if web_resize :
-					await self.upload_async(self.get_image_data(image, compress = False), url, content_type=content_type)
-
-				else :
-					await self.upload_async(open(file_on_disk, 'rb').read(), url, content_type=content_type)
+				await self.upload_async(open(file_on_disk, 'rb').read(), url, content_type=content_type)
+				self.logger.debug({
+					'run':     run,
+					'post':    post_id,
+					'message': 'uploaded fullsize image to cdn',
+				})
 
 				# upload thumbnails
 				thumbnails = { }
 
-				for size in self.thumbnail_sizes :
-					thumbnail_url: str = f'{post_id}/thumbnails/{size}.webp'
-					with Image(file=open(file_on_disk, 'rb')) as image :
+				with Image(file=open(file_on_disk, 'rb')) as image :
+					for i, size in enumerate(self.thumbnail_sizes) :
 						image = self.convert_image(image, size)
+
+						if not i :
+							# jpeg thumbnail
+							thumbnail_url: str = f'{post_id}/thumbnails/{size}.jpg'
+							await self.upload_async(self.get_image_data(image.convert('jpeg')), thumbnail_url, self.mime_types['jpeg'])
+							thumbnails['jpeg'] = thumbnail_url
+							self.logger.debug({
+								'run':     run,
+								'post':    post_id,
+								'message': f'uploaded thumbnail jpeg({size}) image to cdn',
+							})
+
+						thumbnail_url: str = f'{post_id}/thumbnails/{size}.webp'
 						await self.upload_async(self.get_image_data(image), thumbnail_url, self.mime_types['webp'])
+						self.logger.debug({
+							'run':     run,
+							'post':    post_id,
+							'message': f'uploaded thumbnail webp({size}) image to cdn',
+						})
 
 					thumbnails[size] = thumbnail_url
-
-				# jpeg thumbnail
-				with Image(file=open(file_on_disk, 'rb')) as image :
-					thumbnail_url: str = f'{post_id}/thumbnails/{self.thumbnail_sizes[-1]}.jpg'
-					image = self.convert_image(image, self.thumbnail_sizes[-1]).convert('jpeg')
-					await self.upload_async(self.get_image_data(image), thumbnail_url, self.mime_types['jpeg'])
-
-					thumbnails['jpeg'] = thumbnail_url
+					del image
 
 				# TODO: implement emojis
 				emoji: Optional[str] = None
@@ -486,7 +532,7 @@ class Uploader(SqlInterface, B2Interface) :
 			post.media_type = media_type
 			post.size       = image_size
 			post.filename   = filename
-			post.thumbhash  = thumbhash  # type: ignore
+			post.thumbhash  = thumbhash
 			await PostKVS.put_async(post_id, post)
 
 			return {
@@ -503,9 +549,9 @@ class Uploader(SqlInterface, B2Interface) :
 	@HttpErrorHandler('updating post metadata')
 	@timed
 	async def updatePostMetadata(
-		self:   'Uploader',
-		user:    KhUser,
-		post_id: PostId,
+		self:        Self,
+		user:        KhUser,
+		post_id:     PostId,
 		title:       Optional[str]     = None,
 		description: Optional[str]     = None,
 		privacy:     Optional[Privacy] = None,
@@ -544,10 +590,10 @@ class Uploader(SqlInterface, B2Interface) :
 
 	@timed
 	async def _update_privacy(
-		self:   'Uploader',
-		user:    KhUser,
-		post_id: PostId,
-		privacy: Privacy,
+		self:        Self,
+		user:        KhUser,
+		post_id:     PostId,
+		privacy:     Privacy,
 		transaction: Optional[Transaction] = None,
 		commit:      bool                  = True,
 	) -> bool :
@@ -565,8 +611,10 @@ class Uploader(SqlInterface, B2Interface) :
 						ON posts.privacy = privacy.privacy_id
 				WHERE posts.uploader = %s
 					AND posts.post_id = %s;
-				""",
-				(user.user_id, post_id.int()),
+				""", (
+					user.user_id,
+					post_id.int(),
+				),
 				fetch_one=True,
 			)
 
@@ -677,7 +725,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 	@HttpErrorHandler('updating post privacy')
 	@timed
-	async def updatePrivacy(self: 'Uploader', user: KhUser, post_id: PostId, privacy: Privacy) :
+	async def updatePrivacy(self: Self, user: KhUser, post_id: PostId, privacy: Privacy) :
 		success = await self._update_privacy(user, post_id, privacy)
 
 		if await PostKVS.exists_async(post_id) :
@@ -689,7 +737,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 	@HttpErrorHandler('setting user icon')
 	@timed
-	async def setIcon(self: 'Uploader', user: KhUser, post_id: PostId, coordinates: Coordinates) :
+	async def setIcon(self: Self, user: KhUser, post_id: PostId, coordinates: Coordinates) :
 		if coordinates.width != coordinates.height :
 			raise BadRequest(f'icons must be square. width({coordinates.width}) != height({coordinates.height})')
 
@@ -707,7 +755,7 @@ class Uploader(SqlInterface, B2Interface) :
 				image = Image(blob=await response.read())
 
 		except ClientResponseError as e :
-			raise BadGateway('unable to retrieve image from B2.', inner_exception=str(e))
+			raise BadGateway('unable to retrieve image from B2.', err=e)
 
 		# upload new icon
 		image.crop(**coordinates.dict())
@@ -728,8 +776,10 @@ class Uploader(SqlInterface, B2Interface) :
 			UPDATE kheina.public.users
 				SET icon = %s
 			WHERE users.user_id = %s;
-			""",
-			(post_id.int(), user.user_id),
+			""", (
+				post_id.int(),
+				user.user_id,
+			),
 			commit=True,
 		)
 
@@ -744,7 +794,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 	@HttpErrorHandler('setting user banner')
 	@timed
-	async def setBanner(self: 'Uploader', user: KhUser, post_id: PostId, coordinates: Coordinates) :
+	async def setBanner(self: Self, user: KhUser, post_id: PostId, coordinates: Coordinates) :
 		if round(coordinates.width / 3) != coordinates.height :
 			raise BadRequest(f'banners must be a 3x:1 rectangle. round(width / 3)({round(coordinates.width / 3)}) != height({coordinates.height})')
 
@@ -762,7 +812,7 @@ class Uploader(SqlInterface, B2Interface) :
 				image = Image(blob=await response.read())
 
 		except ClientResponseError as e :
-			raise BadGateway('unable to retrieve image from B2.', inner_exception=str(e))
+			raise BadGateway('unable to retrieve image from B2.', err=e)
 
 		# upload new banner
 		image.crop(**coordinates.dict())
@@ -800,7 +850,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 	@HttpErrorHandler('removing post')
 	@timed
-	async def deletePost(self: 'Uploader', user: KhUser, post_id: PostId) -> None :
+	async def deletePost(self: Self, user: KhUser, post_id: PostId) -> None :
 		ipost: InternalPost = await posts._get_post(post_id)
 
 		if ipost.user_id != user.user_id :

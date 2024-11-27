@@ -1,5 +1,6 @@
 import json
 from os import environ
+from typing import Optional
 
 from fastapi import FastAPI
 from psycopg_pool import AsyncConnectionPool
@@ -108,7 +109,7 @@ class VersionInfo(BaseModel) :
 
 class ServiceInfo(BaseModel) :
 	name:        str
-	pod:         str
+	pod:         Optional[str]
 	environment: Environment
 	version:     VersionInfo
 
@@ -117,7 +118,7 @@ class ServiceInfo(BaseModel) :
 def root() -> ServiceInfo :
 	return ServiceInfo(
 		name        = name,
-		pod         = environ.get('pod_name', 'none'),
+		pod         = environ.get('pod_name', None),
 		environment = environment,
 		version = VersionInfo(
 			short = short_hash,

@@ -1,4 +1,5 @@
 from typing import Dict, List, Optional, Union
+from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import UJSONResponse
@@ -6,14 +7,15 @@ from fastapi.responses import UJSONResponse
 from posts.models import PostId
 from shared.server import NoContentResponse, Request
 from shared.timing import timed
+from shared.utilities.units import Byte
 
 from .models import CreateRequest, IconRequest, PrivacyRequest, UpdateRequest
 from .uploader import Uploader
 
 
 app = APIRouter(
-	prefix='/v1/upload',
-	tags=['upload'],
+	prefix = '/v1/upload',
+	tags   = ['upload'],
 )
 uploader = Uploader()
 
@@ -44,9 +46,9 @@ async def v1CreatePost(req: Request, body: CreateRequest) :
 async def v1UploadImage(req: Request, file: UploadFile = File(None), post_id: PostId = Form(None), web_resize: Optional[int] = Form(None)) :
 	"""
 	FORMDATA: {
-		"post_id": Optional[str],
-		"file": image file,
-		"web_resize": Optional[bool],
+		"post_id":    Optional[str],
+		"file":       image file,
+		"web_resize": Optional[int],
 	}
 	"""
 	await req.user.authenticated()
@@ -89,13 +91,20 @@ async def v1UploadImage(req: Request, file: UploadFile = File(None), post_id: Po
 		return UJSONResponse({ 'detail': detail }, status_code=422)
 
 	assert file.filename
+	file_on_disk: str = f'images/{uuid4().hex}_{file.filename}'
+
+	with open(file_on_disk, 'wb') as f :
+		while chunk := await file.read(Byte.kilobyte.value * 10) :
+			f.write(chunk)
+
+	await file.close()
 
 	return await uploader.uploadImage(
-		user=req.user,
-		file_data=file.file.read(),
-		filename=file.filename,
-		post_id=PostId(post_id),
-		web_resize=web_resize,
+		user         = req.user,
+		file_on_disk = file_on_disk,
+		filename     = file.filename,
+		post_id      = PostId(post_id),
+		web_resize   = web_resize,
 	)
 
 
