@@ -1,5 +1,4 @@
 from asyncio import Task, ensure_future
-from datetime import datetime
 from enum import Enum
 from io import BytesIO
 from os import makedirs, path, remove
@@ -24,6 +23,7 @@ from shared.auth import KhUser
 from shared.backblaze import B2Interface
 from shared.base64 import b64decode
 from shared.caching.key_value_store import KeyValueStore
+from shared.datetime import datetime
 from shared.exceptions.http_error import BadGateway, BadRequest, Forbidden, HttpErrorHandler, InternalServerError, NotFound
 from shared.models import InternalUser
 from shared.sql import SqlInterface, Transaction
@@ -255,13 +255,13 @@ class Uploader(SqlInterface, B2Interface) :
 		assert isinstance(draft, int)
 
 		post: InternalPost = InternalPost(
-			post_id=0,
-			user_id=user.user_id,
-			rating=explicit,
-			privacy=draft,
-			created=datetime.now(),
-			updated=datetime.now(),
-			size=None,
+			post_id = 0,
+			user_id = user.user_id,
+			rating  = explicit,
+			privacy = draft,
+			created = datetime.now(),
+			updated = datetime.now(),
+			size    = None,
 		)
 
 		if reply_to :
