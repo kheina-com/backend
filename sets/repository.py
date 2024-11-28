@@ -72,9 +72,9 @@ class Sets(SqlInterface, Hashable) :
 				l.last,
 				l.index
 			FROM kheina.public.sets
-				INNER JOIN f
+				LEFT JOIN f
 					ON true
-				INNER JOIN l
+				LEFT JOIN l
 					ON true
 			WHERE sets.set_id = %s;
 			""",

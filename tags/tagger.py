@@ -292,7 +292,7 @@ class Tagger(Tags) :
 			t = await tt
 			tg[t.group.name].append(self.portable(t))
 
-		return TagGroups(**tg)
+		return TagGroups(**{ k: sorted(v, key=lambda t : t.tag) for k, v in tg.items() })
 
 
 	@HttpErrorHandler('fetching tag blocklist')
@@ -309,7 +309,7 @@ class Tagger(Tags) :
 			t = await tt
 			tg[t.group.name].append(t)
 
-		return TagGroups(**tg)
+		return TagGroups(**{ k: sorted(v, key=lambda t : t.tag) for k, v in tg.items() })
 
 
 	@HttpErrorHandler('updating tag blocklist')

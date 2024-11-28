@@ -1,18 +1,17 @@
 from asyncio import Task, ensure_future, wait
 from collections import defaultdict
-from enum import Enum
-from typing import Dict, List, Literal, Optional, Self, Tuple, Union, get_args
+from typing import Optional, Self, Tuple, Union
 
 from posts.models import InternalPost, MediaType, Post, PostId, PostSize, Privacy, Rating
 from posts.repository import Posts, privacy_map
 from shared.auth import KhUser, Scope
 from shared.caching import AerospikeCache, ArgsCache
 from shared.datetime import datetime
-from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
-from shared.hashing import Hashable
+from shared.exceptions.http_error import BadRequest, Conflict, HttpErrorHandler, NotFound
 from shared.models.user import UserPrivacy
-from shared.sql import SqlInterface
+from shared.timing import timed
 from users.repository import Users
+from psycopg.errors import UniqueViolation
 
 from .models import InternalSet, PostSet, Set, SetId, SetNeighbors, UpdateSetRequest
 from .repository import SetKVS, SetNotFound, Sets  # type: ignore
@@ -142,7 +141,7 @@ class Sets(Sets) :
 
 
 	@HttpErrorHandler('creating a set')
-	async def create_set(self: Self, user: KhUser, title: str, privacy: UserPrivacy, description: Optional[str]) -> Set :
+	async def create_set(self: Self, user: KhUser, title: str, privacy: Privacy, description: Optional[str]) -> Set :
 		set_id: SetId
 
 		while True :
@@ -205,9 +204,9 @@ class Sets(Sets) :
 		if not Sets._verify_authorized(user, iset) :
 			raise NotFound(SetNotFound.format(set_id=set_id))
 
-		params: List[Union[str, UserPrivacy, int, None]] = []
-		bad_mask: List[str] = []
-		query: List[str] = []
+		params: list[Union[str, Privacy, int, None]] = []
+		bad_mask: list[str] = []
+		query: list[str] = []
 
 		for m in req.mask :
 
@@ -260,7 +259,8 @@ class Sets(Sets) :
 		ensure_future(SetKVS.put_async(set_id, iset))
 
 
-	@HttpErrorHandler('deleting a set')
+	@timed
+	# @HttpErrorHandler('deleting a set')
 	async def delete_set(self: Self, user: KhUser, set_id: SetId) -> None :
 		iset: InternalSet = await self._get_set(set_id)
 
@@ -271,6 +271,9 @@ class Sets(Sets) :
 		await SetKVS.remove_async(set_id)
 
 
+	@HttpErrorHandler('adding post to set', handlers={
+		UniqueViolation: (Conflict, 'post already exists within set'),
+	})
 	async def add_post_to_set(self: Self, user: KhUser, post_id: PostId, set_id: SetId, index: int) -> None :
 		iset_task: Task[InternalSet] = ensure_future(self._get_set(set_id))
 		ipost: InternalPost = await posts._get_post(post_id)
@@ -301,8 +304,7 @@ class Sets(Sets) :
 			SELECT
 				%s, %s, i.index
 			FROM i;
-			""",
-			(
+			""", (
 				index, set_id.int(),
 				set_id.int(),
 				set_id.int(), post_id.int(),
@@ -350,9 +352,9 @@ class Sets(Sets) :
 		ensure_future(SetKVS.put_async(set_id, iset))
 
 
-	async def get_post_sets(self: Self, user: KhUser, post_id: PostId) -> List[PostSet] :
+	async def get_post_sets(self: Self, user: KhUser, post_id: PostId) -> list[PostSet] :
 		neighbor_range: int = 3  # const
-		data: List[Tuple[
+		data: list[Tuple[
 			int, int, Optional[str], Optional[str], int, datetime, datetime,  # set
 			int, int,  # post index
 			int, Optional[str], Optional[str], int, int, datetime, datetime, Optional[str], int, int, int, int, int,  # posts
@@ -414,27 +416,29 @@ class Sets(Sets) :
 				l.last,
 				l.index
 			FROM post_sets
-				INNER JOIN kheina.public.set_post
+				LEFT JOIN kheina.public.set_post
 					ON set_post.set_id = post_sets.set_id
 					AND set_post.index BETWEEN post_sets.index - %s AND post_sets.index + %s
 					AND set_post.index != post_sets.index
-				INNER JOIN kheina.public.posts
+				LEFT JOIN kheina.public.posts
 					ON posts.post_id = set_post.post_id
 				INNER JOIN f
 					ON f.set_id = post_sets.set_id
 				INNER JOIN l
 					ON l.set_id = post_sets.set_id
-			""",
-			(
+			""", (
 				post_id.int(),
 				neighbor_range, neighbor_range,
 			),
 			fetch_all=True,
 		)
 
+		print('==> data:', data)
+		print('==> post_id:', post_id.int())
+
 		# both tuples are formatted: index, object. set is the index of the parent post. posts is index of the neighbors
-		isets: List[Tuple[int, InternalSet]] = []
-		iposts: Dict[int, List[Tuple[int, InternalPost]]] = defaultdict(lambda : [])
+		isets: list[Tuple[int, InternalSet]] = []
+		iposts: dict[int, list[Tuple[int, InternalPost]]] = defaultdict(lambda : [])
 
 		sets_made: set = set()
 		for row in data :
@@ -456,38 +460,40 @@ class Sets(Sets) :
 					),
 				))
 
-			iposts[row[0]].append((
-				row[8],
-				InternalPost(
-					post_id=row[9],
-					title=row[10],
-					description=row[11],
-					rating=row[12],
-					parent=row[13],
-					created=row[14],
-					updated=row[15],
-					filename=row[16],
-					media_type=row[17],
-					size=PostSize(
-						width=row[18],
-						height=row[19],
-					) if row[18] and row[19] else None,
-					user_id=row[20],
-					privacy=row[21],
-				),
-			))
+			if row[9] :
+				# in case there are no other posts in the sets
+				iposts[row[0]].append((
+					row[8],
+					InternalPost(
+						post_id=row[9],
+						title=row[10],
+						description=row[11],
+						rating=row[12],
+						parent=row[13],
+						created=row[14],
+						updated=row[15],
+						filename=row[16],
+						media_type=row[17],
+						size=PostSize(
+							width=row[18],
+							height=row[19],
+						) if row[18] and row[19] else None,
+						user_id=row[20],
+						privacy=row[21],
+					),
+				))
 
 		# again, this is index, set task
-		allowed: List[Tuple[int, Task[Set]]] = [
+		allowed: list[Tuple[int, Task[Set]]] = [
 			(index, ensure_future(self.set(iset, user))) for index, iset in isets if await self.authorized(iset, user)
 		]
 
-		sets: List[PostSet] = []
+		sets: list[PostSet] = []
 
 		for index, set_task in allowed :
 			s: Set = await set_task
-			before: Task[List[Post]] = ensure_future(posts.posts(list(map(lambda x : x[1], sorted(filter(lambda x : x[0] < index, iposts[s.set_id.int()]), key=lambda x : x[0], reverse=True))), user))
-			after: Task[List[Post]] = ensure_future(posts.posts(list(map(lambda x : x[1], sorted(filter(lambda x : x[0] > index, iposts[s.set_id.int()]), key=lambda x : x[0], reverse=False))), user))
+			before: Task[list[Post]] = ensure_future(posts.posts(list(map(lambda x : x[1], sorted(filter(lambda x : x[0] < index, iposts[s.set_id.int()]), key=lambda x : x[0], reverse=True))), user))
+			after: Task[list[Post]] = ensure_future(posts.posts(list(map(lambda x : x[1], sorted(filter(lambda x : x[0] > index, iposts[s.set_id.int()]), key=lambda x : x[0], reverse=False))), user))
 			sets.append(
 				PostSet(
 					set_id=s.set_id,
@@ -511,10 +517,11 @@ class Sets(Sets) :
 		return sets
 
 
-	async def get_user_sets(self: Self, user: KhUser, handle: str) -> List[Set] :
-		owner: int = await users._handle_to_user_id(handle)
+	@timed
+	async def get_user_sets(self: Self, user: KhUser, handle: Optional[str]) -> list[Set] :
+		owner: int = user.user_id if handle is None else await users._handle_to_user_id(handle)
 		# TODO: MISSING FINAL SELECT
-		data: List[Tuple[
+		data: list[Tuple[
 			int, int, Optional[str], Optional[str], int, datetime, datetime, # set
 			int, int, # first
 			int, int, # last
@@ -561,18 +568,17 @@ class Sets(Sets) :
 				l.last,
 				l.index
 			FROM user_sets
-				INNER JOIN f
+				LEFT JOIN f
 					ON true
-				INNER JOIN l
+				LEFT JOIN l
 					ON true;
-			""",
-			(owner,),
+			""", (
+				owner,
+			),
 			fetch_all=True,
 		)
 
-
-
-		isets: List[InternalSet] = [
+		isets: list[InternalSet] = [
 			InternalSet(
 				set_id=row[0],
 				owner=row[1],
@@ -588,7 +594,7 @@ class Sets(Sets) :
 			for row in data
 		]
 
-		sets: List[Task[Set]] = [
+		sets: list[Task[Set]] = [
 			ensure_future(self.set(iset, user)) for iset in isets if await self.authorized(iset, user)
 		]
 
