@@ -1,21 +1,20 @@
-from asyncio import Task, ensure_future, wait
-from collections import defaultdict
+from asyncio import Task, ensure_future
 from enum import Enum
-from typing import Dict, List, Optional, Self, Tuple, Union
+from typing import Optional, Self, Tuple, Union
 
-from posts.models import InternalPost, MediaType, Post, PostId, PostSize, Privacy, Rating
+from posts.models import InternalPost, Post, PostId, Privacy
 from posts.repository import Posts, privacy_map
 from shared.auth import KhUser, Scope
 from shared.caching import AerospikeCache, ArgsCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.datetime import datetime
-from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
+from shared.exceptions.http_error import NotFound
 from shared.hashing import Hashable
-from shared.models import InternalUser, UserPortable, UserPrivacy
+from shared.models import InternalUser, UserPrivacy
 from shared.sql import SqlInterface
 from users.repository import Users
 
-from .models import InternalSet, PostSet, Set, SetId, SetNeighbors, UpdateSetRequest
+from .models import InternalSet, Set, SetId
 
 
 SetNotFound: str = 'no data was found for the provided set id: {set_id}.'
@@ -77,8 +76,11 @@ class Sets(SqlInterface, Hashable) :
 				LEFT JOIN l
 					ON true
 			WHERE sets.set_id = %s;
-			""",
-			(set_id.int(), set_id.int(), set_id.int()),
+			""", (
+				set_id.int(),
+				set_id.int(),
+				set_id.int(),
+			),
 			fetch_one=True,
 		)
 
@@ -93,9 +95,9 @@ class Sets(SqlInterface, Hashable) :
 			privacy=data[3],
 			created=data[4],
 			updated=data[5],
-			first=PostId(data[6]),
-			last=PostId(data[7]),
-			count=data[8] + 1,  # set indices are 0-indexed, so add one
+			first=PostId(data[6]) if data[6] else None,
+			last=PostId(data[7]) if data[7] else None,
+			count=data[8] + 1 if data[8] else 0,  # set indices are 0-indexed, so add one
 		)
 
 

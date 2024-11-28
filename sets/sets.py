@@ -2,6 +2,8 @@ from asyncio import Task, ensure_future, wait
 from collections import defaultdict
 from typing import Optional, Self, Tuple, Union
 
+from psycopg.errors import UniqueViolation
+
 from posts.models import InternalPost, MediaType, Post, PostId, PostSize, Privacy, Rating
 from posts.repository import Posts, privacy_map
 from shared.auth import KhUser, Scope
@@ -11,7 +13,6 @@ from shared.exceptions.http_error import BadRequest, Conflict, HttpErrorHandler,
 from shared.models.user import UserPrivacy
 from shared.timing import timed
 from users.repository import Users
-from psycopg.errors import UniqueViolation
 
 from .models import InternalSet, PostSet, Set, SetId, SetNeighbors, UpdateSetRequest
 from .repository import SetKVS, SetNotFound, Sets  # type: ignore

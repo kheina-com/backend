@@ -1,7 +1,8 @@
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum, IntEnum
-from typing import Any, Callable, Dict
+from traceback import format_tb
+from typing import Any, Callable
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -15,7 +16,7 @@ from . import getFullyQualifiedClassName
 crc = CRC(32)
 
 
-_conversions: Dict[type, Callable] = {
+_conversions: dict[type, Callable] = {
 	datetime: str,
 	Decimal: float,
 	float: float,
@@ -47,6 +48,11 @@ _conversions: Dict[type, Callable] = {
 	},
 	BaseModel: lambda x : json_stream(x.dict()),
 	bytes: bytes.hex,
+	BaseException: lambda e : {
+		'error': f'{getFullyQualifiedClassName(e)}: {e}',
+		'stacktrace': list(map(str.strip, format_tb(e.__traceback__))),
+		**json_stream(e.__dict__),
+	},
 }
 
 

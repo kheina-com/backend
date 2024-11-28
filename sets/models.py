@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, conint, conlist, constr, validator
 
 from posts.models import Post, PostIdValidator, _post_id_converter
 from shared.exceptions.http_error import UnprocessableEntity
-from shared.models._shared import PostId, SetId, SetIdValidator, UserPortable, Privacy
+from shared.models._shared import PostId, Privacy, SetId, SetIdValidator, UserPortable
 from shared.sql.query import Table
 
 

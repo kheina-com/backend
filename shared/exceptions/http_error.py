@@ -103,6 +103,7 @@ def HttpErrorHandler(message: str, exclusions: Iterable[str] = ['self'], handler
 							f'{message} has not been implemented.',
 							refid = refid,
 							logdata = logdata,
+							err = e,
 						)
 
 					case ClientError() :
@@ -110,12 +111,14 @@ def HttpErrorHandler(message: str, exclusions: Iterable[str] = ['self'], handler
 							f'{ServiceUnavailable.__name__}: received an invalid response from an upstream server while {message}.',
 							refid = refid,
 							logdata = logdata,
+							err = e,
 						)
 
 				raise InternalServerError(
 					f'an unexpected error occurred while {message}.',
 					refid = refid,
 					logdata = logdata,
+					err = e,
 				)
 
 		wrapper._is_coroutine = _is_coroutine # type: ignore
