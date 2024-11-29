@@ -187,6 +187,7 @@ class Tags(SqlInterface) :
 				await BlockingKVS.remove_async(f'tags.{user_id}')
 
 
+	@timed
 	@AerospikeCache('kheina', 'tags', 'freq.{user_id}', TTL_days=1, _kvs=TagKVS)
 	async def _frequently_used(self, user_id: int) -> list[InternalTag] :
 		data: list[tuple[str, str, bool, Optional[int]]] = await self.query_async("""

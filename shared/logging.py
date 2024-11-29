@@ -197,6 +197,7 @@ class LogHandler(logging.Handler) :
 
 	def __init__(self, name: str, *args, structs: list[type] = [dict, list, tuple], **kwargs: Any) -> None :
 		super().__init__(*args, **kwargs)
+		self._name = name
 		self._structs = tuple(structs)
 		if LogHandler.logging_available :
 			self.agent = GkeAgent(name)
