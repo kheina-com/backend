@@ -207,7 +207,7 @@ class LogHandler(logging.Handler) :
 
 	def emit(self, record: logging.LogRecord) -> None :
 		if record.args and isinstance(record.msg, str) :
-			record.msg = record.msg % record.args
+			record.msg = record.msg % tuple(map(str, map(json_stream, record.args)))
 
 		if record.exc_info :
 			e: BaseException = record.exc_info[1] # type: ignore

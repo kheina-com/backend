@@ -569,7 +569,9 @@ class Uploader(SqlInterface, B2Interface) :
 
 		update: bool         = False
 		post:   InternalPost = await posts._get_post(post_id)
-		print('post:', post)
+		self.logger.debug({
+			'post': post,
+		})
 
 		if post.user_id != user.user_id :
 			raise Forbidden('You are not allowed to modify this resource.')

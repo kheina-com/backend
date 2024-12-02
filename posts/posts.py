@@ -571,7 +571,6 @@ class Posts(Posts) :
 	@timed
 	async def getPost(self: Self, user: KhUser, post_id: PostId) -> Post :
 		post: InternalPost = await self._get_post(post_id)
-		print('==> post:', type(post), post)
 
 		if await self.authorized(post, user) :
 			return await self.post(post, user)

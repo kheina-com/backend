@@ -163,7 +163,10 @@ class Reporting(SqlInterface) :
 
 		data = report.data.dict()
 		prev = report_data.dict()
-		print('incoming data:', data, 'prev:', prev)
+		self.logger.debug({
+			'incoming data': data,
+			'prev': prev,
+		})
 		for k, v in data.items() :
 			if prev.get(k) == v :
 				del prev[k]
