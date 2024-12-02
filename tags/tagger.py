@@ -1,6 +1,6 @@
 from asyncio import Task, ensure_future, wait
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Self, Sequence, Tuple
+from typing import Any, Iterable, Optional, Self, Sequence, Tuple
 
 import aerospike
 from psycopg.errors import NotNullViolation, UniqueViolation
@@ -15,10 +15,11 @@ from shared.maps import privacy_map
 from shared.models import UserPortable
 from shared.timing import timed
 from shared.utilities import flatten
+from shared.models import InternalUser
 from users.repository import Users
 
 from .models import InternalTag, Tag, TagGroup, TagGroups, TagPortable
-from .repository import CountKVS, TagKVS, Tags
+from .repository import TagKVS, Tags
 
 
 users = Users()
@@ -42,16 +43,37 @@ class Tagger(Tags) :
 
 	async def tag(self: Self, user: KhUser, itag: InternalTag) -> Tag :
 		owner: Task[Optional[UserPortable]] = ensure_future(self._tag_owner(user, itag))
-		tag_count: Task[int] = ensure_future(self._get_tag_count(itag.name))
+		count: Task[int] = ensure_future(self._get_tag_count(itag.name))
 		return Tag(
-			tag=itag.name,
-			owner=await owner,
-			group=itag.group,
-			deprecated=itag.deprecated,
-			inherited_tags=itag.inherited_tags,
-			description=itag.description,
-			count=await tag_count,
+			tag            = itag.name,
+			owner          = await owner,
+			group          = itag.group,
+			deprecated     = itag.deprecated,
+			inherited_tags = itag.inherited_tags,
+			description    = itag.description,
+			count          = await count,
 		)
+
+
+	async def tags(self: Self, user: KhUser, itags: list[InternalTag]) -> list[Tag] :
+		owners_task: Task[dict[int, InternalUser]] = ensure_future(users._get_users(filter(None, (t.owner for t in itags))))
+		counts_task: Task[dict[str, int]]          = ensure_future(self._get_tag_counts([t.name for t in itags]))
+
+		owners = await users.portables(user, (await owners_task).values())
+		counts = await counts_task
+
+		return [
+			Tag(
+				tag            = t.name,
+				owner          = owners[t.owner] if t.owner else None,
+				group          = t.group,
+				deprecated     = t.deprecated,
+				inherited_tags = t.inherited_tags,
+				description    = t.description,
+				count          = counts[t.name],
+			)
+			for t in itags
+		]
 
 
 	def portable(self: Self, tag: Tag) -> TagPortable :
@@ -123,7 +145,6 @@ class Tagger(Tags) :
 	@HttpErrorHandler('removing tag inheritance')
 	async def removeInheritance(self, user: KhUser, parent_tag: str, child_tag: str) :
 		await user.verify_scope(Scope.admin)
-
 		await self.query_async("""
 			DELETE FROM kheina.public.tag_inheritance
 				USING kheina.public.tags as t1,
@@ -159,8 +180,8 @@ class Tagger(Tags) :
 		if not any([name, group, owner, description, deprecated is not None]) :
 			raise BadRequest('no params were provided.')
 
-		query: List[str] = []
-		params: List[Any] = []
+		query: list[str] = []
+		params: list[Any] = []
 
 		itag = await self._fetch_tag(tag)
 
@@ -212,7 +233,7 @@ class Tagger(Tags) :
 
 
 	@AerospikeCache('kheina', 'tags', 'user.{user_id}', _kvs=TagKVS)
-	async def _fetch_user_tags(self, user_id: int) -> List[InternalTag]:
+	async def _fetch_user_tags(self, user_id: int) -> list[InternalTag]:
 		data = await self.query_async("""
 			SELECT
 				tags.tag,
@@ -252,16 +273,13 @@ class Tagger(Tags) :
 
 
 	@HttpErrorHandler('fetching user-owned tags')
-	async def fetchTagsByUser(self, user: KhUser, handle: str) -> List[Tag] :
+	async def fetchTagsByUser(self, user: KhUser, handle: str) -> list[Tag] :
 		data = await self._fetch_user_tags(await users._handle_to_user_id(handle))
 
 		if not data :
 			raise NotFound('the provided user does not exist or the user does not own any tags.', handle=handle)
 
-		tags: List[Task[Tag]] = list(map(lambda t : ensure_future(self.tag(user, t)), data))
-		await wait(tags)
-
-		return list(map(Task.result, tags))
+		return await self.tags(user, data)
 
 
 	@HttpErrorHandler('fetching tags by post')
@@ -281,16 +299,10 @@ class Tagger(Tags) :
 			# the post was found and returned, but the user shouldn't have access to it or isn't authenticated
 			raise nf
 
-		itags: list[InternalTag] = await tags_task
-		tags: list[Task[Tag]] = [
-			ensure_future(self.tag(user, t))
-			for t in itags
-		]
-
+		tags:  list[Tag] = await self.tags(user, await tags_task)
 		tg: defaultdict[str, list[TagPortable]] = defaultdict(lambda : [])
 
-		for tt in tags :
-			t = await tt
+		for t in tags :
 			tg[t.group.name].append(self.portable(t))
 
 		return TagGroups(**{ k: sorted(v, key=lambda t : t.tag) for k, v in tg.items() })
@@ -298,16 +310,10 @@ class Tagger(Tags) :
 
 	@HttpErrorHandler('fetching tag blocklist')
 	async def fetchBlockedTags(self, user: KhUser) -> TagGroups :
-		itags: list[InternalTag] = await self._user_blocked_tags(user.user_id)
-		tags: list[Task[Tag]] = [
-			ensure_future(self.tag(user, t))
-			for t in itags
-		]
-
+		tags: list[Tag] = await self.tags(user, await self._user_blocked_tags(user.user_id))
 		tg = defaultdict(lambda : [])
 
-		for tt in tags :
-			t = await tt
+		for t in tags :
 			tg[t.group.name].append(t)
 
 		return TagGroups(**{ k: sorted(v, key=lambda t : t.tag) for k, v in tg.items() })
@@ -319,7 +325,7 @@ class Tagger(Tags) :
 
 
 	@SimpleCache(60)
-	async def _pullAllTags(self) -> Dict[str, InternalTag] :
+	async def _pullAllTags(self) -> dict[str, InternalTag] :
 		data = await self.query_async("""
 			SELECT
 				tags.tag,
@@ -357,21 +363,10 @@ class Tagger(Tags) :
 
 
 	@HttpErrorHandler('looking up tags')
-	async def tagLookup(self, user: KhUser, tag: Optional[str] = None) -> List[Tag] :
+	async def tagLookup(self, user: KhUser, tag: Optional[str] = None) -> list[Tag] :
 		tag = tag or ''
-
-		tags: List[Task[Tag]] = []
-
-		for name, itag in (await self._pullAllTags()).items() :
-
-			if not name.startswith(tag) :
-				continue
-
-			tags.append(ensure_future(self.tag(user, itag)))
-
-		await wait(tags)
-
-		return list(map(Task.result, tags))
+		tags: list[Tag] = await self.tags(user, [itag for name, itag in (await self._pullAllTags()).items() if name.startswith(tag)])
+		return tags
 
 
 	@AerospikeCache('kheina', 'tags', '{tag}', _kvs=TagKVS)
@@ -423,20 +418,15 @@ class Tagger(Tags) :
 	@timed
 	@HttpErrorHandler('fetching frequently used tags')
 	async def frequentlyUsed(self, user: KhUser) -> TagGroups :
-		itags: list[InternalTag] = await self._frequently_used(user.user_id)
-		tag_tasks: list[Task[Tag]] = [
-			ensure_future(self.tag(user, t))
-			for t in itags
-		]
+		tags: list[Tag] = await self.tags(user, await self._frequently_used(user.user_id))
 
-		tags: dict[TagGroup, dict[Tag, int]] = defaultdict(lambda : defaultdict(lambda : 0))
+		groups: dict[TagGroup, dict[Tag, int]] = defaultdict(lambda : defaultdict(lambda : 0))
 
-		for tt in tag_tasks :
-			t = await tt
+		for t in tags :
 			# tg[t.group.name].append(t)
-			tags[t.group][t] += 1
+			groups[t.group][t] += 1
 
 		return TagGroups(**{
 			group.name: list(map(lambda x : self.portable(x[0]), sorted(tag_ranks.items(), key=lambda x : x[1], reverse=True)))[:(25 if group == Misc else 10)]
-			for group, tag_ranks in tags.items()
+			for group, tag_ranks in groups.items()
 		})

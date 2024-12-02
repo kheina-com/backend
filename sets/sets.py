@@ -434,9 +434,6 @@ class Sets(Sets) :
 			fetch_all=True,
 		)
 
-		print('==> data:', data)
-		print('==> post_id:', post_id.int())
-
 		# both tuples are formatted: index, object. set is the index of the parent post. posts is index of the neighbors
 		isets: list[Tuple[int, InternalSet]] = []
 		iposts: dict[int, list[Tuple[int, InternalPost]]] = defaultdict(lambda : [])

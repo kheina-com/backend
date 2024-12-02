@@ -143,6 +143,7 @@ class Posts(SqlInterface) :
 			Field('posts', 'privacy'),
 			Field('posts', 'thumbhash'),
 			Field('posts', 'locked'),
+			Field('posts', 'revision'),
 		)
 
 		return self.parse_response
@@ -186,21 +187,22 @@ class Posts(SqlInterface) :
 		assert isinstance(p, Privacy)
 
 		return Post(
-			post_id=post_id,
-			title=ipost.title,
-			description=ipost.description,
-			user=await upl_portable,
-			score=await score,
-			rating=r,
-			parent=ipost.parent,  # type: ignore
-			privacy=p,
-			created=ipost.created,
-			updated=ipost.updated,
-			filename=ipost.filename,
-			media_type=await media_type_map.get(ipost.media_type),
-			size=ipost.size,
-			blocked=await blocked,
-			thumbhash=ipost.thumbhash,  # type: ignore
+			post_id     = post_id,
+			title       = ipost.title,
+			description = ipost.description,
+			user        = await upl_portable,
+			score       = await score,
+			rating      = r,
+			parent      = ipost.parent,  # type: ignore
+			privacy     = p,
+			created     = ipost.created,
+			updated     = ipost.updated,
+			revision    = ipost.revision or 0,
+			filename    = ipost.filename,
+			media_type  = await media_type_map.get(ipost.media_type),
+			size        = ipost.size,
+			blocked     = await blocked,
+			thumbhash   = ipost.thumbhash,  # type: ignore
 		)
 
 
@@ -369,36 +371,6 @@ class Posts(SqlInterface) :
 		return False
 
 
-	@timed
-	async def following_many(self: Self, user_id: int, targets: list[int]) -> dict[int, bool] :
-		"""
-		returns a map of target user id -> following bool
-		"""
-
-		data: list[Tuple[int, int]] = await self.query_async("""
-			SELECT following.follows, count(1)
-			FROM kheina.public.following
-			WHERE following.user_id = %s
-				AND following.follows = any(%s)
-			GROUP BY following.follows;
-			""",
-			(user_id, targets),
-			fetch_all=True,
-		)
-
-		return_value: dict[int, bool] = {
-			target: False
-			for target in targets
-		}
-
-		for target, following in data :
-			following = bool(following)
-			return_value[target] = following
-			ensure_future(FollowKVS.put_async(f'{user_id}|{target}', following))
-
-		return return_value
-
-
 	def _validateVote(self: Self, vote: Optional[bool]) -> None :
 		if not isinstance(vote, (bool, type(None))) :
 			raise BadRequest('the given vote is invalid (vote value must be integer. 1 = up, -1 = down, 0 or null to remove vote)')
@@ -489,69 +461,6 @@ class Posts(SqlInterface) :
 
 
 	@timed
-	async def users_many(self, user_ids: list[int]) -> dict[int, InternalUser] :
-		data: list[tuple] = await self.query_async("""
-			SELECT
-				users.user_id,
-				users.display_name,
-				users.handle,
-				users.privacy,
-				users.icon,
-				users.website,
-				users.created,
-				users.description,
-				users.banner,
-				users.admin,
-				users.mod,
-				users.verified,
-				array_agg(user_badge.badge_id)
-			FROM kheina.public.users
-				LEFT JOIN kheina.public.user_badge
-					ON user_badge.user_id = users.user_id
-			WHERE users.user_id = any(%s)
-			GROUP BY
-				users.user_id;
-			""",
-			(user_ids,),
-			fetch_all=True,
-		)
-
-		if not data :
-			return { }
-
-		users: dict[int, InternalUser] = { }
-		for datum in data :
-			verified: Optional[Verified] = None
-
-			if datum[9] :
-				verified = Verified.admin
-
-			elif datum[10] :
-				verified = Verified.mod
-
-			elif datum[11] :
-				verified = Verified.artist
-
-			user: InternalUser = InternalUser(
-				user_id = datum[0],
-				name = datum[1],
-				handle = datum[2],
-				privacy = datum[3],
-				icon = datum[4],
-				website = datum[5],
-				created = datum[6],
-				description = datum[7],
-				banner = datum[8],
-				verified = verified,
-				badges = [await badge_map.get(i) for i in filter(None, datum[12])],
-			)
-			users[datum[0]] = user
-			ensure_future(UserKVS.put_async(str(datum[0]), user))
-
-		return users
-
-
-	@timed
 	async def _uploaders(self: Self, iposts: list[InternalPost], user: KhUser) -> dict[int, UserCombined] :
 		"""
 		returns populated user objects for every uploader id provided
@@ -559,11 +468,11 @@ class Posts(SqlInterface) :
 		:return: dict in the form user id -> populated User object
 		"""
 		uploader_ids: list[int] = list(set(map(lambda x : x.user_id, iposts)))
-		users_task: Task[dict[int, InternalUser]] = ensure_future(self.users_many(uploader_ids))
+		users_task: Task[dict[int, InternalUser]] = ensure_future(users._get_users(uploader_ids))
 		following: Mapping[int, Optional[bool]]
 
 		if await user.authenticated(False) :
-			following = await self.following_many(user.user_id, uploader_ids)
+			following = await users.following_many(user.user_id, uploader_ids)
 
 		else :
 			following = defaultdict(lambda : None)
@@ -572,14 +481,14 @@ class Posts(SqlInterface) :
 
 		return {
 			user_id: UserCombined(
-				internal=iuser,
-				portable=UserPortable(
-					name=iuser.name,
-					handle=iuser.handle,
-					privacy=users._validate_privacy(await privacy_map.get(iuser.privacy)),
-					icon=iuser.icon,
-					verified=iuser.verified,
-					following=following[user_id],
+				internal = iuser,
+				portable = UserPortable(
+					name      = iuser.name,
+					handle    = iuser.handle,
+					privacy   = users._validate_privacy(await privacy_map.get(iuser.privacy)),
+					icon      = iuser.icon,
+					verified  = iuser.verified,
+					following = following[user_id],
 				),
 			)
 			for user_id, iuser in iusers.items()
@@ -662,7 +571,6 @@ class Posts(SqlInterface) :
 		"""
 		returns a list of external post objects populated with user and other information
 		"""
-
 		uploaders_task: Task[dict[int, UserCombined]]       = ensure_future(self._uploaders(iposts, user))
 		scores_task:    Task[dict[PostId, Optional[Score]]] = ensure_future(self._scores(iposts, user))
 
@@ -691,6 +599,7 @@ class Posts(SqlInterface) :
 				privacy     = p,
 				created     = post.created,
 				updated     = post.updated,
+				revision    = post.revision or 0,
 				filename    = post.filename,
 				media_type  = await media_type_map.get(post.media_type),
 				size        = post.size,

@@ -1,4 +1,4 @@
-from typing import Optional, Self, Sequence
+from typing import Iterable, Optional, Self, Sequence
 
 from posts.models import PostId
 from shared.caching import AerospikeCache
@@ -10,8 +10,8 @@ from shared.utilities import flatten
 from .models import InternalTag, TagGroup
 
 
-CountKVS: KeyValueStore = KeyValueStore('kheina', 'tag_count')
-TagKVS: KeyValueStore = KeyValueStore('kheina', 'tags')
+CountKVS:    KeyValueStore = KeyValueStore('kheina', 'tag_count')
+TagKVS:      KeyValueStore = KeyValueStore('kheina', 'tags')
 BlockingKVS: KeyValueStore = KeyValueStore('kheina', 'blocking', local_TTL=30)
 
 
@@ -57,8 +57,9 @@ class Tags(SqlInterface) :
 		]
 
 
-	async def _populate_tag_cache(self, tag: str) -> None :
-		if not await CountKVS.exists_async(tag) :
+	async def _populate_tag_cache(self, tag: str) -> int :
+		count: int = await CountKVS.get_async(tag)
+		if count is None :
 			# we gotta populate it here (sad)
 			data = await self.query_async("""
 				SELECT COUNT(1)
@@ -69,11 +70,28 @@ class Tags(SqlInterface) :
 						ON tag_post.post_id = posts.post_id
 							AND posts.privacy = privacy_to_id('public')
 				WHERE tags.tag = %s;
-				""",
-				(tag,),
+				""", (
+					tag,
+				),
 				fetch_one=True,
 			)
-			await CountKVS.put_async(tag, int(data[0]), -1)
+			count = int(data[0])
+			await CountKVS.put_async(tag, count, -1)
+
+		return count
+
+
+	async def _get_tag_counts(self, tags: Iterable[str]) -> dict[str, int] :
+		"""
+		returns a map of tag name -> tag count
+		"""
+
+		counts = await CountKVS.get_many_async(tags)
+		for k, v in counts.items() :
+			if v is None :
+				counts[k] = await self._populate_tag_cache(v)
+
+		return counts
 
 
 	async def _get_tag_count(self, tag: str) -> int :

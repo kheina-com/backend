@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import copy
 from functools import partial
 from time import time
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union
+from typing import Any, Iterable, Optional, Set, Tuple, Type, TypeVar, Union
 
 import aerospike
 
@@ -24,8 +24,8 @@ class KeyValueStore :
 	def __init__(self: 'KeyValueStore', namespace: str, set: str, local_TTL: float = 1) :
 		if not KeyValueStore._client and not environment.is_test() :
 			config = {
-				'hosts': fetch('aerospike.hosts', List[Tuple[str, int]]),
-				'policies': fetch('aerospike.policies', Dict[str, Any]),
+				'hosts': fetch('aerospike.hosts', list[Tuple[str, int]]),
+				'policies': fetch('aerospike.policies', dict[str, Any]),
 			}
 			KeyValueStore._client = aerospike.client(config).connect()
 
@@ -89,17 +89,17 @@ class KeyValueStore :
 				raise aerospike.exception.RecordNotFound(f'Record not found: {(self._namespace, self._set, key)}')
 
 
-	def _get_many(self: 'KeyValueStore', k: Iterable[KeyType]) :
-		keys: Set[KeyType] = set(k)
-		remote_keys: Set[KeyType] = keys - self._cache.keys()
+	def _get_many[T: KeyType](self: 'KeyValueStore', k: Iterable[T]) -> dict[T, Any] :
+		keys: Set[T] = set(k)
+		remote_keys: Set[T] = keys - self._cache.keys()
 
 		if remote_keys :
-			data: List[Tuple[Any, Any, Any]] = KeyValueStore._client.get_many(list(map(lambda k : (self._namespace, self._set, k), remote_keys))) # type: ignore
-			data_map: Dict[str, Any] = { }
+			data: list[Tuple[Any, Any, Any]] = KeyValueStore._client.get_many(list(map(lambda k : (self._namespace, self._set, k), remote_keys))) # type: ignore
+			data_map: dict[T, Any] = { }
 
 			exp: float = time() + self._local_TTL
 			for datum in data :
-				key: str = datum[0][2]
+				key: T = datum[0][2]
 
 				# filter on the metadata, since it will always be populated
 				if datum[1] :
@@ -126,13 +126,13 @@ class KeyValueStore :
 
 
 	@timed
-	def get_many(self: 'KeyValueStore', keys: Iterable[KeyType]) -> Dict[KeyType, Any] :
+	def get_many[T: KeyType](self: 'KeyValueStore', keys: Iterable[T]) -> dict[T, Any] :
 		__clear_cache__(self._cache, time)
 		return self._get_many(keys)
 
 
 	@timed
-	async def get_many_async(self: 'KeyValueStore', keys: Iterable[KeyType]) -> Dict[KeyType, Any] :
+	async def get_many_async[T: KeyType](self: 'KeyValueStore', keys: Iterable[T]) -> dict[T, Any] :
 		async with self._get_many_lock :
 			with ThreadPoolExecutor() as threadpool :
 				return await get_event_loop().run_in_executor(threadpool, partial(self.get_many, keys))

@@ -1,19 +1,18 @@
 from asyncio import Task, ensure_future
-from collections import defaultdict
 from datetime import timedelta
 from math import ceil
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Iterable, Optional, Self, Tuple
 
 from sets.models import InternalSet, SetId
 from sets.repository import Sets
 from shared.auth import KhUser
-from shared.caching import AerospikeCache, ArgsCache, SimpleCache
+from shared.caching import AerospikeCache, ArgsCache
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
 from shared.sql.query import Field, Join, JoinType, Operator, Order, Query, Table, Value, Where
 from shared.timing import timed
 
-from .models import InternalPost, MediaType, Post, PostId, PostSize, PostSort, Privacy, Rating, Score, SearchResults
+from .models import InternalPost, Post, PostId, PostSort, Privacy, Rating, Score, SearchResults
 from .repository import Posts, privacy_map, rating_map, users  # type: ignore
 
 
@@ -30,24 +29,24 @@ class Posts(Posts) :
 		return tag.lower()
 
 
-	def _validatePageNumber(self, page_number: int) :
+	def _validatePageNumber(self: Self, page_number: int) :
 		if page_number < 1 :
 			raise BadRequest(f'the given page number is invalid: {page_number}. page number must be greater than or equal to 1.', page_number=page_number)
 
 
-	def _validateCount(self, count: int) :
+	def _validateCount(self: Self, count: int) :
 		if not 1 <= count <= 1000 :
 			raise BadRequest(f'the given count is invalid: {count}. count must be between 1 and 1000.', count=count)
 
 
 	@HttpErrorHandler('processing vote')
-	async def vote(self, user: KhUser, post_id: str, upvote: Optional[bool]) -> Score :
+	async def vote(self: Self, user: KhUser, post_id: str, upvote: Optional[bool]) -> Score :
 		return await self._vote(user, PostId(post_id), upvote)
 
 
 	@timed
 	@AerospikeCache('kheina', 'tag_count', '{tag}', TTL_seconds=-1, local_TTL=600)
-	async def post_count(self, tag: str) -> int :
+	async def post_count(self: Self, tag: str) -> int :
 		"""
 		use '_' to indicate total public posts.
 		use the format '@{user_id}' to get the count of posts uploaded by a user
@@ -112,7 +111,7 @@ class Posts(Posts) :
 
 
 	@timed
-	async def total_results(self, tags: Iterable[str]) -> int :
+	async def total_results(self: Self, tags: Iterable[str]) -> int :
 		"""
 		returns an estimate on the total number of results available for a given query
 		"""
@@ -126,7 +125,7 @@ class Posts(Posts) :
 
 		factor: float = 1.1
 
-		counts: List[Tuple[int, bool]] = []
+		counts: list[Tuple[int, bool]] = []
 
 		for tag in tags :
 			invert: bool = False
@@ -166,7 +165,7 @@ class Posts(Posts) :
 
 	@timed
 	@ArgsCache(60)
-	async def _fetch_posts(self, sort: PostSort, tags: Optional[Tuple[str, ...]], count: int, page: int) -> List[InternalPost] :
+	async def _fetch_posts(self: Self, sort: PostSort, tags: Optional[Tuple[str, ...]], count: int, page: int) -> list[InternalPost] :
 		idk = { }
 
 		if tags :
@@ -542,7 +541,7 @@ class Posts(Posts) :
 
 	@HttpErrorHandler('fetching posts')
 	@timed
-	async def fetchPosts(self, user: KhUser, sort: PostSort, tags: Optional[List[str]], count:int=64, page:int=1) -> SearchResults :
+	async def fetchPosts(self: Self, user: KhUser, sort: PostSort, tags: Optional[list[str]], count:int=64, page:int=1) -> SearchResults :
 		self._validatePageNumber(page)
 		self._validateCount(count)
 
@@ -557,8 +556,8 @@ class Posts(Posts) :
 		else :
 			total = ensure_future(self.post_count('_'))
 
-		iposts: List[InternalPost] = await self._fetch_posts(sort, t, count, page)
-		posts:  List[Post]         = await self.posts(iposts, user)
+		iposts: list[InternalPost] = await self._fetch_posts(sort, t, count, page)
+		posts:  list[Post]         = await self.posts(iposts, user)
 
 		return SearchResults(
 			posts = posts,
@@ -570,8 +569,9 @@ class Posts(Posts) :
 
 	@HttpErrorHandler('retrieving post')
 	@timed
-	async def getPost(self, user: KhUser, post_id: PostId) -> Post :
+	async def getPost(self: Self, user: KhUser, post_id: PostId) -> Post :
 		post: InternalPost = await self._get_post(post_id)
+		print('==> post:', type(post), post)
 
 		if await self.authorized(post, user) :
 			return await self.post(post, user)
@@ -580,7 +580,7 @@ class Posts(Posts) :
 
 
 	@ArgsCache(5)
-	async def _getComments(self, post_id: PostId, sort: PostSort, count: int, page: int) -> List[InternalPost] :
+	async def _getComments(self: Self, post_id: PostId, sort: PostSort, count: int, page: int) -> list[InternalPost] :
 		# TODO: fix new and old sorts
 		data = await self.query_async(f"""
 			SELECT
@@ -620,18 +620,18 @@ class Posts(Posts) :
 
 
 	@HttpErrorHandler('retrieving comments')
-	async def fetchComments(self, user: KhUser, post_id: PostId, sort: PostSort, count: int, page: int) -> List[Post] :
+	async def fetchComments(self: Self, user: KhUser, post_id: PostId, sort: PostSort, count: int, page: int) -> list[Post] :
 		self._validatePageNumber(page)
 		self._validateCount(count)
 
 		# TODO: if there ever comes a time when there are thousands of comments on posts, this may need to be revisited.
-		posts: List[InternalPost] = await self._getComments(post_id, sort, count, page)
+		posts: list[InternalPost] = await self._getComments(post_id, sort, count, page)
 		return await self.posts(posts, user)
 
 
 	@ArgsCache(10)
 	@HttpErrorHandler('retrieving timeline posts')
-	async def timelinePosts(self, user: KhUser, count: int, page: int) -> List[Post] :
+	async def timelinePosts(self: Self, user: KhUser, count: int, page: int) -> list[Post] :
 		self._validatePageNumber(page)
 		self._validateCount(count)
 
@@ -669,14 +669,14 @@ class Posts(Posts) :
 		)
 
 		parser = self.internal_select(query)
-		posts: List[InternalPost] = parser(await self.query_async(query, fetch_all=True))
+		posts: list[InternalPost] = parser(await self.query_async(query, fetch_all=True))
 
 		return await self.posts(posts, user)
 
 
 	@ArgsCache(10)
 	@HttpErrorHandler('generating RSS feed')
-	async def RssFeedPosts(self, user: KhUser) -> Tuple[datetime, List[Post]]:
+	async def RssFeedPosts(self: Self, user: KhUser) -> Tuple[datetime, list[Post]]:
 		now = datetime.now()
 
 		query = Query(
@@ -712,21 +712,21 @@ class Posts(Posts) :
 		)
 
 		parser = self.internal_select(query)
-		posts: List[InternalPost] = parser(await self.query_async(query, fetch_all=True))
+		posts: list[InternalPost] = parser(await self.query_async(query, fetch_all=True))
 
 		return now, await self.posts(posts, user)
 
 
 	@HttpErrorHandler('retrieving user posts')
-	async def fetchUserPosts(self, user: KhUser, handle: str, count: int, page: int) -> SearchResults :
+	async def fetchUserPosts(self: Self, user: KhUser, handle: str, count: int, page: int) -> SearchResults :
 		handle = handle.lower()
 		self._validatePageNumber(page)
 		self._validateCount(count)
 
 		tags: Tuple[str] = (f'@{handle}',)
 		total: Task[int] = ensure_future(self.total_results(tags))
-		iposts: List[InternalPost] = await self._fetch_posts(PostSort.new, tags, count, page)
-		posts: List[Post] = await self.posts(iposts, user)
+		iposts: list[InternalPost] = await self._fetch_posts(PostSort.new, tags, count, page)
+		posts: list[Post] = await self.posts(iposts, user)
 
 		return SearchResults(
 			posts=posts,
@@ -736,7 +736,7 @@ class Posts(Posts) :
 		)
 
 
-	async def _fetch_own_posts(self, user_id: int, sort: PostSort, count: int, page: int) -> List[InternalPost] :
+	async def _fetch_own_posts(self: Self, user_id: int, sort: PostSort, count: int, page: int) -> list[InternalPost] :
 		query = Query(
 			Table('kheina.public.posts')
 		).join(
@@ -793,17 +793,17 @@ class Posts(Posts) :
 
 	@HttpErrorHandler("retrieving user's own posts")
 	@ArgsCache(5)
-	async def fetchOwnPosts(self, user: KhUser, sort: PostSort, count: int, page: int) -> List[Post] :
+	async def fetchOwnPosts(self: Self, user: KhUser, sort: PostSort, count: int, page: int) -> list[Post] :
 		self._validatePageNumber(page)
 		self._validateCount(count)
 
-		posts: List[InternalPost] = await self._fetch_own_posts(user.user_id, sort, count, page)
+		posts: list[InternalPost] = await self._fetch_own_posts(user.user_id, sort, count, page)
 		return await self.posts(posts, user)
 
 
 	@HttpErrorHandler("retrieving user's drafts")
 	@ArgsCache(5)
-	async def fetchDrafts(self, user: KhUser) -> List[Post] :
+	async def fetchDrafts(self: Self, user: KhUser) -> list[Post] :
 		query = Query(
 			Table('kheina.public.posts')
 		).join(
@@ -834,6 +834,6 @@ class Posts(Posts) :
 		)
 
 		parser = self.internal_select(query)
-		posts: List[InternalPost] = parser(await self.query_async(query, fetch_all=True))
+		posts: list[InternalPost] = parser(await self.query_async(query, fetch_all=True))
 
 		return await self.posts(posts, user)

@@ -111,7 +111,7 @@ def timed(root, key_format = None) :
 		start:     Callable[[Optional[Execution], Optional[str]], float]
 		completed: Callable[[float], None]
 
-		name = f'{func.__module__}.{func.__qualname__}'
+		name = f'{func.__module__}.{getattr(func, "__qualname__", func.__class__.__name__)}'
 
 		if root :
 			def s(_: Optional[Execution], key: Optional[str] = None) -> float :

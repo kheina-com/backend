@@ -1,5 +1,6 @@
+from asyncio import ensure_future
 from datetime import datetime
-from typing import Optional, Self, Union
+from typing import Iterable, Optional, Self, Union
 
 from cache import AsyncLRU
 
@@ -13,7 +14,7 @@ from shared.sql import SqlInterface
 from shared.timing import timed
 
 
-UserKVS: KeyValueStore = KeyValueStore('kheina', 'users', local_TTL=60)
+UserKVS:   KeyValueStore = KeyValueStore('kheina', 'users', local_TTL=60)
 FollowKVS: KeyValueStore = KeyValueStore('kheina', 'following')
 
 
@@ -186,8 +187,87 @@ class Users(SqlInterface) :
 			description = data[7],
 			banner      = data[8],  # type: ignore
 			verified    = verified,
-			badges      = [await badge_map.get(i) for i in filter(None, data[12])],
+			badges = [
+				await badge_map.get(i) for i in filter(None, data[12])
+			],
 		)
+
+
+	@timed
+	async def _get_users(self, user_ids: Iterable[int]) -> dict[int, InternalUser] :
+		user_ids = list(user_ids)
+
+		if not user_ids :
+			return { }
+
+		cached = await UserKVS.get_many_async(user_ids)
+		misses = [k for k, v in cached.items() if v is None]
+
+		if not misses :
+			return cached
+
+		data: list[tuple] = await self.query_async("""
+			SELECT
+				users.user_id,
+				users.display_name,
+				users.handle,
+				users.privacy,
+				users.icon,
+				users.website,
+				users.created,
+				users.description,
+				users.banner,
+				users.admin,
+				users.mod,
+				users.verified,
+				array_agg(user_badge.badge_id)
+			FROM kheina.public.users
+				LEFT JOIN kheina.public.user_badge
+					ON user_badge.user_id = users.user_id
+			WHERE users.user_id = any(%s)
+			GROUP BY
+				users.user_id;
+			""", (
+				misses,
+			),
+			fetch_all=True,
+		)
+
+		if not data :
+			raise NotFound('not all users could be found.', user_ids=user_ids, misses=misses, cached=cached, data=data)
+
+		users: dict[int, InternalUser] = cached
+		for datum in data :
+			verified: Optional[Verified] = None
+
+			if datum[9] :
+				verified = Verified.admin
+
+			elif datum[10] :
+				verified = Verified.mod
+
+			elif datum[11] :
+				verified = Verified.artist
+
+			user: InternalUser = InternalUser(
+				user_id     = datum[0],
+				name        = datum[1],
+				handle      = datum[2],
+				privacy     = datum[3],
+				icon        = datum[4],
+				website     = datum[5],
+				created     = datum[6],
+				description = datum[7],
+				banner      = datum[8],
+				verified    = verified,
+				badges = [
+					await badge_map.get(i) for i in filter(None, datum[12])
+				],
+			)
+			users[datum[0]] = user
+			ensure_future(UserKVS.put_async(str(datum[0]), user))
+
+		return users
 
 
 	@AerospikeCache('kheina', 'user_handle_map', '{handle}', local_TTL=60)
@@ -239,6 +319,46 @@ class Users(SqlInterface) :
 		return bool(data[0])
 
 
+	@timed
+	async def following_many(self: Self, user_id: int, targets: list[int]) -> dict[int, bool] :
+		"""
+		returns a map of target user id -> following bool
+		"""
+		if not targets :
+			return { }
+
+		cached = {
+			int(k[k.rfind('|') + 1:]): v
+			for k, v in (await FollowKVS.get_many_async([f'{user_id}|{t}' for t in targets])).items()
+		}
+		misses = [k for k, v in cached.items() if v is None]
+
+		if not misses :
+			return cached
+
+		data: list[tuple[int, int]] = await self.query_async("""
+			SELECT following.follows, count(1)
+			FROM kheina.public.following
+			WHERE following.user_id = %s
+				AND following.follows = any(%s)
+			GROUP BY following.follows;
+			""", (
+				user_id,
+				misses,
+			),
+			fetch_all=True,
+		)
+
+		return_value: dict[int, bool] = cached
+
+		for target, following in data :
+			following = bool(following)
+			return_value[target] = following
+			ensure_future(FollowKVS.put_async(f'{user_id}|{target}', following))
+
+		return return_value
+
+
 	async def user(self: Self, user: KhUser, iuser: InternalUser) -> User :
 		following: Optional[bool] = None
 
@@ -262,16 +382,31 @@ class Users(SqlInterface) :
 
 	@timed
 	async def portable(self: Self, user: KhUser, iuser: InternalUser) -> UserPortable :
-		following: Optional[bool] = None
-
-		if user :
-			following = await self.following(user.user_id, iuser.user_id)
-
 		return UserPortable(
 			name      = iuser.name,
 			handle    = iuser.handle,
 			privacy   = self._validate_privacy(await privacy_map.get(iuser.privacy)),
 			icon      = iuser.icon,
 			verified  = iuser.verified,
-			following = following,
+			following = await self.following(user.user_id, iuser.user_id),
 		)
+
+
+	@timed
+	async def portables(self: Self, user: KhUser, iusers: Iterable[InternalUser]) -> dict[int, UserPortable] :
+		"""
+		returns a map of user id -> UserPortable
+		"""
+
+		following = await self.following_many(user.user_id, [iuser.user_id for iuser in iusers])
+		return {
+			iuser.user_id: UserPortable(
+				name      = iuser.name,
+				handle    = iuser.handle,
+				privacy   = self._validate_privacy(await privacy_map.get(iuser.privacy)),
+				icon      = iuser.icon,
+				verified  = iuser.verified,
+				following = following[iuser.user_id],
+			)
+			for iuser in iusers
+		}

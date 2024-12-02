@@ -1,7 +1,7 @@
 from asyncio import Lock
 from collections import OrderedDict
 from copy import copy
-from functools import wraps
+from functools import partial, wraps
 from inspect import FullArgSpec, Parameter, getfullargspec, iscoroutinefunction, signature
 from time import time
 from typing import Any, Callable, Dict, Hashable, Iterable, Optional, Tuple
@@ -181,36 +181,39 @@ def KwargsCache(TTL_seconds:float=0, TTL_minutes:float=0, TTL_hours:float=0, TTL
 	return decorator
 
 
-# def deepTypecheck(type_: type | tuple, instance: Any) -> bool :
-# 	if isinstance(type_, tuple) :
-# 		if type(instance) not in type_ :
-# 			print(instance, type(instance), type_)
-# 			return False	
+def deepTypecheck(type_: type | tuple, instance: Any) -> bool :
+	if isinstance(type_, tuple) :
+		if type(instance) not in type_ :
+			return False	
 
-# 	else :
-# 		t = getattr(type_, '__origin__', type_)
-# 		if type(instance) is not t :
-# 			print(instance, type(instance), type_)
-# 			return False
+	else :
+		t = getattr(type_, '__origin__', type_)
+		if type(instance) is not t :
+			return False
 
-# 	match instance :
-# 		case list() | tuple() :
-# 			return all(map(partial(deepTypecheck, type_.__args__), instance))  # type: ignore
+	if di := getattr(instance, '__dict__', None) :
+		if dt := getattr(type_, '__annotations__', None) :
+			if di.keys() != dt.keys() :
+				return False
 
-# 	return True
+	match instance :
+		case list() | tuple() :
+			return all(map(partial(deepTypecheck, type_.__args__), instance))  # type: ignore
+
+	return True
 
 
 def AerospikeCache(
-	namespace: str,
-	set: str,
-	key_format: str,
-	TTL_seconds: int = 0,
-	TTL_minutes: int = 0,
-	TTL_hours: int = 0,
-	TTL_days: int = 0,
-	local_TTL: float = 1,
-	read_only: bool = False,
-	_kvs: Optional[KeyValueStore] = None,
+	namespace:   str,
+	set:         str,
+	key_format:  str,
+	TTL_seconds: int                     = 0,
+	TTL_minutes: int                     = 0,
+	TTL_hours:   int                     = 0,
+	TTL_days:    int                     = 0,
+	local_TTL:   float                   = 1,
+	read_only:   bool                    = False,
+	_kvs:        Optional[KeyValueStore] = None,
 ) -> Callable :
 	"""
 	checks if data exists in aerospike before running the function. cached data is automatically type checked against the wrapped fucntion's return type
@@ -263,15 +266,9 @@ def AerospikeCache(
 					if writable :
 						await decorator.kvs.put_async(key, data, TTL)
 
-				# else :
-				# 	if not deepTypecheck(return_type, data) :
-				# 		data = await func(*args, **kwargs)
-
-				# 		if writable :
-				# 			await decorator.kvs.put_async(key, data, TTL)
-
-				else :  # this is a stopgap, we should be doing the deep type check, but that's hard
-					if isinstance(data, bytearray) :
+				else :
+					
+					if not deepTypecheck(return_type, data) :
 						data = await func(*args, **kwargs)
 
 						if writable :
@@ -295,15 +292,8 @@ def AerospikeCache(
 					if writable :
 						decorator.kvs.put(key, data, TTL)
 
-				# else :
-				# 	if not deepTypecheck(return_type, data) :
-				# 		data = func(*args, **kwargs)
-
-				# 		if writable :
-				# 			decorator.kvs.put(key, data, TTL)
-
-				else :  # this is a stopgap, we should be doing the deep type check, but that's hard
-					if isinstance(data, bytearray) :
+				else :
+					if not deepTypecheck(return_type, data) :
 						data = func(*args, **kwargs)
 
 						if writable :

@@ -118,6 +118,7 @@ class Post(BaseModel) :
 	privacy:     Privacy
 	created:     datetime
 	updated:     datetime
+	revision:    int
 	filename:    Optional[str]
 	media_type:  Optional[MediaType]
 	size:        Optional[PostSize]
@@ -160,6 +161,7 @@ class InternalPost(BaseModel) :
 	privacy:     int
 	created:     datetime           = Field(dt.zero(), description='orm:"default:now()"')
 	updated:     datetime           = Field(dt.zero(), description='orm:"default:now()"')
+	revision:    Optional[int]      = None
 	filename:    Optional[str]      = None
 	media_type:  Optional[int]      = None
 	size:        Optional[PostSize] = Field(None, description='orm:"map[width:width,height:height]"')
