@@ -6,6 +6,7 @@ from shared.caching.key_value_store import KeyValueStore
 from shared.sql import SqlInterface
 from shared.timing import timed
 from shared.utilities import flatten
+import aerospike
 
 from .models import InternalTag, TagGroup
 
@@ -58,8 +59,10 @@ class Tags(SqlInterface) :
 
 
 	async def _populate_tag_cache(self, tag: str) -> int :
-		count: int = await CountKVS.get_async(tag)
-		if count is None :
+		try :
+			return await CountKVS.get_async(tag)
+
+		except aerospike.exception.RecordNotFound :
 			# we gotta populate it here (sad)
 			data = await self.query_async("""
 				SELECT COUNT(1)
@@ -77,8 +80,7 @@ class Tags(SqlInterface) :
 			)
 			count = int(data[0])
 			await CountKVS.put_async(tag, count, -1)
-
-		return count
+			return count
 
 
 	async def _get_tag_counts(self, tags: Iterable[str]) -> dict[str, int] :
@@ -89,7 +91,7 @@ class Tags(SqlInterface) :
 		counts = await CountKVS.get_many_async(tags)
 		for k, v in counts.items() :
 			if v is None :
-				counts[k] = await self._populate_tag_cache(v)
+				counts[k] = await self._populate_tag_cache(k)
 
 		return counts
 
@@ -101,7 +103,7 @@ class Tags(SqlInterface) :
 
 	async def _increment_tag_count(self, tag: str, value: int = 1) -> None :
 		await self._populate_tag_cache(tag)
-		KeyValueStore._client.increment( # type: ignore
+		KeyValueStore._client.increment(  # type: ignore
 			(CountKVS._namespace, CountKVS._set, tag),
 			'data',
 			value,
@@ -116,7 +118,7 @@ class Tags(SqlInterface) :
 
 	async def _decrement_tag_count(self, tag: str, value: int = 1) -> None :
 		await self._populate_tag_cache(tag)
-		KeyValueStore._client.increment( # type: ignore
+		KeyValueStore._client.increment(  # type: ignore
 			(CountKVS._namespace, CountKVS._set, tag),
 			'data',
 			value * -1,

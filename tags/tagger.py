@@ -419,7 +419,6 @@ class Tagger(Tags) :
 	@HttpErrorHandler('fetching frequently used tags')
 	async def frequentlyUsed(self, user: KhUser) -> TagGroups :
 		tags: list[Tag] = await self.tags(user, await self._frequently_used(user.user_id))
-
 		groups: dict[TagGroup, dict[Tag, int]] = defaultdict(lambda : defaultdict(lambda : 0))
 
 		for t in tags :

@@ -85,6 +85,7 @@ class KeyValueStore :
 		with ThreadPoolExecutor() as threadpool :
 			try :
 				return await get_event_loop().run_in_executor(threadpool, partial(self._get, key, type))
+
 			except aerospike.exception.RecordNotFound :
 				raise aerospike.exception.RecordNotFound(f'Record not found: {(self._namespace, self._set, key)}')
 
