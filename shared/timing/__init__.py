@@ -81,13 +81,16 @@ def _get_parent(frame: Optional[FrameType]) -> Optional[Execution] :
 
 
 # it's required for timed and decorator to not be annotated otherwise it fucks up @wraps(func), don't ask me why.
-def timed(root, key_format = None) :
+def timed(root, key = None) :
 	"""
 	times the decorated function.
 
 	- if root = True, timing values are logged on completion.
 	- if root = False, timing values are stored in the root's callstack and logged upon the root's completion.
 	- if timed is used without passing root, it is assumed to be false.
+	- key can be a string or a function.
+		- if type(key) == str, args and kwargs are passed to key.format
+		- if type(key) == callable, arms and kwards are passed to key directly: key(*args, **kwargs)
 
 	`@timed.root` may be used as a shorthand for `@timed(True)`
 	`@timed.key('key')` may be used as a shorthand for `@timed(False, 'key')`
@@ -108,14 +111,29 @@ def timed(root, key_format = None) :
 		arg_spec: tuple[str, ...] = tuple(argspec.args)
 		del argspec
 
+		if key is None :
+			def fkey(*a, **kw) -> Optional[str] :
+				return None
+
+		elif isinstance(key, str) :
+			def fkey(*args, key: str, **kwargs) -> Optional[str] :
+				return key.format(**{ **kw, **dict(zip(arg_spec, args)), **kwargs })
+
+		elif callable(key) :
+			def fkey(*args, key: Callable[Any, Any, str], **kwargs) -> Optional[str] :
+				return key(*args, **kwargs)
+
+		else :
+			raise TypeError('Expected key argument to be a str, a callable, or None')
+
 		start:     Callable[[Optional[Execution], Optional[str]], float]
 		completed: Callable[[float], None]
 
 		name = f'{func.__module__}.{getattr(func, "__qualname__", func.__class__.__name__)}'
 
 		if root :
-			def s(_: Optional[Execution], key: Optional[str] = None) -> float :
-				n = f'{name}[{key}]' if key else name
+			def s(_: Optional[Execution], k: Optional[str] = None) -> float :
+				n = f'{name}[{k}]' if k else name
 				frame = _getframe().f_back
 				assert frame
 				frame.f_locals[EXEC] = Execution(n)
@@ -134,8 +152,8 @@ def timed(root, key_format = None) :
 			completed = c
 
 		else :
-			def s(parent: Optional[Execution], key: Optional[str] = None) -> float :
-				n = f'{name}[{key}]' if key else name
+			def s(parent: Optional[Execution], k: Optional[str] = None) -> float :
+				n = f'{name}[{k}]' if k else name
 				# print(f'==>    exec: {n}')
 				if not parent :
 					return time()
@@ -165,8 +183,8 @@ def timed(root, key_format = None) :
 			completed = c
 
 		if iscoroutinefunction(func) :
-			async def coro(parent: Optional[Execution], args: tuple[Any], kwargs: dict[str, Any]) -> Any :
-				s: float = start(parent, key_format.format(**{ **kw, **dict(zip(arg_spec, args)), **kwargs }) if key_format else None)
+			async def coro(parent: Optional[Execution], args: Any, kwargs: Any) -> Any :
+				s: float = start(parent, fkey(*args, key, **kwargs))
 
 				try :
 					return await func(*args, **kwargs)
@@ -188,7 +206,7 @@ def timed(root, key_format = None) :
 		else :
 			@wraps(func)
 			def wrapper(*args: Any, **kwargs: Any) -> Any :
-				s: float = start(_get_parent(_getframe()), key_format.format(**{ **kw, **dict(zip(arg_spec, args)), **kwargs }) if key_format else None)
+				s: float = start(_get_parent(_getframe()), fkey(*args, key, **kwargs))
 
 				try :
 					return func(*args, **kwargs)

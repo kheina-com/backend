@@ -557,7 +557,7 @@ class Posts(Posts) :
 			total = ensure_future(self.post_count('_'))
 
 		iposts: list[InternalPost] = await self._fetch_posts(sort, t, count, page)
-		posts:  list[Post]         = await self.posts(iposts, user)
+		posts:  list[Post]         = await self.posts(user, iposts)
 
 		return SearchResults(
 			posts = posts,
@@ -625,7 +625,7 @@ class Posts(Posts) :
 
 		# TODO: if there ever comes a time when there are thousands of comments on posts, this may need to be revisited.
 		posts: list[InternalPost] = await self._getComments(post_id, sort, count, page)
-		return await self.posts(posts, user)
+		return await self.posts(user, posts)
 
 
 	@ArgsCache(10)
@@ -670,7 +670,7 @@ class Posts(Posts) :
 		parser = self.internal_select(query)
 		posts: list[InternalPost] = parser(await self.query_async(query, fetch_all=True))
 
-		return await self.posts(posts, user)
+		return await self.posts(user, posts)
 
 
 	@ArgsCache(10)
@@ -713,7 +713,7 @@ class Posts(Posts) :
 		parser = self.internal_select(query)
 		posts: list[InternalPost] = parser(await self.query_async(query, fetch_all=True))
 
-		return now, await self.posts(posts, user)
+		return now, await self.posts(user, posts)
 
 
 	@HttpErrorHandler('retrieving user posts')
@@ -725,7 +725,7 @@ class Posts(Posts) :
 		tags: Tuple[str] = (f'@{handle}',)
 		total: Task[int] = ensure_future(self.total_results(tags))
 		iposts: list[InternalPost] = await self._fetch_posts(PostSort.new, tags, count, page)
-		posts: list[Post] = await self.posts(iposts, user)
+		posts: list[Post] = await self.posts(user, iposts)
 
 		return SearchResults(
 			posts=posts,
@@ -797,7 +797,7 @@ class Posts(Posts) :
 		self._validateCount(count)
 
 		posts: list[InternalPost] = await self._fetch_own_posts(user.user_id, sort, count, page)
-		return await self.posts(posts, user)
+		return await self.posts(user, posts)
 
 
 	@HttpErrorHandler("retrieving user's drafts")
@@ -835,4 +835,4 @@ class Posts(Posts) :
 		parser = self.internal_select(query)
 		posts: list[InternalPost] = parser(await self.query_async(query, fetch_all=True))
 
-		return await self.posts(posts, user)
+		return await self.posts(user, posts)

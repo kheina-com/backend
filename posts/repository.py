@@ -11,14 +11,14 @@ from shared.caching.key_value_store import KeyValueStore
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, NotFound
 from shared.maps import privacy_map
-from shared.models import InternalUser, UserPortable, Verified
+from shared.models import InternalUser, UserPortable
 from shared.sql import SqlInterface
 from shared.sql.query import Field, Query
 from shared.timing import timed
 from shared.utilities import flatten
-from tags.models import InternalTag, TagGroups
-from tags.repository import Tags
-from users.repository import FollowKVS, UserKVS, Users, badge_map
+from tags.models import InternalTag, TagGroup
+from tags.repository import Tags, TagKVS
+from users.repository import Users
 
 from .blocking import is_post_blocked
 from .models import InternalPost, InternalScore, MediaType, Post, PostId, PostSize, Privacy, Rating, Score
@@ -180,9 +180,9 @@ class Posts(SqlInterface) :
 		tags:    Task[list[InternalTag]] = ensure_future(tagger._fetch_tags_by_post(post_id))
 		score:   Task[Optional[Score]]   = ensure_future(self.getScore(user, post_id))
 
-		uploader: InternalUser = await upl
+		uploader:     InternalUser       = await upl
 		upl_portable: Task[UserPortable] = ensure_future(users.portable(user, uploader))
-		blocked: Task[bool] = ensure_future(is_post_blocked(user, uploader, flatten(await tags)))
+		blocked:      Task[bool]         = ensure_future(is_post_blocked(user, uploader, flatten(await tags)))
 
 		r = await rating_map.get(ipost.rating)
 		assert isinstance(r, Rating)
@@ -237,11 +237,16 @@ class Posts(SqlInterface) :
 
 	@timed
 	async def scores_many(self: Self, post_ids: list[PostId]) -> dict[PostId, Optional[InternalScore]] :
-		scores: dict[PostId, Optional[InternalScore]] = {
-			post_id: None
-			for post_id in post_ids
-		}
+		if not post_ids :
+			return { }
 
+		cached = await ScoreKVS.get_many_async(post_ids)
+		misses = [k for k, v in cached.items() if v is None]
+
+		if not misses :
+			return cached
+
+		scores: dict[PostId, Optional[InternalScore]] = cached
 		data: list[Tuple[int, int, int]] = await self.query_async("""
 			SELECT
 				post_scores.post_id,
@@ -250,7 +255,7 @@ class Posts(SqlInterface) :
 			FROM kheina.public.post_scores
 			WHERE post_scores.post_id = any(%s);
 			""", (
-				list(map(int, post_ids)),
+				list(map(int, misses)),
 			),
 			fetch_all=True,
 		)
@@ -295,11 +300,19 @@ class Posts(SqlInterface) :
 
 	@timed
 	async def votes_many(self: Self, user_id: int, post_ids: list[PostId]) -> dict[PostId, int] :
-		votes: dict[PostId, int] = {
-			post_id: 0
-			for post_id in post_ids
-		}
+		if not post_ids :
+			return { }
 
+		cached = {
+			PostId(k[k.rfind('|') + 1:]): v
+			for k, v in (await VoteKVS.get_many_async([f'{user_id}|{post_id}' for post_id in post_ids])).items()
+		}
+		misses = [k for k, v in cached.items() if v is None]
+
+		if not misses :
+			return cached
+
+		votes: dict[PostId, int] = cached
 		data: list[Tuple[int, int]] = await self.query_async("""
 			SELECT
 				post_votes.post_id,
@@ -309,7 +322,7 @@ class Posts(SqlInterface) :
 				AND post_votes.post_id = any(%s);
 			""", (
 				user_id,
-				list(map(int, post_ids)),
+				list(map(int, misses)),
 			),
 			fetch_all=True,
 		)
@@ -472,7 +485,7 @@ class Posts(SqlInterface) :
 
 
 	@timed
-	async def _uploaders(self: Self, iposts: list[InternalPost], user: KhUser) -> dict[int, UserCombined] :
+	async def _uploaders(self: Self, user: KhUser, iposts: list[InternalPost]) -> dict[int, UserCombined] :
 		"""
 		returns populated user objects for every uploader id provided
 
@@ -507,13 +520,12 @@ class Posts(SqlInterface) :
 
 
 	@timed
-	async def _scores(self: Self, iposts: list[InternalPost], user: KhUser) -> dict[PostId, Optional[Score]] :
+	async def _scores(self: Self, user: KhUser, iposts: list[InternalPost]) -> dict[PostId, Optional[Score]] :
 		"""
 		returns populated score objects for every post id provided
 
 		:return: dict in the form post id -> populated Score object
 		"""
-		# TODO: update all of the (post)_many functions to use get_many from the cache
 		scores: dict[PostId, Optional[Score]] = { }
 		post_ids: list[PostId] = []
 
@@ -552,43 +564,64 @@ class Posts(SqlInterface) :
 
 
 	@timed
-	async def _tags_many(self: Self, post_ids: list[PostId]) -> dict[PostId, list[str]] :
-		# TODO: it may be worth doing a more complex query here for the tag classes
-		# so that the response data can be cached for future use
-		tags: dict[PostId, list[str]] = {
-			post_id: []
-			for post_id in post_ids
-		}
-		data: list[Tuple[int, list[str]]] = await self.query_async("""
-			SELECT tag_post.post_id, array_agg(tags.tag)
+	async def _tags_many(self: Self, post_ids: list[PostId]) -> dict[PostId, list[InternalTag]] :
+		if not post_ids :
+			return { }
+
+		cached = await TagKVS.get_many_async(post_ids)
+		misses = [k for k, v in cached.items() if v is None]
+
+		if not misses :
+			return cached
+
+		tags: dict[PostId, list[InternalTag]] = defaultdict(lambda : [], cached)
+		data: list[tuple[int, str, str, bool, Optional[int]]] = await self.query_async("""
+			SELECT
+				tag_post.post_id,
+				tags.tag,
+				tag_classes.class,
+				tags.deprecated,
+				tags.owner
 			FROM kheina.public.tag_post
 				INNER JOIN kheina.public.tags
 					ON tags.tag_id = tag_post.tag_id
 						AND tags.deprecated = false
-			WHERE tag_post.post_id = any(%s)
-			GROUP BY tag_post.post_id;
-			""",
-			(list(map(int, post_ids)),),
+				INNER JOIN kheina.public.tag_classes
+					ON tag_classes.class_id = tags.class_id
+			WHERE tag_post.post_id = any(%s);
+			""", (
+				list(map(int, post_ids)),
+			),
 			fetch_all=True,
 		)
 
-		for post_id, tag_list in data :
-			tags[PostId(post_id)] = list(filter(None, tag_list))
+		for post_id, tag, group, deprecated, owner in data :
+			tags[PostId(post_id)].append(InternalTag(
+				name           = tag,
+				owner          = owner,
+				group          = TagGroup(group),
+				deprecated     = deprecated,
+				inherited_tags = [],   # in this case, we don't care about this field
+				description    = None, # in this case, we don't care about this field
+			))
+
+		for post_id, t in tags.items() :
+			ensure_future(TagKVS.put_async(f'post.{post_id}', t))
 
 		return tags
 
 
 	@timed
-	async def posts(self: Self, iposts: list[InternalPost], user: KhUser) -> list[Post] :
+	async def posts(self: Self, user: KhUser, iposts: list[InternalPost]) -> list[Post] :
 		"""
 		returns a list of external post objects populated with user and other information
 		"""
-		uploaders_task: Task[dict[int, UserCombined]]       = ensure_future(self._uploaders(iposts, user))
-		scores_task:    Task[dict[PostId, Optional[Score]]] = ensure_future(self._scores(iposts, user))
+		uploaders_task: Task[dict[int, UserCombined]]       = ensure_future(self._uploaders(user, iposts))
+		scores_task:    Task[dict[PostId, Optional[Score]]] = ensure_future(self._scores(user, iposts))
 
-		tags:      dict[PostId, list[str]]       = await self._tags_many(list(map(lambda x : PostId(x.post_id), iposts)))
-		uploaders: dict[int, UserCombined]       = await uploaders_task
-		scores:    dict[PostId, Optional[Score]] = await scores_task
+		tags:      dict[PostId, list[InternalTag]] = await self._tags_many(list(map(lambda x : PostId(x.post_id), iposts)))
+		uploaders: dict[int, UserCombined]         = await uploaders_task
+		scores:    dict[PostId, Optional[Score]]   = await scores_task
 
 		posts: list[Post] = []
 		for post in iposts :
@@ -617,7 +650,7 @@ class Posts(SqlInterface) :
 				size        = post.size,
 
 				# only the first call retrieves blocked info, all the rest should be cached and not actually await
-				blocked   = await is_post_blocked(user, uploaders[post.user_id].internal, tags[post_id]),
+				blocked   = await is_post_blocked(user, uploaders[post.user_id].internal, [t.name for t in tags[post_id]]),
 				thumbhash = post.thumbhash,  # type: ignore
 			))
 		

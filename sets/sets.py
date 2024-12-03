@@ -490,8 +490,9 @@ class Sets(Sets) :
 
 		for index, set_task in allowed :
 			s: Set = await set_task
-			before: Task[list[Post]] = ensure_future(posts.posts(list(map(lambda x : x[1], sorted(filter(lambda x : x[0] < index, iposts[s.set_id.int()]), key=lambda x : x[0], reverse=True))), user))
-			after: Task[list[Post]] = ensure_future(posts.posts(list(map(lambda x : x[1], sorted(filter(lambda x : x[0] > index, iposts[s.set_id.int()]), key=lambda x : x[0], reverse=False))), user))
+			before: Task[list[Post]] = ensure_future(posts.posts(user, list(map(lambda x : x[1], sorted(filter(lambda x : x[0] < index, iposts[s.set_id.int()]), key=lambda x : x[0], reverse=True)))))
+			after:  Task[list[Post]] = ensure_future(posts.posts(user, list(map(lambda x : x[1], sorted(filter(lambda x : x[0] > index, iposts[s.set_id.int()]), key=lambda x : x[0], reverse=False)))))
+
 			sets.append(
 				PostSet(
 					set_id=s.set_id,
@@ -518,7 +519,6 @@ class Sets(Sets) :
 	@timed
 	async def get_user_sets(self: Self, user: KhUser, handle: Optional[str]) -> list[Set] :
 		owner: int = user.user_id if handle is None else await users._handle_to_user_id(handle)
-		# TODO: MISSING FINAL SELECT
 		data: list[Tuple[
 			int, int, Optional[str], Optional[str], int, datetime, datetime, # set
 			int, int, # first
