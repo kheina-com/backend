@@ -1,7 +1,7 @@
 from asyncio import Task, ensure_future
 from enum import Enum
 from io import BytesIO
-from os import makedirs, path, remove
+from os import makedirs, path, remove, stat
 from secrets import token_bytes
 from subprocess import PIPE, Popen
 from time import time
@@ -49,6 +49,10 @@ _crc   = CRC(32)
 
 
 if not path.isdir('images') :
+	if path.exists('images') :
+		print('stat images:', stat('images'))
+		remove('images')
+
 	makedirs('images')
 
 

@@ -436,7 +436,7 @@ class Sets(Sets) :
 
 		# both tuples are formatted: index, object. set is the index of the parent post. posts is index of the neighbors
 		isets: list[Tuple[int, InternalSet]] = []
-		iposts: dict[int, list[Tuple[int, InternalPost]]] = defaultdict(lambda : [])
+		iposts: dict[int, list[Tuple[int, InternalPost]]] = defaultdict(list)
 
 		sets_made: set = set()
 		for row in data :

@@ -574,7 +574,7 @@ class Posts(SqlInterface) :
 		if not misses :
 			return cached
 
-		tags: dict[PostId, list[InternalTag]] = defaultdict(lambda : [], cached)
+		tags: dict[PostId, list[InternalTag]] = defaultdict(list, cached)
 		data: list[tuple[int, str, str, bool, Optional[int]]] = await self.query_async("""
 			SELECT
 				tag_post.post_id,

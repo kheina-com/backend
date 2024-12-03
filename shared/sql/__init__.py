@@ -24,7 +24,7 @@ _orm_attr_regex = compile(r'(col|map|pk|gen|default)(?:\[([\s\S]*?)\])?')
 
 @dataclass
 class FieldAttributes :
-	map: List[Tuple[Tuple[str, ...], str]] = dataclass_field(default_factory=lambda : [])
+	map: List[Tuple[Tuple[str, ...], str]] = dataclass_field(default_factory=list)
 	"""
 	list of paths to columns.
 	first entry of each list member is the route to the field within the model.

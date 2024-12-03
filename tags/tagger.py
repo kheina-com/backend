@@ -300,7 +300,7 @@ class Tagger(Tags) :
 			raise nf
 
 		tags:  list[Tag] = await self.tags(user, await tags_task)
-		tg: defaultdict[str, list[TagPortable]] = defaultdict(lambda : [])
+		tg: defaultdict[str, list[TagPortable]] = defaultdict(list)
 
 		for t in tags :
 			tg[t.group.name].append(self.portable(t))
@@ -311,7 +311,7 @@ class Tagger(Tags) :
 	@HttpErrorHandler('fetching tag blocklist')
 	async def fetchBlockedTags(self, user: KhUser) -> TagGroups :
 		tags: list[Tag] = await self.tags(user, await self._user_blocked_tags(user.user_id))
-		tg = defaultdict(lambda : [])
+		tg = defaultdict(list)
 
 		for t in tags :
 			tg[t.group.name].append(t)
