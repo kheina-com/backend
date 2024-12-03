@@ -116,11 +116,11 @@ def timed(root, key = None) :
 				return None
 
 		elif isinstance(key, str) :
-			def fkey(*args, key: str, **kwargs) -> Optional[str] :
+			def fkey(key: str, *args, **kwargs) -> Optional[str] :
 				return key.format(**{ **kw, **dict(zip(arg_spec, args)), **kwargs })
 
 		elif callable(key) :
-			def fkey(*args, key: Callable[Any, Any, str], **kwargs) -> Optional[str] :
+			def fkey(key: Callable[Any, Any, str], *args, **kwargs) -> Optional[str] :
 				return key(*args, **kwargs)
 
 		else :
@@ -184,7 +184,7 @@ def timed(root, key = None) :
 
 		if iscoroutinefunction(func) :
 			async def coro(parent: Optional[Execution], args: Any, kwargs: Any) -> Any :
-				s: float = start(parent, fkey(*args, key, **kwargs))
+				s: float = start(parent, fkey(key, *args, **kwargs))  # type: ignore
 
 				try :
 					return await func(*args, **kwargs)
@@ -206,7 +206,7 @@ def timed(root, key = None) :
 		else :
 			@wraps(func)
 			def wrapper(*args: Any, **kwargs: Any) -> Any :
-				s: float = start(_get_parent(_getframe()), fkey(*args, key, **kwargs))
+				s: float = start(_get_parent(_getframe()), fkey(key, *args, **kwargs))  # type: ignore
 
 				try :
 					return func(*args, **kwargs)
