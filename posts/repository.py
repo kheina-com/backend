@@ -17,7 +17,7 @@ from shared.sql.query import Field, Query
 from shared.timing import timed
 from shared.utilities import flatten
 from tags.models import InternalTag, TagGroup
-from tags.repository import Tags, TagKVS
+from tags.repository import TagKVS, Tags
 from users.repository import Users
 
 from .blocking import is_post_blocked
@@ -241,7 +241,7 @@ class Posts(SqlInterface) :
 			return { }
 
 		cached = await ScoreKVS.get_many_async(post_ids)
-		misses = [k for k, v in cached.items() if v is None]
+		misses = [PostId(k) for k, v in cached.items() if v is None]
 
 		if not misses :
 			return cached
@@ -568,8 +568,18 @@ class Posts(SqlInterface) :
 		if not post_ids :
 			return { }
 
-		cached = await TagKVS.get_many_async(post_ids)
-		misses = [k for k, v in cached.items() if v is None]
+		cached = {
+			PostId(k[k.rfind('.') + 1:]): v
+			for k, v in (await VoteKVS.get_many_async([f'post.{post_id}' for post_id in post_ids])).items()
+		}
+		misses: list[PostId] = []
+
+		for k, v in list(cached.items()) :
+			if v is not None :
+				continue
+
+			misses.append(k)
+			del cached[k]
 
 		if not misses :
 			return cached
@@ -590,7 +600,7 @@ class Posts(SqlInterface) :
 					ON tag_classes.class_id = tags.class_id
 			WHERE tag_post.post_id = any(%s);
 			""", (
-				list(map(int, post_ids)),
+				list(map(int, misses)),
 			),
 			fetch_all=True,
 		)

@@ -1,12 +1,13 @@
 from typing import Iterable, Optional, Self, Sequence
 
+import aerospike
+
 from posts.models import PostId
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.sql import SqlInterface
 from shared.timing import timed
 from shared.utilities import flatten
-import aerospike
 
 from .models import InternalTag, TagGroup
 

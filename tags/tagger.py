@@ -12,10 +12,9 @@ from shared.caching import AerospikeCache, SimpleCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadRequest, Conflict, Forbidden, HttpErrorHandler, NotFound
 from shared.maps import privacy_map
-from shared.models import UserPortable
+from shared.models import InternalUser, UserPortable
 from shared.timing import timed
 from shared.utilities import flatten
-from shared.models import InternalUser
 from users.repository import Users
 
 from .models import InternalTag, Tag, TagGroup, TagGroups, TagPortable

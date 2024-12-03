@@ -43,6 +43,7 @@ RUN apt update && \
 
 WORKDIR /app
 COPY . /app
+RUN mkdir "images"
 RUN rm -rf .venv && \
 	rm -rf credentials
 
