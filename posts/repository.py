@@ -100,25 +100,29 @@ class UserCombined:
 
 class Posts(SqlInterface) :
 
-	def parse_response(self: Self, data: list[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes, bool]]) -> list[InternalPost] :
+	def parse_response(self: Self, data: list[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes, bool, Optional[int]]]) -> list[InternalPost] :
 			posts: list[InternalPost] = []
 
 			for row in data :
 				post = InternalPost(
-					post_id=row[0],
-					title=row[1],
-					description=row[2],
-					rating=row[3],
-					parent=row[4],
-					created=row[5],
-					updated=row[6],
-					filename=row[7],
-					media_type=row[8],
-					size=PostSize(width=row[9], height=row[10]) if row[9] and row[10] else None,
-					user_id=row[11],
-					privacy=row[12],
-					thumbhash=row[13], # type: ignore
-					locked=row[14],
+					post_id     = row[0],
+					title       = row[1],
+					description = row[2],
+					rating      = row[3],
+					parent      = row[4],
+					created     = row[5],
+					updated     = row[6],
+					filename    = row[7],
+					media_type  = row[8],
+					size = PostSize(
+						width  = row[9],
+						height = row[10],
+					) if row[9] and row[10] else None,
+					user_id   = row[11],
+					privacy   = row[12],
+					thumbhash = row[13],  # type: ignore
+					locked    = row[14],
+					revision  = row[15],
 				)
 				posts.append(post)
 				ensure_future(PostKVS.put_async(post.post_id, post))
@@ -126,7 +130,7 @@ class Posts(SqlInterface) :
 			return posts
 
 
-	def internal_select(self: Self, query: Query) -> Callable[[list[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes, bool]]], list[InternalPost]] :
+	def internal_select(self: Self, query: Query) -> Callable[[list[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes, bool, Optional[int]]]], list[InternalPost]] :
 		query.select(
 			Field('posts', 'post_id'),
 			Field('posts', 'title'),
@@ -197,7 +201,7 @@ class Posts(SqlInterface) :
 			privacy     = p,
 			created     = ipost.created,
 			updated     = ipost.updated,
-			revision    = ipost.revision or 0,
+			revision    = ipost.revision,
 			filename    = ipost.filename,
 			media_type  = await media_type_map.get(ipost.media_type),
 			size        = ipost.size,
@@ -215,8 +219,9 @@ class Posts(SqlInterface) :
 				post_scores.downvotes
 			FROM kheina.public.post_scores
 			WHERE post_scores.post_id = %s;
-			""",
-			(post_id.int(),),
+			""", (
+				post_id.int(),
+			),
 			fetch_one=True,
 		)
 
@@ -224,9 +229,9 @@ class Posts(SqlInterface) :
 			return None
 
 		return InternalScore(
-			up=data[0],
-			down=data[1],
-			total=sum(data),
+			up    = data[0],
+			down  = data[1],
+			total = sum(data),
 		)
 
 
@@ -244,8 +249,9 @@ class Posts(SqlInterface) :
 				post_scores.downvotes
 			FROM kheina.public.post_scores
 			WHERE post_scores.post_id = any(%s);
-			""",
-			(list(map(int, post_ids)),),
+			""", (
+				list(map(int, post_ids)),
+			),
 			fetch_all=True,
 		)
 
@@ -255,9 +261,9 @@ class Posts(SqlInterface) :
 		for post_id, up, down in data :
 			post_id = PostId(post_id)
 			score: InternalScore = InternalScore(
-				up=up,
-				down=down,
-				total=up + down,
+				up    = up,
+				down  = down,
+				total = up + down,
 			)
 			scores[post_id] = score
 			ensure_future(ScoreKVS.put_async(post_id, score))
@@ -274,8 +280,10 @@ class Posts(SqlInterface) :
 			FROM kheina.public.post_votes
 			WHERE post_votes.user_id = %s
 				AND post_votes.post_id = %s;
-			""",
-			(user_id, post_id.int()),
+			""", (
+				user_id,
+				post_id.int(),
+			),
 			fetch_one=True,
 		)
 
@@ -291,6 +299,7 @@ class Posts(SqlInterface) :
 			post_id: 0
 			for post_id in post_ids
 		}
+
 		data: list[Tuple[int, int]] = await self.query_async("""
 			SELECT
 				post_votes.post_id,
@@ -298,8 +307,10 @@ class Posts(SqlInterface) :
 			FROM kheina.public.post_votes
 			WHERE post_votes.user_id = %s
 				AND post_votes.post_id = any(%s);
-			""",
-			(user_id, list(map(int, post_ids))),
+			""", (
+				user_id,
+				list(map(int, post_ids)),
+			),
 			fetch_all=True,
 		)
 
@@ -326,10 +337,10 @@ class Posts(SqlInterface) :
 			return None
 
 		return Score(
-			up=score.up,
-			down=score.down,
-			total=score.total,
-			user_vote=await vote,
+			up    = score.up,
+			down  = score.down,
+			total = score.total,
+			vote  = await vote,
 		)
 
 
@@ -453,10 +464,10 @@ class Posts(SqlInterface) :
 		ensure_future(VoteKVS.put_async(f'{user.user_id}|{post_id}', user_vote))
 
 		return Score(
-			up = score.up,
-			down = score.down,
+			up    = score.up,
+			down  = score.down,
 			total = score.total,
-			user_vote = user_vote,
+			vote  = user_vote,
 		)
 
 
@@ -502,6 +513,7 @@ class Posts(SqlInterface) :
 
 		:return: dict in the form post id -> populated Score object
 		"""
+		# TODO: update all of the (post)_many functions to use get_many from the cache
 		scores: dict[PostId, Optional[Score]] = { }
 		post_ids: list[PostId] = []
 
@@ -530,10 +542,10 @@ class Posts(SqlInterface) :
 			# the score may still be None, technically
 			if iscore :
 				scores[post_id] = Score(
-					up=iscore.up,
-					down=iscore.down,
-					total=iscore.total,
-					user_vote=user_votes[post_id],
+					up    = iscore.up,
+					down  = iscore.down,
+					total = iscore.total,
+					vote  = user_votes[post_id],
 				)
 
 		return scores

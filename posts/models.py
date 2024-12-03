@@ -33,10 +33,10 @@ PostIdValidator = validator('post_id', pre=True, always=True, allow_reuse=True)(
 
 
 class Score(BaseModel) :
-	up:        int
-	down:      int
-	total:     int
-	user_vote: int
+	up:    int
+	down:  int
+	total: int
+	vote:  int
 
 
 class PostSize(BaseModel) :
@@ -118,7 +118,7 @@ class Post(BaseModel) :
 	privacy:     Privacy
 	created:     datetime
 	updated:     datetime
-	revision:    int
+	revision:    Optional[int]
 	filename:    Optional[str]
 	media_type:  Optional[MediaType]
 	size:        Optional[PostSize]

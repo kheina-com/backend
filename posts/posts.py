@@ -597,7 +597,8 @@ class Posts(Posts) :
 				posts.uploader,
 				posts.privacy,
 				posts.thumbhash,
-				posts.locked
+				posts.locked,
+				posts.revision
 			FROM kheina.public.posts
 				LEFT JOIN kheina.public.post_scores
 					ON post_scores.post_id = posts.post_id
@@ -606,8 +607,7 @@ class Posts(Posts) :
 			ORDER BY post_scores.{sort.name} DESC NULLS LAST
 			LIMIT %s
 			OFFSET %s;
-			""",
-			(
+			""", (
 				post_id.int(),
 				count,
 				count * (page - 1),
