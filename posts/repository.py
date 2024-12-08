@@ -557,7 +557,7 @@ class Posts(SqlInterface) :
 					up    = iscore.up,
 					down  = iscore.down,
 					total = iscore.total,
-					vote  = user_votes[post_id],
+					vote  = user_votes[post_id] or 0,
 				)
 
 		return scores
