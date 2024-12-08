@@ -79,13 +79,6 @@ class Uploader(SqlInterface, B2Interface) :
 		self.filter_function: str = 'catrom'
 
 
-	def _convert_item(self: 'SqlInterface', item: Any) -> Any :
-		for cls in type(item).__mro__ :
-			if cls in self._conversions :
-				return self._conversions[cls](item)
-		return item
-
-
 	async def _increment_total_post_count(self: Self, value: int = 1) -> None :
 		if not await CountKVS.exists_async('_') :
 			# we gotta populate it here (sad)
