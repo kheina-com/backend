@@ -106,6 +106,7 @@ async def execSql(unlock: bool = False, file: str = '') -> None :
 	sql = SqlInterface()
 	await sql.open()
 
+	dir: str
 	async with sql.pool.connection() as conn :
 		async with conn.cursor() as cur :
 			sqllock = None
@@ -127,13 +128,12 @@ async def execSql(unlock: bool = False, file: str = '') -> None :
 				await conn.commit()
 				return
 
-			dirs = sorted(int(i) for i in listdir('db') if isdir(f'db/{i}') and i == str(isint(i)))
-			dir = ""
+			dirs = sorted(i for i in listdir('db') if isdir(f'db/{i}') and i == str(isint(i)).rjust(len(i), '0'))
 			for dir in dirs :
-				if sqllock and sqllock >= dir :
+				if sqllock and sqllock >= int(dir) :
 					continue
 
-				files = [join('db', str(dir), file) for file in sorted(listdir(join('db', str(dir))))]
+				files = [join('db', dir, file) for file in sorted(listdir(join('db', str(dir))))]
 				for file in files :
 					if not isfile(file) :
 						continue
@@ -148,7 +148,7 @@ async def execSql(unlock: bool = False, file: str = '') -> None :
 			await conn.commit()
 
 	with open('sql.lock', 'w') as f :
-		f.write(str(dir))
+		f.write(str(int(dir)))
 
 
 EmojiFontURL = r'https://github.com/PoomSmart/EmojiFonts/releases/download/15.1.0/AppleColorEmoji-HD.ttc'

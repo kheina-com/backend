@@ -17,3 +17,13 @@ foreign key (post_id)
 references public.posts(post_id)
 on delete cascade
 on update cascade;
+
+alter table public.tag_post
+drop constraint if exists tag_post_post_id_int_fkey;
+
+alter table public.tag_post
+add constraint tag_post_post_id_int_fkey
+foreign key (post_id)
+references public.posts(post_id)
+on delete cascade
+on update cascade;
