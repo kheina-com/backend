@@ -1,10 +1,11 @@
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import UJSONResponse
 
-from posts.models import PostId
+from posts.models import Media, PostId
+from shared.exceptions.http_error import UnprocessableEntity
 from shared.server import NoContentResponse, Request
 from shared.timing import timed
 from shared.utilities.units import Byte
@@ -43,7 +44,12 @@ async def v1CreatePost(req: Request, body: CreateRequest) :
 
 @app.post('/image')
 @timed.root
-async def v1UploadImage(req: Request, file: UploadFile = File(None), post_id: PostId = Form(None), web_resize: Optional[int] = Form(None)) :
+async def v1UploadImage(
+	req:        Request,
+	file:       UploadFile    = File(None),
+	post_id:    PostId        = Form(None),
+	web_resize: Optional[int] = Form(None),
+) -> Media :
 	"""
 	FORMDATA: {
 		"post_id":    Optional[str],
@@ -54,7 +60,7 @@ async def v1UploadImage(req: Request, file: UploadFile = File(None), post_id: Po
 	await req.user.authenticated()
 
 	# since it doesn't do this for us, send the proper error back
-	detail: List[Dict[str, Union[str, List[str]]]] = []
+	detail: list[dict[str, Union[str, list[str]]]] = []
 
 	if not file :
 		detail.append({
@@ -88,7 +94,7 @@ async def v1UploadImage(req: Request, file: UploadFile = File(None), post_id: Po
 		})
 
 	if detail :
-		return UJSONResponse({ 'detail': detail }, status_code=422)
+		raise UnprocessableEntity(detail=detail)
 
 	assert file.filename
 	file_on_disk: str = f'images/{uuid4().hex}_{file.filename}'

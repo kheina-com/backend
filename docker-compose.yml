@@ -36,6 +36,9 @@ services:
     command: [ "--config-file", "/etc/aerospike/aerospike.conf" ]
     ports:
       - "4000:4000"
+    ulimits:
+      memlock: -1
+      NOFILE: 15000
     volumes:
       - type: bind
         source: ./docker/aerospike

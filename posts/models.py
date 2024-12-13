@@ -1,16 +1,29 @@
 from datetime import datetime
 from enum import Enum, unique
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
+from urllib.parse import quote
 
 from pydantic import BaseModel, Field, validator
 
 from shared.base64 import b64decode, b64encode
-from shared.config.constants import environment
+from shared.config.constants import Environment, environment
 from shared.config.repo import short_hash
 from shared.datetime import datetime as dt
 from shared.models._shared import PostId, Privacy, UserPortable, _post_id_converter
 from shared.sql.query import Table
 
+
+cdn_host: Literal['https://cdn.fuzz.ly', 'http://localhost:9000/kheina-content']
+
+match environment :
+	case Environment.prod :
+		cdn_host = 'https://cdn.fuzz.ly'
+
+	case Environment.dev :
+		cdn_host = 'https://cdn.fuzz.ly'
+
+	case _ :
+		cdn_host = 'http://localhost:9000/kheina-content'
 
 @unique
 class Rating(Enum) :
@@ -103,10 +116,66 @@ def _thumbhash_converter(value: Any) -> Optional[str] :
 		return value
 
 
+@unique
+class MediaFlag(Enum) :
+	animated = 'animated'
+	video    = 'video'
+
+
+class Media(BaseModel) :
+	_thumbhash_converter = validator('thumbhash', pre=True, always=True, allow_reuse=True)(_thumbhash_converter)
+	_thumbnail_sizes = [
+		1200,
+		800,
+		400,
+		200,
+		100,
+	]
+
+	post_id:   PostId
+	updated:   datetime
+	crc:       Optional[int]
+	filename:  str
+	type:      MediaType
+	size:      PostSize
+	thumbhash: str
+	length:    int
+	flags:     list[MediaFlag] = []
+
+	# computed
+	url:        str            = ""
+	thumbnails: dict[str, str] = { }
+
+	@validator('url', pre=True, always=True)
+	def _url(cls, _, values: dict) :
+		if values['crc'] :
+			return f'{cdn_host}/{values["post_id"]}/{values["crc"]}/{quote(values["filename"])}'
+
+		return f'{cdn_host}/{values["post_id"]}/{quote(values["filename"])}'
+
+	@validator('thumbnails', pre=True, always=True)
+	def _thumbnails(cls, _, values: dict) :
+		thumbnails: dict[str, str] = { }
+		if values['crc'] :
+			thumbnails['jpeg'] = f'{cdn_host}/{values["post_id"]}/{values["crc"]}/thumbnails/{cls._thumbnail_sizes[0]}.jpg'
+			thumbnails.update({
+				str(th): f'{cdn_host}/{values["post_id"]}/{values["crc"]}/thumbnails/{th}.webp'
+				for th in cls._thumbnail_sizes
+			})
+
+		else :
+			thumbnails['jpeg'] = f'{cdn_host}/{values["post_id"]}/thumbnails/{cls._thumbnail_sizes[0]}.jpg'
+			thumbnails.update({
+				str(th): f'{cdn_host}/{values["post_id"]}/thumbnails/{th}.webp'
+				for th in cls._thumbnail_sizes
+			})
+
+		return thumbnails
+
+
 class Post(BaseModel) :
 	_post_id_validator = PostIdValidator
 	_post_id_converter = validator('parent', pre=True, always=True, allow_reuse=True)(_post_id_converter)
-	_thumbhash_converter = validator('thumbhash', pre=True, always=True, allow_reuse=True)(_thumbhash_converter)
 
 	post_id:     PostId
 	title:       Optional[str]
@@ -118,12 +187,8 @@ class Post(BaseModel) :
 	privacy:     Privacy
 	created:     datetime
 	updated:     datetime
-	revision:    Optional[int]
-	filename:    Optional[str]
-	media_type:  Optional[MediaType]
-	size:        Optional[PostSize]
+	media:       Optional[Media]
 	blocked:     bool
-	thumbhash:   Optional[str]
 
 
 class SearchResults(BaseModel) :
@@ -143,7 +208,7 @@ def _bytes_converter(value: Any) -> Optional[bytes] :
 
 
 class InternalPost(BaseModel) :
-	__table_name__: Table = Table('kheina.public.posts')
+	__table_name__: Table = Table('kheina.public.internal_posts')
 	_thumbhash_converter = validator('thumbhash', pre=True, always=True, allow_reuse=True)(_bytes_converter)
 
 	class Config:
@@ -152,21 +217,23 @@ class InternalPost(BaseModel) :
 			bytes: lambda x: b64encode(x).decode(),
 		}
 
-	post_id:     int           = Field(description='orm:"pk"')
-	title:       Optional[str] = None
-	description: Optional[str] = None
-	user_id:     int           = Field(description='orm:"col[uploader]"')
-	rating:      int
-	parent:      Optional[int] = None
-	privacy:     int
-	created:     datetime           = Field(dt.zero(), description='orm:"default:now()"')
-	updated:     datetime           = Field(dt.zero(), description='orm:"default:now()"')
-	revision:    Optional[int]      = None
-	filename:    Optional[str]      = None
-	media_type:  Optional[int]      = None
-	size:        Optional[PostSize] = Field(None, description='orm:"map[width:width,height:height]"')
-	thumbhash:   Optional[bytes]    = None
-	locked:      bool               = False
+	post_id:        int           = Field(description='orm:"pk"')
+	title:          Optional[str] = None
+	description:    Optional[str] = None
+	user_id:        int           = Field(description='orm:"col[uploader]"')
+	rating:         int
+	parent:         Optional[int] = None
+	privacy:        int
+	created:        datetime           = Field(dt.zero(), description='orm:"default:now()"')
+	updated:        datetime           = Field(dt.zero(), description='orm:"default:now()"')
+	crc:            Optional[int]      = None
+	filename:       Optional[str]      = None
+	media_type:     Optional[int]      = None
+	media_updated:  Optional[datetime] = None
+	content_length: Optional[int]      = None
+	size:           Optional[PostSize] = Field(None, description='orm:"map[width:width,height:height]"')
+	thumbhash:      Optional[bytes]    = None
+	locked:         bool               = False
 
 
 class InternalScore(BaseModel) :

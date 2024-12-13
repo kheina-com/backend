@@ -178,38 +178,38 @@ class SqlInterface :
 		if not field.field_info.description :
 			return FieldAttributes()
 
-		match = _orm_regex.search(field.field_info.description)
-		if not match :
+		m = _orm_regex.search(field.field_info.description)
+		if not m :
 			return FieldAttributes()
 
-		orm_info = match.group(1).replace(r'\"', r'"')
+		orm_info = m.group(1).replace(r'\"', r'"')
 
 		if orm_info == '-' :
 			return FieldAttributes(ignore=True)
 
 		attributes = FieldAttributes()
 		for i in orm_info.split(';') :
-			match = _orm_attr_regex.search(i)
-			if not match :
+			m = _orm_attr_regex.search(i)
+			if not m :
 				continue
 
-			attr_key = match.group(1)
-			if attr_key == 'col' :
-				attributes.column = match.group(2).strip()
+			match m.group(1) :
+				case 'col' :
+					attributes.column = m.group(2).strip()
 
-			elif attr_key == 'map' :
-				for m in match.group(2).split(',') :
-					path, col = m.split(':')
-					attributes.map.append((tuple(path.split('.')), str(col)))
+				case 'map' :
+					for mm in m.group(2).split(',') :
+						path, col = mm.split(':')
+						attributes.map.append((tuple(path.split('.')), str(col)))
 
-			elif attr_key == 'pk' :
-				attributes.primary_key = True
+				case 'pk' :
+					attributes.primary_key = True
 
-			elif attr_key == 'gen' :
-				attributes.generated = True
+				case 'gen' :
+					attributes.generated = True
 
-			elif attr_key == 'default' :
-				attributes.default = True
+				case 'default' :
+					attributes.default = True
 
 		return attributes
 
@@ -419,7 +419,7 @@ class SqlInterface :
 			attrs = SqlInterface._orm_attr_parser(field)
 			if attrs.ignore :
 				continue
-			
+
 			if attrs.primary_key :
 				pk += 1
 				sql.where(Where(

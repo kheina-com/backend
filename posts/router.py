@@ -105,9 +105,20 @@ async def v1TimelinePosts(req: Request, body: TimelineRequest) -> List[Post] :
 
 
 async def get_post_media(post: Post) -> str :
-	filename: str = f'{post.post_id}/{escape(quote(post.filename or ""))}'
+	if not post.media :
+		return ""
+
+	filename: str
+
+	if post.media.crc :
+		filename = f'{post.post_id}/{post.media.crc}/{escape(quote(post.media.filename))}'
+
+	else :
+		filename = f'{post.post_id}/{escape(quote(post.media.filename))}'
+
 	file_info = await b2.b2_get_file_info(filename)
 	assert file_info
+
 	return RssMedia.format(
 		url='https://cdn.fuzz.ly/' + filename,
 		mime_type=file_info.content_type,
@@ -127,29 +138,28 @@ async def v1Rss(req: Request) -> Response :
 	media = { }
 
 	for post in timeline :
-		if post.filename :
-			media[post.post_id] = ensure_future(get_post_media(post))
+		media[post.post_id] = ensure_future(get_post_media(post))
 
 	user = await user
 
 	return Response(
-		media_type='application/xml',
-		content=RssFeed.format(
-			description=f'RSS feed timeline for @{user.handle}',
-			pub_date=(
+		media_type = 'application/xml',
+		content    = RssFeed.format(
+			description = f'RSS feed timeline for @{user.handle}',
+			pub_date    = (
 				max(map(lambda post : post.updated, timeline))
 				if timeline else retrieved
 			).strftime(RssDateFormat),
-			last_build_date=retrieved.strftime(RssDateFormat),
-			items='\n'.join([
+			last_build_date = retrieved.strftime(RssDateFormat),
+			items           = '\n'.join([
 				RssItem.format(
-					title=RssTitle.format(escape(post.title)) if post.title else '',
-					link=f'https://fuzz.ly/p/{post.post_id}' if environment.is_prod() else f'https://dev.fuzz.ly/p/{post.post_id}',
-					description=RssDescription.format(escape(post.description)) if post.description else '',
-					user=f'https://fuzz.ly/{post.user.handle}' if environment.is_prod() else f'https://dev.fuzz.ly/{post.user.handle}',
-					created=post.created.strftime(RssDateFormat),
-					media=await media[post.post_id] if post.filename else '',
-					post_id=post.post_id,
+					title       = RssTitle.format(escape(post.title)) if post.title else '',
+					link        = f'https://fuzz.ly/p/{post.post_id}' if environment.is_prod() else f'https://dev.fuzz.ly/p/{post.post_id}',
+					description = RssDescription.format(escape(post.description)) if post.description else '',
+					user        = f'https://fuzz.ly/{post.user.handle}' if environment.is_prod() else f'https://dev.fuzz.ly/{post.user.handle}',
+					created     = post.created.strftime(RssDateFormat),
+					media       = await media[post.post_id],
+					post_id     = post.post_id,
 				) for post in timeline
 			]),
 		),
@@ -162,6 +172,7 @@ async def v1Post(req: Request, post_id: PostId) -> Post :
 	try :
 		# fastapi doesn't parse to PostId automatically, only str
 		post_id = PostId(post_id)
+
 	except ValueError as e :
 		raise UnprocessableEntity(str(e))
 

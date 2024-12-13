@@ -2,6 +2,7 @@
 venv:
 	python3 -m venv ./.venv
 	.venv/bin/python3 -m pip install -r requirements.lock --no-deps --ignore-requires-python \
+		&& go install github.com/kheina-com/go-thumbhash/cmd/thumbhash@9146e72 \
 		&& echo && echo "Done. run 'source .venv/bin/activate' to enter python virtual environment"
 
 .PHONY: lock

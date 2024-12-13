@@ -1,7 +1,7 @@
 from asyncio.coroutines import _is_coroutine  # type: ignore
 from functools import wraps
 from inspect import FullArgSpec, getfullargspec, iscoroutinefunction
-from typing import Any, Callable, Dict, Iterable, Set, Tuple, Type
+from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple, Type
 from uuid import uuid4
 
 from aiohttp import ClientError
@@ -39,6 +39,13 @@ class UnsupportedMedia(HttpError) :
 
 class UnprocessableEntity(HttpError) :
 	status: int = 422
+
+	def __init__(self, *args: Any, detail: Optional[list[dict[str, str | list[str]]]] = None, **kwargs: Any) -> None :
+		"""
+		raising this error using the `detail` kwarg will result in an exception being raised that matches fastapi's 422 response
+		"""
+		HttpError.__init__(self, *args, **kwargs)
+		self.detail: Optional[list[dict[str, str | list[str]]]] = detail
 
 
 class InternalServerError(HttpError) :

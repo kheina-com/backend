@@ -475,6 +475,19 @@ class Posts(Posts) :
 				),			
 			)
 
+		query.join(
+			Join(
+				JoinType.left,
+				Table('kheina.public.media'),
+			).where(
+				Where(
+					Field('media', 'post_id'),
+					Operator.equal,
+					Field('posts', 'post_id'),
+				),
+			),
+		)
+
 		if sort in { PostSort.new, PostSort.old } :
 
 			if tags and len(tags) == 1 and len(include_sets) == 1 :
@@ -485,6 +498,7 @@ class Posts(Posts) :
 					Order.descending_nulls_first if sort == PostSort.new else Order.ascending_nulls_last,
 				).group(
 					Field('posts', 'post_id'),
+					Field('media', 'post_id'),
 					Field('set_post', 'set_id'),
 					Field('set_post', 'index'),
 				)
@@ -495,6 +509,7 @@ class Posts(Posts) :
 					Order.descending_nulls_first if sort == PostSort.new else Order.ascending_nulls_last,
 				).group(
 					Field('posts', 'post_id'),
+					Field('media', 'post_id'),
 					Field('users', 'user_id'),
 				)
 
@@ -518,6 +533,7 @@ class Posts(Posts) :
 				),
 			).group(
 				Field('posts', 'post_id'),
+				Field('media', 'post_id'),
 				Field('post_scores', 'post_id'),
 				Field('users', 'user_id'),
 			)
@@ -580,6 +596,49 @@ class Posts(Posts) :
 
 	@ArgsCache(5)
 	async def _getComments(self: Self, post_id: PostId, sort: PostSort, count: int, page: int) -> list[InternalPost] :
+		query = Query(
+			Table('kheina.public.posts')
+		).join(
+			Join(
+				JoinType.inner,
+				Table('kheina.public.following'),
+			).where(
+				Where(
+					Field('following', 'follows'),
+					Operator.equal,
+					Field('posts', 'uploader'),
+				),
+			),
+			Join(
+				JoinType.left,
+				Table('kheina.public.media'),
+			).where(
+				Where(
+					Field('media', 'post_id'),
+					Operator.equal,
+					Field('posts', 'post_id'),
+				),
+			),
+		).where(
+			Where(
+				Field('posts', 'parent'),
+				Operator.equal,
+				Value(post_id.int()),
+			),
+			Where(
+				Field('posts', 'privacy'),
+				Operator.equal,
+				Value(await privacy_map.get(Privacy.public)),
+			),
+		).order(
+			Field('posts', 'created'),
+			Order.descending_nulls_first,
+		)
+
+		parser = self.internal_select(query)
+		return parser(await self.query_async(query, fetch_all=True))
+
+
 		# TODO: fix new and old sorts
 		data = await self.query_async(f"""
 			SELECT
@@ -652,6 +711,16 @@ class Posts(Posts) :
 					Field('posts', 'uploader'),
 				),
 			),
+			Join(
+				JoinType.left,
+				Table('kheina.public.media'),
+			).where(
+				Where(
+					Field('media', 'post_id'),
+					Operator.equal,
+					Field('posts', 'post_id'),
+				),
+			),
 		).where(
 			Where(
 				Field('posts', 'privacy'),
@@ -691,6 +760,16 @@ class Posts(Posts) :
 					Field('posts', 'uploader'),
 				),
 			),
+			Join(
+				JoinType.left,
+				Table('kheina.public.media'),
+			).where(
+				Where(
+					Field('media', 'post_id'),
+					Operator.equal,
+					Field('posts', 'post_id'),
+				),
+			),
 		).where(
 			Where(
 				Field('posts', 'privacy'),
@@ -704,6 +783,7 @@ class Posts(Posts) :
 			),
 		).group(
 			Field('posts', 'post_id'),
+			Field('media', 'post_id'),
 			Field('users', 'user_id'),
 		).order(
 			Field('posts', 'created'),
@@ -755,6 +835,16 @@ class Posts(Posts) :
 			).where(
 				Where(
 					Field('post_scores', 'post_id'),
+					Operator.equal,
+					Field('posts', 'post_id'),
+				),
+			),
+			Join(
+				JoinType.left,
+				Table('kheina.public.media'),
+			).where(
+				Where(
+					Field('media', 'post_id'),
 					Operator.equal,
 					Field('posts', 'post_id'),
 				),
@@ -814,6 +904,16 @@ class Posts(Posts) :
 					Field('posts', 'uploader'),
 					Operator.equal,
 					Field('users', 'user_id'),
+				),
+			),
+			Join(
+				JoinType.left,
+				Table('kheina.public.media'),
+			).where(
+				Where(
+					Field('media', 'post_id'),
+					Operator.equal,
+					Field('posts', 'post_id'),
 				),
 			),
 		).where(

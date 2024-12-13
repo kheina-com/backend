@@ -7,7 +7,7 @@ from fastapi.responses import UJSONResponse
 
 from ..logging import Logger, getLogger
 from .base_error import BaseError
-from .http_error import BadGateway
+from .http_error import BadGateway, UnprocessableEntity
 
 
 logger: Logger = getLogger()
@@ -23,6 +23,13 @@ def jsonErrorHandler(_: Request, e: Exception) -> UJSONResponse :
 
 	if isinstance(e, BaseError) :
 		logger.warning(error, exc_info=e)
+
+		if isinstance(e, UnprocessableEntity) and e.detail :
+			return UJSONResponse(
+				{ 'detail': e.detail },
+				status_code=status,
+			)
+
 		error['error'] = f'{e.__class__.__name__}: {e}'
 
 	elif isinstance(e, ClientError) :

@@ -1,7 +1,7 @@
 from asyncio import Task, ensure_future
 from enum import Enum
 from io import BytesIO
-from os import remove
+from os import path, remove
 from secrets import token_bytes
 from subprocess import PIPE, Popen
 from time import time
@@ -14,8 +14,8 @@ from exiftool import ExifToolAlpha as ExifTool
 from wand import resource
 from wand.image import Image
 
-from posts.models import InternalPost, Post, PostId, PostSize, Privacy, Rating
-from posts.repository import PostKVS, Posts, VoteKVS, privacy_map, rating_map
+from posts.models import InternalPost, Media, Post, PostId, PostSize, Privacy, Rating
+from posts.repository import PostKVS, Posts, VoteKVS, privacy_map, rating_map, media_type_map
 from posts.scoring import confidence
 from posts.scoring import controversial as calc_cont
 from posts.scoring import hot as calc_hot
@@ -63,14 +63,7 @@ class Uploader(SqlInterface, B2Interface) :
 			},
 		)
 		B2Interface.__init__(self, max_retries=5)
-		self.thumbnail_sizes: list[int] = [
-			# the length of the longest side, in pixels
-			1200,
-			800,
-			400,
-			200,
-			100,
-		]
+		self.thumbnail_sizes: list[int] = Media._thumbnail_sizes
 		self.web_size:        int = 1500
 		self.emoji_size:      int = 256
 		self.icon_size:       int = 400
@@ -201,6 +194,7 @@ class Uploader(SqlInterface, B2Interface) :
 				if not data[0] :
 					break
 
+			# TODO: double check the final select is necessary here on conflict
 			data: list[str] = await transaction.query_async("""
 				WITH input AS (
 					INSERT INTO kheina.public.posts
@@ -346,7 +340,7 @@ class Uploader(SqlInterface, B2Interface) :
 		post_id:      PostId,
 		emoji_name:   Optional[str] = None,
 		web_resize:   Optional[int] = None,
-	) -> dict[str, Union[Optional[str], int, dict[str, str]]] :
+	) -> Media :
 		run: str = uuid4().hex
 
 		# validate it's an actual photo
@@ -358,13 +352,13 @@ class Uploader(SqlInterface, B2Interface) :
 			self.delete_file(file_on_disk)
 			raise BadRequest('Uploaded file is not an image.')
 
-		rev: int
-		content_type: str
+		rev:       int
+		mime_type: str
 
 		try :
 			rev = crc(open(file_on_disk, 'rb').read())
 			with ExifTool() as et :
-				content_type = et.get_tag(file_on_disk, 'File:MIMEType') # type: ignore
+				mime_type = et.get_tag(file_on_disk, 'File:MIMEType') # type: ignore
 				et.execute(b'-overwrite_original_in_place', b'-ALL=', file_on_disk)
 
 		except :  # noqa: E722
@@ -373,7 +367,7 @@ class Uploader(SqlInterface, B2Interface) :
 			self.logger.exception({ 'refid': refid })
 			raise InternalServerError('Failed to strip file metadata.', refid=refid)
 
-		if content_type != self._get_mime_from_filename(filename.lower()) :
+		if mime_type != self._get_mime_from_filename(filename.lower()) :
 			self.delete_file(file_on_disk)
 			raise BadRequest('file extension does not match file type.')
 
@@ -389,7 +383,7 @@ class Uploader(SqlInterface, B2Interface) :
 				'run':          run,
 				'post':         post_id,
 				'file_on_disk': file_on_disk,
-				'content_type': content_type,
+				'content_type': mime_type,
 				'filename':     filename,
 				'web_resize':   web_resize,
 			})
@@ -405,10 +399,13 @@ class Uploader(SqlInterface, B2Interface) :
 			})
 
 			async with self.transaction() as transaction :
-				data: list[str] = await transaction.query_async("""
-					SELECT posts.filename from kheina.public.posts
-					WHERE posts.post_id = %s
-						AND uploader = %s;
+				data: tuple[Optional[str], Optional[int]] = await transaction.query_async("""
+					select media.filename, media.crc
+					from kheina.public.posts
+						left join kheina.public.media
+							on media.post_id = posts.post_id
+					where posts.post_id = %s
+						and posts.uploader = %s;
 					""", (
 						post_id.int(),
 						user.user_id,
@@ -420,7 +417,8 @@ class Uploader(SqlInterface, B2Interface) :
 				if not data :
 					raise Forbidden('the post you are trying to upload to does not belong to this account.')
 
-				old_filename: str = data[0]
+				old_filename: Optional[str] = data[0]
+				old_crc:      Optional[int] = data[1]
 				image_size: PostSize
 
 				with Image(file=open(file_on_disk, 'rb')) as image :
@@ -443,36 +441,60 @@ class Uploader(SqlInterface, B2Interface) :
 
 					del image
 
-				# optimize
-				upd: Tuple[datetime, int] = await transaction.query_async("""
-					UPDATE kheina.public.posts
-						SET updated = now(),
-							media_type = media_mime_type_to_id(%s),
-							filename = %s,
-							width = %s,
-							height = %s,
-							thumbhash = %s,
-							revision = %s
-					WHERE posts.post_id = %s
-						AND posts.uploader = %s
-					RETURNING posts.updated, media_type;
+				content_length: int = path.getsize(file_on_disk)
+				media_type:     int = await media_type_map.getId(mime_type)
+
+				# TODO: optimize
+				upd: Tuple[datetime] = await transaction.query_async("""
+					insert into kheina.public.media
+					(post_id, type, filename, length, thumbhash, width, height, crc)
+					values
+					(     %s,   %s,       %s,     %s,        %s,    %s,     %s,  %s)
+					on conflict (post_id) do update
+					set updated   = now(),
+						type      = %s,
+						filename  = %s,
+						length    = %s,
+						thumbhash = %s,
+						width     = %s,
+						height    = %s,
+						crc       = %s
+					WHERE media.post_id = %s
+					RETURNING media.updated;
 					""", (
-						content_type,
+						post_id.int(),
+						media_type,
 						filename,
+						content_length,
+						thumbhash,
 						image_size.width,
 						image_size.height,
-						thumbhash,
 						rev,
+
+						media_type,
+						filename,
+						content_length,
+						thumbhash,
+						image_size.width,
+						image_size.height,
+						rev,
+
 						post_id.int(),
-						user.user_id,
 					),
 					fetch_one=True,
 				)
 				updated: datetime = upd[0]
-				media_type = upd[1]
 
 				if old_filename :
-					await self.b2_delete_file_async(f'{post_id}/{old_filename}')
+					old_url: str
+
+					if old_crc :
+						old_url = f'{post_id}/{old_crc}/{old_filename}'
+
+					else :
+						old_url = f'{post_id}/{old_filename}'
+
+					await self.b2_delete_file_async(old_url)
 					self.logger.debug({
 						'run':     run,
 						'post':    post_id,
@@ -482,7 +504,7 @@ class Uploader(SqlInterface, B2Interface) :
 				url: str = f'{post_id}/{rev}/{filename}'
 
 				# upload fullsize
-				await self.upload_async(open(file_on_disk, 'rb').read(), url, content_type=content_type)
+				await self.upload_async(open(file_on_disk, 'rb').read(), url, content_type = mime_type)
 				self.logger.debug({
 					'run':     run,
 					'post':    post_id,
@@ -523,19 +545,25 @@ class Uploader(SqlInterface, B2Interface) :
 
 				await transaction.commit()
 
-			post.updated    = updated
-			post.media_type = media_type
-			post.size       = image_size
-			post.filename   = filename
-			post.thumbhash  = thumbhash
+			post.media_updated  = updated
+			post.filename       = filename
+			post.media_type     = media_type
+			post.thumbhash      = thumbhash
+			post.size           = image_size
+			post.content_length = content_length
+			post.crc            = rev
 			await PostKVS.put_async(post_id, post)
 
-			return {
-				'post_id':    post_id,
-				'url':        url,
-				'emoji':      emoji,
-				'thumbnails': thumbnails,
-			}
+			return Media(
+				post_id   = post_id,
+				updated   = updated,
+				filename  = filename,
+				type      = await media_type_map.get(media_type),
+				thumbhash = thumbhash,  # type: ignore
+				size      = image_size,
+				length    = content_length,
+				crc       = rev,
+			)
 
 		finally :
 			self.delete_file(file_on_disk)

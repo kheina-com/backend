@@ -21,7 +21,7 @@ from tags.repository import TagKVS, Tags
 from users.repository import Users
 
 from .blocking import is_post_blocked
-from .models import InternalPost, InternalScore, MediaType, Post, PostId, PostSize, Privacy, Rating, Score
+from .models import InternalPost, InternalScore, Media, MediaType, Post, PostId, PostSize, Privacy, Rating, Score
 from .scoring import confidence, controversial, hot
 
 
@@ -42,8 +42,9 @@ class RatingMap(SqlInterface) :
 				FROM kheina.public.ratings
 				WHERE ratings.rating_id = %s
 				LIMIT 1;
-				""",
-				(key,),
+				""", (
+					key,
+				),
 				fetch_one=True,
 			)
 
@@ -56,8 +57,9 @@ class RatingMap(SqlInterface) :
 				FROM kheina.public.ratings
 				WHERE ratings.rating = %s
 				LIMIT 1;
-				""",
-				(key,),
+				""", (
+					key,
+				),
 				fetch_one=True,
 			)
 
@@ -71,23 +73,37 @@ rating_map: RatingMap = RatingMap()
 class MediaTypeMap(SqlInterface) :
 
 	@AsyncLRU(maxsize=0)
-	async def get(self, key: Optional[int]) -> Optional[MediaType] :
-		if key is None :
-			return None
-
+	async def get(self, key: int) -> MediaType :
 		data: Tuple[str, str] = await self.query_async("""
 			SELECT file_type, mime_type
 			FROM kheina.public.media_type
 			WHERE media_type.media_type_id = %s
 			LIMIT 1;
-			""",
-			(key,),
+			""", (
+				key,
+			),
 			fetch_one=True,
 		)
 		return MediaType(
 			file_type = data[0],
 			mime_type = data[1],
 		)
+
+
+	@AsyncLRU(maxsize=0)
+	async def getId(self, mime: str) -> int :
+		data: Tuple[int] = await self.query_async("""
+			SELECT media_type_id
+			FROM kheina.public.media_type
+			WHERE media_type.mime_type = %s
+			LIMIT 1;
+			""", (
+				mime,
+			),
+			fetch_one=True,
+		)
+		return data[0]
+
 
 media_type_map: MediaTypeMap = MediaTypeMap()
 
@@ -100,10 +116,24 @@ class UserCombined:
 
 class Posts(SqlInterface) :
 
-	def parse_response(self: Self, data: list[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes, bool, Optional[int]]]) -> list[InternalPost] :
+	def parse_response(self: Self, data: list[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes, bool, Optional[int], Optional[datetime], Optional[int]]]) -> list[InternalPost] :
 			posts: list[InternalPost] = []
 
 			for row in data :
+				# media: Optional[InternalMedia] = None
+				# if row[7] and row[8] and row[16] :
+				# 	media = InternalMedia(
+				# 		post_id  = row[0],
+				# 		filename = row[7],
+				# 		type     = row[8],
+				# 		crc      = row[15],
+				# 		updated  = row[16],
+				# 		size = PostSize(
+				# 			width  = row[9],
+				# 			height = row[10],
+				# 		) if row[9] and row[10] else None,
+				# 	)
+
 				post = InternalPost(
 					post_id     = row[0],
 					title       = row[1],
@@ -118,11 +148,13 @@ class Posts(SqlInterface) :
 						width  = row[9],
 						height = row[10],
 					) if row[9] and row[10] else None,
-					user_id   = row[11],
-					privacy   = row[12],
-					thumbhash = row[13],  # type: ignore
-					locked    = row[14],
-					revision  = row[15],
+					user_id        = row[11],
+					privacy        = row[12],
+					thumbhash      = row[13],  # type: ignore
+					locked         = row[14],
+					crc            = row[15],
+					media_updated  = row[16],
+					content_length = row[17],
 				)
 				posts.append(post)
 				ensure_future(PostKVS.put_async(post.post_id, post))
@@ -130,7 +162,7 @@ class Posts(SqlInterface) :
 			return posts
 
 
-	def internal_select(self: Self, query: Query) -> Callable[[list[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes, bool, Optional[int]]]], list[InternalPost]] :
+	def internal_select(self: Self, query: Query) -> Callable[[list[Tuple[int, str, str, int, int, datetime, datetime, str, int, int, int, int, int, bytes, bool, Optional[int], Optional[datetime], Optional[int]]]], list[InternalPost]] :
 		query.select(
 			Field('posts', 'post_id'),
 			Field('posts', 'title'),
@@ -139,15 +171,17 @@ class Posts(SqlInterface) :
 			Field('posts', 'parent'),
 			Field('posts', 'created'),
 			Field('posts', 'updated'),
-			Field('posts', 'filename'),
-			Field('posts', 'media_type'),
-			Field('posts', 'width'),
-			Field('posts', 'height'),
+			Field('media', 'filename'),
+			Field('media', 'type'),
+			Field('media', 'width'),
+			Field('media', 'height'),
 			Field('posts', 'uploader'),
 			Field('posts', 'privacy'),
-			Field('posts', 'thumbhash'),
+			Field('media', 'thumbhash'),
 			Field('posts', 'locked'),
-			Field('posts', 'revision'),
+			Field('media', 'crc'),
+			Field('media', 'updated'),
+			Field('media', 'length'),
 		)
 
 		return self.parse_response
@@ -157,13 +191,13 @@ class Posts(SqlInterface) :
 	@AerospikeCache('kheina', 'posts', '{post_id}', _kvs=PostKVS)
 	async def _get_post(self: Self, post_id: PostId) -> InternalPost :
 		ipost: InternalPost = InternalPost(
-			post_id=post_id.int(),
-			user_id=-1,
-			rating=-1,
-			privacy=-1,
-			created=datetime.zero(),
-			updated=datetime.zero(),
-			size=None,
+			post_id = post_id.int(),
+			user_id = -1,
+			rating  = -1,
+			privacy = -1,
+			created = datetime.zero(),
+			updated = datetime.zero(),
+			size    = None,
 		)
 
 		try :
@@ -175,20 +209,34 @@ class Posts(SqlInterface) :
 
 	@timed
 	async def post(self: Self, ipost: InternalPost, user: KhUser) -> Post :
-		post_id: PostId                  = PostId(ipost.post_id)
-		upl:     Task[InternalUser]      = ensure_future(users._get_user(ipost.user_id))
-		tags:    Task[list[InternalTag]] = ensure_future(tagger._fetch_tags_by_post(post_id))
-		score:   Task[Optional[Score]]   = ensure_future(self.getScore(user, post_id))
+		post_id:   PostId                  = PostId(ipost.post_id)
+		upl:       Task[InternalUser]      = ensure_future(users._get_user(ipost.user_id))
+		tags_task: Task[list[InternalTag]] = ensure_future(tagger._fetch_tags_by_post(post_id))
+		score:     Task[Optional[Score]]   = ensure_future(self.getScore(user, post_id))
 
 		uploader:     InternalUser       = await upl
 		upl_portable: Task[UserPortable] = ensure_future(users.portable(user, uploader))
-		blocked:      Task[bool]         = ensure_future(is_post_blocked(user, uploader, flatten(await tags)))
+		tags:         list[InternalTag]  = await tags_task
+		blocked:      Task[bool]         = ensure_future(is_post_blocked(user, uploader, flatten(tags)))
 
 		r = await rating_map.get(ipost.rating)
 		assert isinstance(r, Rating)
 
 		p = await privacy_map.get(ipost.privacy)
 		assert isinstance(p, Privacy)
+
+		media: Optional[Media] = None
+		if ipost.filename and ipost.media_type and ipost.size and ipost.content_length :
+			media = Media(
+				post_id   = PostId(ipost.post_id),
+				crc       = ipost.crc,
+				filename  = ipost.filename,
+				type      = await media_type_map.get(ipost.media_type),
+				size      = ipost.size,
+				updated   = ipost.updated,
+				length    = ipost.content_length,
+				thumbhash = ipost.thumbhash,  # type: ignore
+			)
 
 		return Post(
 			post_id     = post_id,
@@ -201,12 +249,8 @@ class Posts(SqlInterface) :
 			privacy     = p,
 			created     = ipost.created,
 			updated     = ipost.updated,
-			revision    = ipost.revision,
-			filename    = ipost.filename,
-			media_type  = await media_type_map.get(ipost.media_type),
-			size        = ipost.size,
+			media       = media,
 			blocked     = await blocked,
-			thumbhash   = ipost.thumbhash,  # type: ignore
 		)
 
 
@@ -643,6 +687,19 @@ class Posts(SqlInterface) :
 			p = await privacy_map.get(post.privacy)
 			assert isinstance(p, Privacy)
 
+			media: Optional[Media] = None
+			if post.filename and post.media_type and post.size and post.content_length :
+				media = Media(
+					post_id   = PostId(post.post_id),
+					crc       = post.crc,
+					filename  = post.filename,
+					type      = await media_type_map.get(post.media_type),
+					size      = post.size,
+					updated   = post.updated,
+					length    = post.content_length,
+					thumbhash = post.thumbhash,  # type: ignore
+				)
+
 			posts.append(Post(
 				post_id     = post_id,
 				title       = post.title,
@@ -652,16 +709,12 @@ class Posts(SqlInterface) :
 				rating      = r,
 				parent      = post.parent, # type: ignore
 				privacy     = p,
+				media       = media,
 				created     = post.created,
 				updated     = post.updated,
-				revision    = post.revision or 0,
-				filename    = post.filename,
-				media_type  = await media_type_map.get(post.media_type),
-				size        = post.size,
 
 				# only the first call retrieves blocked info, all the rest should be cached and not actually await
 				blocked   = await is_post_blocked(user, uploaders[post.user_id].internal, [t.name for t in tags[post_id]]),
-				thumbhash = post.thumbhash,  # type: ignore
 			))
 		
 		return posts
