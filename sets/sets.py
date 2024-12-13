@@ -358,7 +358,8 @@ class Sets(Sets) :
 		data: list[Tuple[
 			int, int, Optional[str], Optional[str], int, datetime, datetime,  # set
 			int, int,  # post index
-			int, Optional[str], Optional[str], int, int, datetime, datetime, Optional[str], int, int, int, int, int,  # posts
+			int, Optional[str], Optional[str], int, int, datetime, datetime, int, int,  # posts
+			Optional[str], Optional[int], Optional[int], Optional[int], Optional[int], Optional[datetime], Optional[int],  # media
 			int, int, int, # first, last, index
 		]] = await self.query_async("""
 			WITH post_sets AS (
@@ -407,12 +408,15 @@ class Sets(Sets) :
 				posts.parent,
 				posts.created,
 				posts.updated,
-				posts.filename,
-				posts.media_type,
-				posts.width,
-				posts.height,
-				posts.uploader,
-				posts.privacy,
+				posts.uploader, -- 16
+				posts.privacy,  -- 17
+				media.filename, -- 18
+				media.type,     -- 19
+				media.width,    -- 20
+				media.height,   -- 21
+				media.crc,      -- 22
+				media.updated,  -- 23
+				media.length,   -- 24
 				f.first,
 				l.last,
 				l.index
@@ -423,6 +427,8 @@ class Sets(Sets) :
 					AND set_post.index != post_sets.index
 				LEFT JOIN kheina.public.posts
 					ON posts.post_id = set_post.post_id
+				LEFT JOIN kheina.public.media
+					ON media.post_id = posts.post_id
 				INNER JOIN f
 					ON f.set_id = post_sets.set_id
 				INNER JOIN l
@@ -445,16 +451,16 @@ class Sets(Sets) :
 				isets.append((
 					row[7],
 					InternalSet(
-						set_id=row[0],
-						owner=row[1],
-						title=row[2],
-						description=row[3],
-						privacy=row[4],
-						created=row[5],
-						updated=row[6],
-						first=PostId(row[22]),
-						last=PostId(row[23]),
-						count=row[24] + 1,
+						set_id      = row[0],
+						owner       = row[1],
+						title       = row[2],
+						description = row[3],
+						privacy     = row[4],
+						created     = row[5],
+						updated     = row[6],
+						first       = PostId(row[25]),
+						last        = PostId(row[26]),
+						count       = row[27] + 1,
 					),
 				))
 
@@ -463,21 +469,21 @@ class Sets(Sets) :
 				iposts[row[0]].append((
 					row[8],
 					InternalPost(
-						post_id=row[9],
-						title=row[10],
-						description=row[11],
-						rating=row[12],
-						parent=row[13],
-						created=row[14],
-						updated=row[15],
-						filename=row[16],
-						media_type=row[17],
-						size=PostSize(
-							width=row[18],
-							height=row[19],
-						) if row[18] and row[19] else None,
-						user_id=row[20],
-						privacy=row[21],
+						post_id     = row[9],
+						title       = row[10],
+						description = row[11],
+						rating      = row[12],
+						parent      = row[13],
+						created     = row[14],
+						updated     = row[15],
+						filename    = row[18],
+						media_type  = row[19],
+						user_id     = row[16],
+						privacy     = row[17],
+						size = PostSize(
+							width  = row[20],
+							height = row[21],
+						) if row[20] and row[21] else None,
 					),
 				))
 
@@ -490,25 +496,25 @@ class Sets(Sets) :
 
 		for index, set_task in allowed :
 			s: Set = await set_task
-			before: Task[list[Post]] = ensure_future(posts.posts(user, list(map(lambda x : x[1], sorted(filter(lambda x : x[0] < index, iposts[s.set_id.int()]), key=lambda x : x[0], reverse=True)))))
-			after:  Task[list[Post]] = ensure_future(posts.posts(user, list(map(lambda x : x[1], sorted(filter(lambda x : x[0] > index, iposts[s.set_id.int()]), key=lambda x : x[0], reverse=False)))))
+			before: Task[list[Post]] = ensure_future(posts.posts(user, list(map(lambda x : x[1], sorted(filter(lambda x : x[0] < index, iposts[s.set_id.int()]), key=lambda x : x[0], reverse = True)))))
+			after:  Task[list[Post]] = ensure_future(posts.posts(user, list(map(lambda x : x[1], sorted(filter(lambda x : x[0] > index, iposts[s.set_id.int()]), key=lambda x : x[0], reverse = False)))))
 
 			sets.append(
 				PostSet(
-					set_id=s.set_id,
-					owner=s.owner,
-					title=s.title,
-					description=s.description,
-					privacy=s.privacy,
-					created=s.created,
-					updated=s.updated,
-					count=s.count,
-					first=s.first,
-					last=s.last,
-					neighbors=SetNeighbors(
-						index=index,
-						before=await before,
-						after=await after,
+					set_id      = s.set_id,
+					owner       = s.owner,
+					title       = s.title,
+					description = s.description,
+					privacy     = s.privacy,
+					created     = s.created,
+					updated     = s.updated,
+					count       = s.count,
+					first       = s.first,
+					last        = s.last,
+					neighbors = SetNeighbors(
+						index  = index,
+						before = await before,
+						after  = await after,
 					),
 				)
 			)
