@@ -1,20 +1,24 @@
 from asyncio import ensure_future
 from html import escape
-from typing import List
+from typing import List, Optional, Union
 from urllib.parse import quote
+from uuid import uuid4
 
-from fastapi import APIRouter
+from fastapi import APIRouter, File, Form, UploadFile
 
 from shared.backblaze import B2Interface
 from shared.config.constants import environment
 from shared.exceptions.http_error import UnprocessableEntity
+from shared.models._shared import convert_path_post_id
 from shared.models.auth import Scope
 from shared.server import Request, Response
 from shared.timing import timed
+from shared.utilities.units import Byte
 from users.users import Users
 
-from .models import BaseFetchRequest, FetchCommentsRequest, FetchPostsRequest, GetUserPostsRequest, Post, PostId, RssDateFormat, RssDescription, RssFeed, RssItem, RssMedia, RssTitle, Score, SearchResults, TimelineRequest, VoteRequest
+from .models import BaseFetchRequest, CreateRequest, FetchCommentsRequest, FetchPostsRequest, GetUserPostsRequest, IconRequest, Media, Post, PostId, PrivacyRequest, RssDateFormat, RssDescription, RssFeed, RssItem, RssMedia, RssTitle, Score, SearchResults, TimelineRequest, UpdateRequest, VoteRequest
 from .posts import Posts
+from .uploader import Uploader
 
 
 postRouter = APIRouter(
@@ -24,45 +28,148 @@ postsRouter = APIRouter(
 	prefix='/posts',
 )
 
-b2 = B2Interface()
-posts = Posts()
-users = Users()
+b2       = B2Interface()
+posts    = Posts()
+users    = Users()
+uploader = Uploader()
 
 
-################################################## INTERNAL ##################################################
-# @app.get('/i1/post/{post_id}', response_model=InternalPost)
-# async def i1Post(req: Request, post_id: PostId) -> InternalPost :
-# 	await req.user.verify_scope(Scope.internal)
-# 	return await posts._get_post(PostId(post_id))
+@postRouter.put('')
+@timed.root
+async def v1CreatePost(req: Request, body: CreateRequest) -> Post :
+	"""
+	only auth required
+	"""
+	await req.user.authenticated()
+
+	if any(body.dict().values()) :
+		return await uploader.createPostWithFields(
+			req.user,
+			body.reply_to,
+			body.title,
+			body.description,
+			body.privacy,
+			body.rating,
+		)
+
+	return await uploader.createPost(req.user)
 
 
-# @app.post('/i1/user/{user_id}', response_model=List[InternalPost])
-# async def i1User(req: Request, user_id: int, body: BaseFetchRequest) -> List[InternalPost] :
-# 	await req.user.verify_scope(Scope.internal)
-# 	return await posts._fetch_own_posts(user_id, body.sort, body.count, body.page)
+@postRouter.patch('/{post_id}', status_code=204)
+@timed.root
+async def v1UpdatePost(req: Request, post_id: PostId, body: UpdateRequest) -> None :
+	await req.user.authenticated()
+	await uploader.updatePostMetadata(
+		req.user,
+		convert_path_post_id(post_id),
+		body.title,
+		body.description,
+		body.privacy,
+		body.rating,
+	)
 
 
-# @app.get('/i1/score/{post_id}', response_model=Optional[InternalScore])
-# async def i1Score(req: Request, post_id: PostId, ) -> Optional[InternalScore] :
-# 	await req.user.verify_scope(Scope.internal)
-# 	# TODO: this needs to be replaced with a model and updated above
-# 	return await posts._get_score(PostId(post_id))
+@postRouter.delete('/{post_id}', status_code=204)
+@timed.root
+async def v1DeletePost(req: Request, post_id: PostId) -> None :
+	await req.user.authenticated()
+	await posts.deletePost(req.user, convert_path_post_id(post_id))
 
 
-# @app.get('/i1/vote/{post_id}/{user_id}', response_model=int)
-# async def i1Vote(req: Request, post_id: PostId, user_id: int) -> int :
-# 	await req.user.verify_scope(Scope.internal)
-# 	# TODO: this needs to be replaced with a model and updated above
-# 	return await posts._get_vote(user_id, PostId(post_id))
+@postRouter.post('/image')
+@timed.root
+async def v1UploadImage(
+	req:        Request,
+	file:       UploadFile    = File(None),
+	post_id:    PostId        = Form(None),
+	web_resize: Optional[int] = Form(None),
+) -> Media :
+	"""
+	FORMDATA: {
+		"post_id":    Optional[str],
+		"file":       image file,
+		"web_resize": Optional[int],
+	}
+	"""
+	await req.user.authenticated()
+
+	# since it doesn't do this for us, send the proper error back
+	detail: list[dict[str, Union[str, list[str]]]] = []
+
+	if not file :
+		detail.append({
+			'loc': [
+				'body',
+				'file',
+			],
+			'msg': 'field required',
+			'type': 'value_error.missing',
+		})
+
+	if not file.filename :
+		detail.append({
+			'loc': [
+				'body',
+				'file',
+				'filename',
+			],
+			'msg': 'field required',
+			'type': 'value_error.missing',
+		})
+
+	if not post_id :
+		detail.append({
+			'loc': [
+				'body',
+				'post_id',
+			],
+			'msg': 'field required',
+			'type': 'value_error.missing',
+		})
+
+	if detail :
+		raise UnprocessableEntity(detail=detail)
+
+	assert file.filename
+	file_on_disk: str = f'images/{uuid4().hex}_{file.filename}'
+
+	with open(file_on_disk, 'wb') as f :
+		while chunk := await file.read(Byte.kilobyte.value * 10) :
+			f.write(chunk)
+
+	await file.close()
+
+	return await uploader.uploadImage(
+		user         = req.user,
+		file_on_disk = file_on_disk,
+		filename     = file.filename,
+		post_id      = PostId(post_id),
+		web_resize   = web_resize,
+	)
 
 
-##################################################  PUBLIC  ##################################################
 @postRouter.post('/vote', responses={ 200: { 'model': Score } })
 @timed.root
 async def v1Vote(req: Request, body: VoteRequest) -> Score :
 	await req.user.verify_scope(Scope.user)
 	vote = True if body.vote > 0 else False if body.vote < 0 else None
 	return await posts.vote(req.user, body.post_id, vote)
+
+
+# TODO: these should go in users tbh
+@postRouter.patch('/icon', status_code=204)
+@timed.root
+async def v1SetIcon(req: Request, body: IconRequest) -> None :
+	await req.user.authenticated()
+	await uploader.setIcon(req.user, body.post_id, body.coordinates)
+
+
+# TODO: these should go in users tbh
+@postRouter.patch('/banner', status_code=204)
+@timed.root
+async def v1SetBanner(req: Request, body: IconRequest) -> None :
+	await req.user.authenticated()
+	await uploader.setBanner(req.user, body.post_id, body.coordinates)
 
 
 @postsRouter.post('', responses={ 200: { 'model': SearchResults } })
@@ -169,14 +276,7 @@ async def v1Rss(req: Request) -> Response :
 @postRouter.get('/{post_id}', responses={ 200: { 'model': Post } })
 @timed.root
 async def v1Post(req: Request, post_id: PostId) -> Post :
-	try :
-		# fastapi doesn't parse to PostId automatically, only str
-		post_id = PostId(post_id)
-
-	except ValueError as e :
-		raise UnprocessableEntity(str(e))
-
-	return await posts.getPost(req.user, post_id)
+	return await posts.getPost(req.user, convert_path_post_id(post_id))
 
 
 app = APIRouter(

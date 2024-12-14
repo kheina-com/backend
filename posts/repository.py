@@ -208,7 +208,7 @@ class Posts(SqlInterface) :
 
 
 	@timed
-	async def post(self: Self, ipost: InternalPost, user: KhUser) -> Post :
+	async def post(self: Self, user: KhUser, ipost: InternalPost) -> Post :
 		post_id:   PostId                  = PostId(ipost.post_id)
 		upl:       Task[InternalUser]      = ensure_future(users._get_user(ipost.user_id))
 		tags_task: Task[list[InternalTag]] = ensure_future(tagger._fetch_tags_by_post(post_id))
@@ -251,6 +251,19 @@ class Posts(SqlInterface) :
 			updated     = ipost.updated,
 			media       = media,
 			blocked     = await blocked,
+		)
+
+
+	@timed
+	async def _delete_post(self: Self, post_id: PostId) -> None :
+		ensure_future(PostKVS.remove_async(post_id))
+		await self.query_async("""
+			delete from kheina.public.posts
+			where posts.post_id = %s;
+			""", (
+				post_id.int(),
+			),
+			commit=True,
 		)
 
 
@@ -402,7 +415,7 @@ class Posts(SqlInterface) :
 
 
 	@timed
-	async def authorized(self: Self, ipost: InternalPost, user: KhUser) -> bool :
+	async def authorized(self: Self, user: KhUser, ipost: InternalPost) -> bool :
 		"""
 		Checks if the given user is able to view this set. Follows the given rules:
 

@@ -588,8 +588,19 @@ class Posts(Posts) :
 	async def getPost(self: Self, user: KhUser, post_id: PostId) -> Post :
 		post: InternalPost = await self._get_post(post_id)
 
-		if await self.authorized(post, user) :
-			return await self.post(post, user)
+		if await self.authorized(user, post) :
+			return await self.post(user, post)
+
+		raise NotFound(f'no data was found for the provided post id: {post_id}.')
+
+
+	@HttpErrorHandler('deleting post')
+	@timed
+	async def deletePost(self: Self, user: KhUser, post_id: PostId) -> None :
+		post: InternalPost = await self._get_post(post_id)
+
+		if post.user_id == user.user_id :
+			return await self._delete_post(post_id)
 
 		raise NotFound(f'no data was found for the provided post id: {post_id}.')
 

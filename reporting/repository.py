@@ -90,7 +90,7 @@ class Reporting(SqlInterface) :
 	async def create(self: Self, user: KhUser, report: Report) -> Report :
 		if report.data.post :
 			ipost = await posts._get_post(report.data.post)
-			if not await posts.authorized(ipost, user) :
+			if not await posts.authorized(user, ipost) :
 				raise NotFound("the provided post does not exist or you don't have access to it.", report=report)
 
 		fp, serializer = await self._get_serializer(report.report_type.internal())

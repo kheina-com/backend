@@ -116,13 +116,13 @@ class Sets(SqlInterface, Hashable) :
 		if first_task :
 			first: Optional[InternalPost] = await first_task
 			if first :
-				first_post = await posts.post(first, user)
+				first_post = await posts.post(user, first)
 
 		last_post: Optional[Post] = None
 		if last_task :
 			last: Optional[InternalPost] = await last_task
 			if last :
-				last_post = await posts.post(last, user)
+				last_post = await posts.post(user, last)
 
 		owner: InternalUser = await owner_task
 

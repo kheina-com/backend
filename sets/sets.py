@@ -279,7 +279,7 @@ class Sets(Sets) :
 		iset_task: Task[InternalSet] = ensure_future(self._get_set(set_id))
 		ipost: InternalPost = await posts._get_post(post_id)
 
-		if not await posts.authorized(ipost, user) :
+		if not await posts.authorized(user, ipost) :
 			raise NotFound(f'no data was found for the provided post id: {post_id}.')
 
 		iset: InternalSet = await iset_task
@@ -321,7 +321,7 @@ class Sets(Sets) :
 		iset_task: Task[InternalSet] = ensure_future(self._get_set(set_id))
 		ipost: InternalPost = await posts._get_post(post_id)
 
-		if not await posts.authorized(ipost, user) :
+		if not await posts.authorized(user, ipost) :
 			raise NotFound(f'no data was found for the provided post id: {post_id}.')
 
 		iset: InternalSet = await iset_task
@@ -408,15 +408,15 @@ class Sets(Sets) :
 				posts.parent,
 				posts.created,
 				posts.updated,
-				posts.uploader, -- 16
-				posts.privacy,  -- 17
-				media.filename, -- 18
-				media.type,     -- 19
-				media.width,    -- 20
-				media.height,   -- 21
-				media.crc,      -- 22
-				media.updated,  -- 23
-				media.length,   -- 24
+				posts.uploader,
+				posts.privacy,
+				media.filename,
+				media.type,
+				media.width,
+				media.height,
+				media.crc,
+				media.updated,
+				media.length,
 				f.first,
 				l.last,
 				l.index

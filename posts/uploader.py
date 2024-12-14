@@ -14,11 +14,6 @@ from exiftool import ExifToolAlpha as ExifTool
 from wand import resource
 from wand.image import Image
 
-from posts.models import InternalPost, Media, Post, PostId, PostSize, Privacy, Rating
-from posts.repository import PostKVS, Posts, VoteKVS, privacy_map, rating_map, media_type_map
-from posts.scoring import confidence
-from posts.scoring import controversial as calc_cont
-from posts.scoring import hot as calc_hot
 from shared.auth import KhUser
 from shared.backblaze import B2Interface
 from shared.base64 import b64decode
@@ -35,7 +30,11 @@ from tags.models import InternalTag
 from tags.repository import CountKVS, Tags
 from users.repository import UserKVS, Users
 
-from .models import Coordinates
+from .models import Coordinates, InternalPost, Media, Post, PostId, PostSize, Privacy, Rating
+from .repository import PostKVS, Posts, VoteKVS, media_type_map, privacy_map, rating_map
+from .scoring import confidence
+from .scoring import controversial as calc_cont
+from .scoring import hot as calc_hot
 
 
 resource.limits.set_resource_limit('memory', Byte.megabyte.value * 512)
@@ -183,19 +182,19 @@ class Uploader(SqlInterface, B2Interface) :
 
 	@HttpErrorHandler('creating new post')
 	@timed
-	async def createPost(self: Self, user: KhUser) -> dict[str, Union[str, int]] :
-		async with self.transaction() as transaction :
-			post_id: int
+	async def createPost(self: Self, user: KhUser) -> Post :
+		async with self.transaction() as t :
+			post_id: PostId
 
 			for _ in range(100) :
-				post_id = int_from_bytes(token_bytes(6))
-				data = await transaction.query_async("SELECT count(1) FROM kheina.public.posts WHERE post_id = %s;", (post_id,), fetch_one=True)
+				post_id = PostId.generate()
+				data = await t.query_async("SELECT count(1) FROM kheina.public.posts WHERE post_id = %s;", (post_id.int(),), fetch_one=True)
 
 				if not data[0] :
 					break
 
 			# TODO: double check the final select is necessary here on conflict
-			data: list[str] = await transaction.query_async("""
+			data: list[str] = await t.query_async("""
 				WITH input AS (
 					INSERT INTO kheina.public.posts
 					(post_id, uploader, privacy)
@@ -220,12 +219,10 @@ class Uploader(SqlInterface, B2Interface) :
 				fetch_one=True,
 			)
 
-			await transaction.commit()
+			post_id = PostId(data[0])
+			await t.commit()
 
-		return {
-			'user_id': user.user_id,
-			'post_id': PostId(data[0]),
-		}
+		return await posts.post(user, await posts._get_post(post_id))
 
 
 	@HttpErrorHandler('creating populated post')
@@ -295,7 +292,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 		await PostKVS.put_async(post_id, post)
 
-		return await posts.post(post, user)
+		return await posts.post(user, post)
 
 
 	@timed.key('{size}')
@@ -584,7 +581,8 @@ class Uploader(SqlInterface, B2Interface) :
 		self._validateTitle(title)
 		self._validateDescription(description)
 
-		update: bool         = False
+		update:         bool = False
+		update_privacy: bool = False
 		post:   InternalPost = await posts._get_post(post_id)
 		self.logger.debug({
 			'post': post,
@@ -607,10 +605,25 @@ class Uploader(SqlInterface, B2Interface) :
 			assert isinstance(r, int)
 			post.rating = r
 
-		if not update :
+		if privacy and privacy != await privacy_map.get(post.privacy) :
+			update_privacy = True
+
+		if not update and not update_privacy :
 			raise BadRequest('no params were provided.')
 
-		await PostKVS.put_async(post_id, await self.update(post))
+		async with self.transaction() as t :
+			if update_privacy and privacy :
+				await self._update_privacy(user, post_id, privacy, t, commit = False)
+				assert isinstance(p := await privacy_map.get(privacy), int)
+				post.privacy = p
+
+			if update :
+				await PostKVS.put_async(post_id, await self.update(post, t.query_async))
+
+			else :
+				await PostKVS.put_async(post_id, post)
+
+			await t.commit()
 
 
 	@timed

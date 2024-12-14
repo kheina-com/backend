@@ -294,7 +294,7 @@ class Tagger(Tags) :
 		except NotFound :
 			raise nf
 
-		if not await posts.authorized(post, user) :
+		if not await posts.authorized(user, post) :
 			# the post was found and returned, but the user shouldn't have access to it or isn't authenticated
 			raise nf
 

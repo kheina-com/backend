@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, validator
 from pydantic_core import core_schema
 
 from ..base64 import b64decode, b64encode
+from ..exceptions.http_error import UnprocessableEntity
 
 
 """
@@ -112,6 +113,25 @@ class PostId(str) :
 		return int.from_bytes(b64decode(self), 'big')
 
 	__int__ = int
+
+
+def convert_path_post_id(post_id: Any) -> PostId :
+	try :
+		# fastapi doesn't parse to PostId automatically, only str
+		return PostId(post_id)
+
+	except ValueError :
+		raise UnprocessableEntity(detail=[
+			{
+				'loc': [
+					'path',
+					'post_id'
+				],
+				'msg': 'value is not a valid PostId',
+				'type': 'shared.models._shared.PostId',
+			}
+		]
+	)
 
 
 def _post_id_converter(value) :

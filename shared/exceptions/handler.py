@@ -7,7 +7,7 @@ from fastapi.responses import UJSONResponse
 
 from ..logging import Logger, getLogger
 from .base_error import BaseError
-from .http_error import BadGateway, UnprocessableEntity
+from .http_error import BadGateway, UnprocessableEntity, NotImplemented
 
 
 logger: Logger = getLogger()
@@ -36,6 +36,10 @@ def jsonErrorHandler(_: Request, e: Exception) -> UJSONResponse :
 		error['error'] = f'{BadGateway.__name__}: received an invalid response from an upstream server.'
 		status = error['status'] = BadGateway.status
 		logger.error(error, exc_info=e)
+
+	elif isinstance(e, NotImplementedError) :
+		error['error'] = f'{NotImplemented.__name__}: {e}.'
+		status = error['status'] = NotImplemented.status
 
 	else :
 		logger.error(error, exc_info=e)

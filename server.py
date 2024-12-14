@@ -25,7 +25,6 @@ from shared.server.middleware.cors import KhCorsMiddleware
 from shared.sql import SqlInterface
 from shared.timing import timed
 from tags.router import app as tags
-from uploader.router import app as uploader
 from users.router import app as users
 
 
@@ -133,7 +132,6 @@ app.include_router(configs)
 app.include_router(posts)
 app.include_router(sets)
 app.include_router(tags)
-app.include_router(uploader)
 app.include_router(users)
 app.include_router(emoji)
 app.include_router(reporting)
