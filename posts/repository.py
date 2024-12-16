@@ -255,19 +255,6 @@ class Posts(SqlInterface) :
 
 
 	@timed
-	async def _delete_post(self: Self, post_id: PostId) -> None :
-		ensure_future(PostKVS.remove_async(post_id))
-		await self.query_async("""
-			delete from kheina.public.posts
-			where posts.post_id = %s;
-			""", (
-				post_id.int(),
-			),
-			commit=True,
-		)
-
-
-	@timed
 	@AerospikeCache('kheina', 'score', '{post_id}', _kvs=ScoreKVS)
 	async def _get_score(self: Self, post_id: PostId) -> Optional[InternalScore] :
 		data: list[int] = await self.query_async("""

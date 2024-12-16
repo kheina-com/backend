@@ -33,6 +33,10 @@ class Conflict(HttpError) :
 	status: int = 409
 
 
+class PreconditionFailed(HttpError) :
+	status: int = 412
+
+
 class UnsupportedMedia(HttpError) :
 	status: int = 415
 

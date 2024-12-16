@@ -491,7 +491,7 @@ class Uploader(SqlInterface, B2Interface) :
 					else :
 						old_url = f'{post_id}/{old_filename}'
 
-					await self.b2_delete_file_async(old_url)
+					await self.delete_file_async(old_url)
 					self.logger.debug({
 						'run':     run,
 						'post':    post_id,
@@ -789,7 +789,7 @@ class Uploader(SqlInterface, B2Interface) :
 			raise BadRequest(f'post {post_id} missing filename')
 
 		try :
-			with await self.b2_get_file(f'{post_id}/{ipost.filename}') as response :
+			with await self.get_file(f'{post_id}/{ipost.filename}') as response :
 				image = Image(blob=await response.read())
 
 		except ClientResponseError as e :
@@ -823,8 +823,8 @@ class Uploader(SqlInterface, B2Interface) :
 
 		# cleanup old icons
 		if post_id != iuser.icon :
-			await self.b2_delete_file_async(f'{iuser.icon}/icons/{handle}.webp')
-			await self.b2_delete_file_async(f'{iuser.icon}/icons/{handle}.jpg')
+			await self.delete_file_async(f'{iuser.icon}/icons/{handle}.webp')
+			await self.delete_file_async(f'{iuser.icon}/icons/{handle}.jpg')
 
 		iuser.icon = post_id
 		ensure_future(UserKVS.put_async(str(iuser.user_id), iuser))
@@ -846,7 +846,7 @@ class Uploader(SqlInterface, B2Interface) :
 			raise BadRequest(f'post {post_id} missing filename')
 
 		try :
-			with await self.b2_get_file(f'{post_id}/{ipost.filename}') as response :
+			with await self.get_file(f'{post_id}/{ipost.filename}') as response :
 				image = Image(blob=await response.read())
 
 		except ClientResponseError as e :
@@ -879,8 +879,8 @@ class Uploader(SqlInterface, B2Interface) :
 
 		# cleanup old banners
 		if post_id != iuser.banner :
-			await self.b2_delete_file_async(f'{iuser.banner}/banners/{handle}.webp')
-			await self.b2_delete_file_async(f'{iuser.banner}/banners/{handle}.jpg')
+			await self.delete_file_async(f'{iuser.banner}/banners/{handle}.webp')
+			await self.delete_file_async(f'{iuser.banner}/banners/{handle}.jpg')
 
 		iuser.banner = post_id
 		ensure_future(UserKVS.put_async(str(iuser.user_id), iuser))
@@ -889,7 +889,19 @@ class Uploader(SqlInterface, B2Interface) :
 	@HttpErrorHandler('removing post')
 	@timed
 	async def deletePost(self: Self, user: KhUser, post_id: PostId) -> None :
-		ipost: InternalPost = await posts._get_post(post_id)
+		post: InternalPost = await posts._get_post(post_id)
 
-		if ipost.user_id != user.user_id :
-			raise NotFound('the provided post does not exist or it does not belong to this account.')
+		if post.user_id != user.user_id :
+			raise NotFound(f'no data was found for the provided post id: {post_id}.')
+
+		async with self.transaction() as t :
+			await t.query_async("""
+				delete from kheina.public.posts
+				where posts.post_id = %s;
+				""", (
+					post_id.int(),
+				),
+			)
+			ensure_future(PostKVS.remove_async(post_id))
+			await self.delete_files_async(f'{post_id}/')
+			await t.commit()

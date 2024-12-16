@@ -73,7 +73,7 @@ async def v1UpdatePost(req: Request, post_id: PostId, body: UpdateRequest) -> No
 @timed.root
 async def v1DeletePost(req: Request, post_id: PostId) -> None :
 	await req.user.authenticated()
-	await posts.deletePost(req.user, convert_path_post_id(post_id))
+	await uploader.deletePost(req.user, convert_path_post_id(post_id))
 
 
 @postRouter.post('/image')
@@ -223,7 +223,7 @@ async def get_post_media(post: Post) -> str :
 	else :
 		filename = f'{post.post_id}/{escape(quote(post.media.filename))}'
 
-	file_info = await b2.b2_get_file_info(filename)
+	file_info = await b2.get_file_info(filename)
 	assert file_info
 
 	return RssMedia.format(

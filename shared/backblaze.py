@@ -6,15 +6,17 @@ from hashlib import sha1 as hashlib_sha1
 from io import BytesIO
 from time import sleep
 from types import TracebackType
-from typing import Dict, Optional, Self, Type, Union
+from typing import Dict, Iterator, Optional, Self, Type, Union
 
 from minio import Minio
 from minio.datatypes import Object
+from minio.deleteobjects import DeleteError, DeleteObject
 from urllib3.response import BaseHTTPResponse
 
 from .config.constants import environment
 from .config.credentials import fetch
 from .exceptions.base_error import BaseError
+from .exceptions.http_error import PreconditionFailed
 from .logging import Logger, getLogger
 from .timing import timed
 
@@ -46,11 +48,11 @@ class FileResponse :
 class B2Interface :
 
 	def __init__(
-		self: 'B2Interface', 
+		self: Self, 
 		timeout: float = 300,
 		max_backoff: float = 30,
 		max_retries: int = 15,
-		mime_types: Dict[str, str] = { }
+		mime_types: Dict[str, str] = { },
 	) -> None :
 		self.logger: Logger = getLogger()
 		self.b2_timeout: float = timeout
@@ -76,14 +78,14 @@ class B2Interface :
 		self.bucket_name = fetch('b2.bucket_name', str)
 
 
-	def _get_mime_from_filename(self: 'B2Interface', filename: str) -> str :
+	def _get_mime_from_filename(self: Self, filename: str) -> str :
 		extension: str = filename[filename.rfind('.') + 1:]
 		if extension in self.mime_types :
 			return self.mime_types[extension.lower()]
 		raise ValueError(f'file extention does not have a known mime type: {filename}')
 
 
-	# def _obtain_upload_url(self: 'B2Interface') -> Dict[str, Any] :
+	# def _obtain_upload_url(self: Self) -> Dict[str, Any] :
 	# 	backoff: float = 1
 	# 	content: Union[str, None] = None
 	# 	status: Union[int, None] = None
@@ -120,7 +122,7 @@ class B2Interface :
 	# 	)
 
 
-	# async def _obtain_upload_url_async(self: 'B2Interface') -> Dict[str, Any] :
+	# async def _obtain_upload_url_async(self: Self) -> Dict[str, Any] :
 	# 	backoff: float = 1
 	# 	content: Union[str, None] = None
 	# 	status: Union[int, None] = None
@@ -158,7 +160,7 @@ class B2Interface :
 	# 	)
 
 
-	def b2_upload(self: 'B2Interface', file_data: bytes, filename: str, content_type:Union[str, None]=None, sha1:Union[str, None]=None) -> None :
+	def upload(self: Self, file_data: bytes, filename: str, content_type:Union[str, None]=None, sha1:Union[str, None]=None) -> None :
 		sha1: str = sha1 or b64encode(hashlib_sha1(file_data).digest()).decode()
 		content_type: str = content_type or self._get_mime_from_filename(filename)
 
@@ -200,14 +202,12 @@ class B2Interface :
 
 
 	@timed
-	async def upload_async(self: 'B2Interface', file_data: bytes, filename: str, content_type:Union[str, None]=None, sha1:Union[str, None]=None) -> None :
+	async def upload_async(self: Self, file_data: bytes, filename: str, content_type:Union[str, None]=None, sha1:Union[str, None]=None) -> None :
 		with ThreadPoolExecutor() as threadpool :
-			return await get_event_loop().run_in_executor(threadpool, partial(self.b2_upload, file_data, filename, content_type, sha1))
+			return await get_event_loop().run_in_executor(threadpool, partial(self.upload, file_data, filename, content_type, sha1))
 
 
-	def _delete_file(self: 'B2Interface', filename: str) -> None :
-		# files = None
-
+	def _delete_file(self: Self, filename: str) -> None :
 		for _ in range(self.b2_max_retries) :
 			try :
 				self.client.remove_object(
@@ -221,12 +221,53 @@ class B2Interface :
 
 
 	@timed
-	async def b2_delete_file_async(self: 'B2Interface', filename: str) -> None :
+	async def delete_file_async(self: Self, filename: str) -> None :
 		with ThreadPoolExecutor() as threadpool :
 			return await get_event_loop().run_in_executor(threadpool, partial(self._delete_file, filename))
 
 
-	# async def b2_upload_async(self: 'B2Interface', file_data: bytes, filename: str, content_type:Union[str, None]=None, sha1:Union[str, None]=None) -> Dict[str, Any] :
+	def _delete_files(self: Self, prefix: str) -> None :
+		assert prefix.endswith('/'), 'prefix must end with "/"'
+
+		errs: list[DeleteError]
+		for _ in range(self.b2_max_retries) :
+			obj: Iterator[Object] = self.client.list_objects(
+				self.bucket_name,
+				prefix    = prefix,
+				recursive = True,
+			)
+
+			errs: list[DeleteError] = list(self.client.remove_objects(
+				self.bucket_name,
+				(
+					DeleteObject(
+						o.object_name,
+						o.version_id,
+					) for o in obj if o.object_name
+				),
+			))
+
+			if not errs :
+				return
+
+		raise PreconditionFailed(f'failed to delete {len(errs)} files', errs=[
+			{
+				'code':    err.code,
+				'message': err.message,
+				'name':    err.name,
+				'version': err.version_id,
+			}
+			for err in errs
+		])
+
+
+	@timed
+	async def delete_files_async(self: Self, prefix: str) -> None :
+		with ThreadPoolExecutor() as threadpool :
+			return await get_event_loop().run_in_executor(threadpool, partial(self._delete_files, prefix))
+
+
+	# async def upload_async(self: Self, file_data: bytes, filename: str, content_type:Union[str, None]=None, sha1:Union[str, None]=None) -> Dict[str, Any] :
 	# 	# obtain upload url
 	# 	upload_url: str = await self._obtain_upload_url_async()
 
@@ -284,7 +325,7 @@ class B2Interface :
 	# 	)
 
 
-	def _get_file_info(self: 'B2Interface', filename: str) -> Optional[Object] :
+	def _get_file_info(self: Self, filename: str) -> Optional[Object] :
 		try :
 			for _ in range(self.b2_max_retries) :
 				return self.client.stat_object(
@@ -316,12 +357,12 @@ class B2Interface :
 
 
 	@timed
-	async def b2_get_file_info(self: 'B2Interface', filename: str) -> Optional[Object] :
+	async def get_file_info(self: Self, filename: str) -> Optional[Object] :
 		with ThreadPoolExecutor() as threadpool :
 			return await get_event_loop().run_in_executor(threadpool, partial(self._get_file_info, filename))
 
 
-	def _get_file(self: 'B2Interface', filename: str) -> FileResponse :
+	def _get_file(self: Self, filename: str) -> FileResponse :
 		try :
 			for _ in range(self.b2_max_retries) :
 				r: BaseHTTPResponse = self.client.get_object(
@@ -356,6 +397,6 @@ class B2Interface :
 
 
 	@timed
-	async def b2_get_file(self: 'B2Interface', filename: str) -> FileResponse :
+	async def get_file(self: Self, filename: str) -> FileResponse :
 		with ThreadPoolExecutor() as threadpool :
 			return await get_event_loop().run_in_executor(threadpool, partial(self._get_file, filename))

@@ -557,7 +557,7 @@ class Posts(Posts) :
 
 	@HttpErrorHandler('fetching posts')
 	@timed
-	async def fetchPosts(self: Self, user: KhUser, sort: PostSort, tags: Optional[list[str]], count:int=64, page:int=1) -> SearchResults :
+	async def fetchPosts(self: Self, user: KhUser, sort: PostSort, tags: Optional[list[str]], count: int = 64, page: int = 1) -> SearchResults :
 		self._validatePageNumber(page)
 		self._validateCount(count)
 
@@ -590,17 +590,6 @@ class Posts(Posts) :
 
 		if await self.authorized(user, post) :
 			return await self.post(user, post)
-
-		raise NotFound(f'no data was found for the provided post id: {post_id}.')
-
-
-	@HttpErrorHandler('deleting post')
-	@timed
-	async def deletePost(self: Self, user: KhUser, post_id: PostId) -> None :
-		post: InternalPost = await self._get_post(post_id)
-
-		if post.user_id == user.user_id :
-			return await self._delete_post(post_id)
 
 		raise NotFound(f'no data was found for the provided post id: {post_id}.')
 
