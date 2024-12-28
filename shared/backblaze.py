@@ -6,7 +6,7 @@ from hashlib import sha1 as hashlib_sha1
 from io import BytesIO
 from time import sleep
 from types import TracebackType
-from typing import Dict, Iterator, Optional, Self, Type, Union
+from typing import Any, Dict, Generator, Iterator, Optional, Self, Type, Union
 
 from minio import Minio
 from minio.datatypes import Object
@@ -226,9 +226,8 @@ class B2Interface :
 			return await get_event_loop().run_in_executor(threadpool, partial(self._delete_file, filename))
 
 
-	def _delete_files(self: Self, prefix: str) -> None :
-		assert prefix.endswith('/'), 'prefix must end with "/"'
-
+	def _delete_files(self: Self, prefix: str) -> int :
+		deleted: list[int] = [0]  # dumb, but necessary
 		errs: list[DeleteError]
 		for _ in range(self.b2_max_retries) :
 			obj: Iterator[Object] = self.client.list_objects(
@@ -237,18 +236,23 @@ class B2Interface :
 				recursive = True,
 			)
 
+			def emitter() -> Generator[DeleteObject, Any, None] :
+				for o in obj :
+					if not o.object_name :
+						continue
+
+					deleted[0] += 1
+					yield DeleteObject(o.object_name)
+
 			errs: list[DeleteError] = list(self.client.remove_objects(
 				self.bucket_name,
-				(
-					DeleteObject(
-						o.object_name,
-						o.version_id,
-					) for o in obj if o.object_name
-				),
+				emitter(),
 			))
 
+			deleted[0] -= len(errs)
+
 			if not errs :
-				return
+				return deleted[0]
 
 		raise PreconditionFailed(f'failed to delete {len(errs)} files', errs=[
 			{
@@ -262,7 +266,7 @@ class B2Interface :
 
 
 	@timed
-	async def delete_files_async(self: Self, prefix: str) -> None :
+	async def delete_files_async(self: Self, prefix: str) -> int :
 		with ThreadPoolExecutor() as threadpool :
 			return await get_event_loop().run_in_executor(threadpool, partial(self._delete_files, prefix))
 

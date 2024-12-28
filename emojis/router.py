@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter
 
 from shared.models.auth import Scope
@@ -45,10 +46,10 @@ async def v1GetEmoji(req: Request, emoji: str) -> Emoji :
 	return await emojis.read(req.user, emoji)
 
 
-@emojisRouter.get('/{emoji}')
+@emojisRouter.get('/{latest}')
 @timed.root
-async def v1ListEmojis(emoji: str) -> list[str] :
-	return await emojis.list(emoji)
+async def v1ListEmojis(req: Request, latest: datetime) -> list[Emoji] :
+	return await emojis.list_(req.user, latest)
 
 
 app = APIRouter(

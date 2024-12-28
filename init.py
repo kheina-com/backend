@@ -22,6 +22,7 @@ from authenticator.models import LoginRequest
 from shared.base64 import b64decode, b64encode
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import decryptCredentialFile, fetch
+from .shared.datetime import datetime
 from shared.logging import TerminalAgent
 from shared.sql import SqlInterface
 
@@ -254,6 +255,7 @@ async def uploadEmojis() -> None :
 						emoji    = f'{text}{suffix}',
 						alt      = alt,
 						filename = filename,
+						updated  = datetime.now(),
 					))
 					uploaded += 1
 					glyphs.discard(key)

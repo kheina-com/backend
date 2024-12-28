@@ -1,10 +1,11 @@
 from typing import Self
+from datetime import datetime as pydatetime
 
 from psycopg.errors import UniqueViolation
 
+from shared.datetime import datetime
 from shared.auth import KhUser
-from shared.exceptions.http_error import BadRequest, Conflict, Forbidden, HttpErrorHandler, NotFound
-from shared.models.auth import Scope
+from shared.exceptions.http_error import BadRequest, Conflict, HttpErrorHandler, NotFound
 
 from .models import AliasRequest, CreateRequest, Emoji, InternalEmoji, UpdateRequest
 from .repository import EmojiRepository, users
@@ -33,6 +34,7 @@ class Emojis(EmojiRepository) :
 			post_id  = req.post_id.int() if req.post_id else None,
 			alt      = req.alt,
 			filename = req.filename,
+			updated  = datetime.now(),
 		)
 		await super().create(iemoji)
 		return await self.emoji(user, iemoji)
@@ -86,3 +88,8 @@ class Emojis(EmojiRepository) :
 
 		await super().update(emoji, iemoji)
 		return await self.emoji(user, iemoji)
+
+
+	async def list_(self: Self, user: KhUser, latest: pydatetime) -> list[Emoji] :
+		iemoji = await super().list_(latest)
+		return await self.emojis(user, iemoji)

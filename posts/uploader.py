@@ -895,6 +895,7 @@ class Uploader(SqlInterface, B2Interface) :
 			raise NotFound(f'no data was found for the provided post id: {post_id}.')
 
 		async with self.transaction() as t :
+			ensure_future(PostKVS.remove_async(post_id))
 			await t.query_async("""
 				delete from kheina.public.posts
 				where posts.post_id = %s;
@@ -902,6 +903,8 @@ class Uploader(SqlInterface, B2Interface) :
 					post_id.int(),
 				),
 			)
-			ensure_future(PostKVS.remove_async(post_id))
-			await self.delete_files_async(f'{post_id}/')
+
+			if post.filename :
+				assert await self.delete_files_async(post_id), 'at least one file is expected to be deleted'
+
 			await t.commit()

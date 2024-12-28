@@ -30,7 +30,11 @@ from users.router import app as users
 
 timed.logger = lambda n, x : print(json.dumps({ n: x.dict() }))
 
-app = FastAPI()
+app = FastAPI(
+	title     = 'fuzz.ly',
+	# docs_url  = None,
+	# redoc_url = None,
+)
 app.add_middleware(ExceptionMiddleware, handlers={ Exception: jsonErrorHandler }, debug=False)
 app.add_exception_handler(BaseError, jsonErrorHandler)
 
@@ -92,6 +96,32 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=[
 	environ.get('pod_host', 'localhost'),
 ])
 app.add_middleware(KhAuthMiddleware, required=False)
+# app.mount('/static', StaticFiles(directory = 'static'), name = 'static')
+
+
+# @app.get('/docs', include_in_schema = False)
+# async def custom_swagger_ui_html():
+# 	return get_swagger_ui_html(
+# 		openapi_url         = app.openapi_url or '',
+# 		title               = app.title + ' - Swagger UI',
+# 		oauth2_redirect_url = app.swagger_ui_oauth2_redirect_url,
+# 		swagger_js_url      = 'https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js',
+# 		swagger_css_url     = 'https://unpkg.com/swagger-ui-dist@5/swagger-ui.css',
+# 	)
+
+
+# @app.get(app.swagger_ui_oauth2_redirect_url or '', include_in_schema = False)
+# async def swagger_ui_redirect():
+# 	return get_swagger_ui_oauth2_redirect_html()
+
+
+# @app.get('/redoc', include_in_schema = False)
+# async def redoc_html():
+# 	return get_redoc_html(
+# 		openapi_url  = app.openapi_url or '',
+# 		title        = app.title + ' - ReDoc',
+# 		redoc_js_url = 'https://unpkg.com/redoc@next/bundles/redoc.standalone.js',
+# 	)
 
 
 @app.on_event('startup')

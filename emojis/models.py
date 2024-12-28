@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, validator
@@ -16,6 +17,7 @@ class InternalEmoji(BaseModel) :
 	owner:    Optional[int] = None
 	post_id:  Optional[int] = None
 	filename: str
+	updated:  datetime
 
 
 class Emoji(BaseModel) :
@@ -25,16 +27,19 @@ class Emoji(BaseModel) :
 		validate_assignment = True
 
 	emoji:    str
+	alias:    Optional[str]          = None
 	alt:      Optional[str]          = None
 	owner:    Optional[UserPortable] = None
 	post_id:  Optional[PostId]       = None
 	filename: str
 	url:      str = ''
+	updated:  datetime
 
 	@validator('url', pre=True, always=True)
 	def validate_url(cls, v, values) :
 		if values['post_id'] :
 			return values['post_id'] + '/emoji/' + values['filename']
+
 		return 'emoji/' + values['filename']
 
 
