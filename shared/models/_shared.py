@@ -115,6 +115,9 @@ class PostId(str) :
 	__int__ = int
 
 
+PostIdValidator = validator('post_id', pre=True, always=True, allow_reuse=True)(PostId)
+
+
 def convert_path_post_id(post_id: Any) -> PostId :
 	try :
 		# fastapi doesn't parse to PostId automatically, only str

@@ -1,10 +1,9 @@
 from enum import Enum, unique
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from pydantic import BaseModel
 
-from posts.models import PostId, PostIdValidator
-from shared.models import UserPortable
+from shared.models import PostId, PostIdValidator, UserPortable
 
 
 @unique

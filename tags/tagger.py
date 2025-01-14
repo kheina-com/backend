@@ -9,19 +9,16 @@ from posts.models import InternalPost, PostId, Privacy
 from posts.repository import Posts
 from shared.auth import KhUser, Scope
 from shared.caching import AerospikeCache, SimpleCache
-from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadRequest, Conflict, Forbidden, HttpErrorHandler, NotFound
 from shared.maps import privacy_map
-from shared.models import InternalUser, UserPortable
+from shared.models import UserPortable
 from shared.timing import timed
 from shared.utilities import flatten
-from users.repository import Users
 
-from .models import InternalTag, Tag, TagGroup, TagGroups, TagPortable
-from .repository import TagKVS, Tags
+from .models import InternalTag, Tag, TagGroup, TagGroups
+from .repository import TagKVS, Tags, users
 
 
-users = Users()
 posts = Posts()
 Misc: TagGroup = TagGroup('misc')
 
@@ -54,36 +51,6 @@ class Tagger(Tags) :
 		)
 
 
-	async def tags(self: Self, user: KhUser, itags: list[InternalTag]) -> list[Tag] :
-		owners_task: Task[dict[int, InternalUser]] = ensure_future(users._get_users(filter(None, (t.owner for t in itags))))
-		counts_task: Task[dict[str, int]]          = ensure_future(self._get_tag_counts([t.name for t in itags]))
-
-		owners = await users.portables(user, (await owners_task).values())
-		counts = await counts_task
-
-		return [
-			Tag(
-				tag            = t.name,
-				owner          = owners[t.owner] if t.owner else None,
-				group          = t.group,
-				deprecated     = t.deprecated,
-				inherited_tags = t.inherited_tags,
-				description    = t.description,
-				count          = counts[t.name],
-			)
-			for t in itags
-		]
-
-
-	def portable(self: Self, tag: Tag) -> TagPortable :
-		return TagPortable(
-			tag   = tag.tag,
-			owner = tag.owner,
-			group = tag.group,
-			count = tag.count,
-		)
-
-
 	@HttpErrorHandler('adding tags to post')
 	async def addTags(self, user: KhUser, post_id: PostId, tags: Tuple[str, ...]) :
 		await self.query_async("""
@@ -94,7 +61,7 @@ class Tagger(Tags) :
 		)
 
 		post: InternalPost = await posts._get_post(post_id)
-		if post.privacy == await privacy_map.get(Privacy.public) :
+		if post.privacy == await privacy_map.get_id(Privacy.public) :
 			existing = set(flatten(await self._fetch_tags_by_post(post_id)))
 			for tag in set(tags) - existing :  # increment tags that didn't already exist
 				await self._increment_tag_count(tag)
@@ -110,13 +77,16 @@ class Tagger(Tags) :
 	async def removeTags(self, user: KhUser, post_id: PostId, tags: Tuple[str, ...]) :
 		await self.query_async("""
 			CALL kheina.public.remove_tags(%s, %s, %s);
-			""",
-			(post_id.int(), user.user_id, list(map(str.lower, tags))),
-			commit=True,
+			""", (
+				post_id.int(),
+				user.user_id,
+				list(map(str.lower, tags)),
+			),
+			commit = True,
 		)
 
 		post: InternalPost = await posts._get_post(post_id)
-		if post.privacy == await privacy_map.get(Privacy.public) :
+		if post.privacy == await privacy_map.get_id(Privacy.public) :
 			existing = set(flatten(await self._fetch_tags_by_post(post_id)))
 			for tag in set(tags) & existing :  # decrement only the tags that already existed
 				await self._decrement_tag_count(tag)
@@ -130,9 +100,13 @@ class Tagger(Tags) :
 
 		await self.query_async("""
 			CALL kheina.public.inherit_tag(%s, %s, %s, %s);
-			""",
-			(user.user_id, parent_tag.lower(), child_tag.lower(), deprecate),
-			commit=True,
+			""", (
+				user.user_id,
+				parent_tag.lower(),
+				child_tag.lower(),
+				deprecate,
+			),
+			commit = True,
 		)
 
 		itag: InternalTag = await TagKVS.get_async(parent_tag)
@@ -152,9 +126,11 @@ class Tagger(Tags) :
 				AND t1.tag = lower(%s)
 				AND tag_inheritance.child = t2.tag_id
 				AND t2.tag = lower(%s);
-			""",
-			(parent_tag.lower(), child_tag.lower()),
-			commit=True,
+			""", (
+				parent_tag.lower(),
+				child_tag.lower(),
+			),
+			commit = True,
 		)
 
 		itag: InternalTag = await TagKVS.get_async(parent_tag)
@@ -298,13 +274,7 @@ class Tagger(Tags) :
 			# the post was found and returned, but the user shouldn't have access to it or isn't authenticated
 			raise nf
 
-		tags:  list[Tag] = await self.tags(user, await tags_task)
-		tg: defaultdict[str, list[TagPortable]] = defaultdict(list)
-
-		for t in tags :
-			tg[t.group.name].append(self.portable(t))
-
-		return TagGroups(**{ k: sorted(v, key=lambda t : t.tag) for k, v in tg.items() })
+		return self.groups(await self.tags(user, await tags_task))
 
 
 	@HttpErrorHandler('fetching tag blocklist')
