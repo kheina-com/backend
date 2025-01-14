@@ -21,10 +21,11 @@ _conversions: dict[type, Callable] = {
 	Decimal: float,
 	float: float,
 	int: int,
-	tuple: lambda x : list(map(json_stream, filter(None, x))),
-	filter: lambda x : list(map(json_stream, filter(None, x))),
-	set: lambda x : list(map(json_stream, filter(None, x))),
-	list: lambda x : list(map(json_stream, filter(None, x))),
+	bool: bool,
+	tuple: lambda x : list(map(json_stream, x)),
+	filter: lambda x : list(map(json_stream, x)),
+	set: lambda x : list(map(json_stream, x)),
+	list: lambda x : list(map(json_stream, x)),
 	dict: lambda x : dict(zip(map(str, x.keys()), map(json_stream, x.values()))),
 	zip: lambda x : dict(zip(map(str, x.keys()), map(json_stream, x.values()))),
 	IntEnum: lambda x : x.name,
@@ -44,14 +45,14 @@ _conversions: dict[type, Callable] = {
 			'len': len(x.token_string),
 			'version': int(b64decode(x.token_string[:x.token_string.find('.')]).decode()),
 			'hash': f'{crc(x.token_string.encode()):x}',
-		}
+		},
 	},
 	BaseModel: lambda x : json_stream(x.dict()),
 	bytes: bytes.hex,
 	BaseException: lambda e : {
 		'error': f'{getFullyQualifiedClassName(e)}: {e}',
 		'stacktrace': list(map(str.strip, format_tb(e.__traceback__))),
-		**json_stream(e.__dict__),
+		**json_stream(getattr(e, '__dict__', { })),
 	},
 }
 

@@ -1,20 +1,26 @@
+from asyncio import Task, ensure_future
+from collections import defaultdict
 from typing import Iterable, Optional, Self, Sequence
 
 import aerospike
 
 from posts.models import PostId
+from shared.auth import KhUser
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
+from shared.models import InternalUser
 from shared.sql import SqlInterface
 from shared.timing import timed
 from shared.utilities import flatten
+from users.repository import Users
 
-from .models import InternalTag, TagGroup
+from .models import InternalTag, Tag, TagGroup, TagGroups, TagPortable
 
 
 CountKVS:    KeyValueStore = KeyValueStore('kheina', 'tag_count')
 TagKVS:      KeyValueStore = KeyValueStore('kheina', 'tags')
 BlockingKVS: KeyValueStore = KeyValueStore('kheina', 'blocking', local_TTL=30)
+users = Users()
 
 
 class Tags(SqlInterface) :
@@ -57,6 +63,45 @@ class Tags(SqlInterface) :
 			for row in data
 			if row[0] and row[1] in TagGroup.__members__
 		]
+
+
+	def portable(self: Self, tag: Tag) -> TagPortable :
+		return TagPortable(
+			tag   = tag.tag,
+			owner = tag.owner,
+			group = tag.group,
+			count = tag.count,
+		)
+
+
+	async def tags(self: Self, user: KhUser, itags: list[InternalTag]) -> list[Tag] :
+		owners_task: Task[dict[int, InternalUser]] = ensure_future(users._get_users(filter(None, (t.owner for t in itags))))
+		counts_task: Task[dict[str, int]]          = ensure_future(self._get_tag_counts([t.name for t in itags]))
+
+		owners = await users.portables(user, (await owners_task).values())
+		counts = await counts_task
+
+		return [
+			Tag(
+				tag            = t.name,
+				owner          = owners[t.owner] if t.owner else None,
+				group          = t.group,
+				deprecated     = t.deprecated,
+				inherited_tags = t.inherited_tags,
+				description    = t.description,
+				count          = counts[t.name],
+			)
+			for t in itags
+		]
+
+
+	def groups(self: Self, tags: list[Tag]) -> TagGroups :
+		tg:   defaultdict[str, list[TagPortable]] = defaultdict(list)
+
+		for t in tags :
+			tg[t.group.name].append(self.portable(t))
+
+		return TagGroups(**{ k: sorted(v, key=lambda t : t.tag) for k, v in tg.items() })
 
 
 	async def _populate_tag_cache(self, tag: str) -> int :

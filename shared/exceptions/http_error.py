@@ -1,6 +1,5 @@
-from asyncio.coroutines import _is_coroutine  # type: ignore
 from functools import wraps
-from inspect import FullArgSpec, getfullargspec, iscoroutinefunction
+from inspect import FullArgSpec, getfullargspec, iscoroutinefunction, markcoroutinefunction
 from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple, Type
 from uuid import uuid4
 
@@ -12,12 +11,23 @@ from ..exceptions.base_error import BaseError
 class HttpError(BaseError) :
 	status: int = 500
 
+	def __init__(self, *args: Any, **kwargs: Any) -> None :
+		self.code: str = self.__class__.__name__
+		BaseError.__init__(self, *args, **kwargs)
+
 
 class BadRequest(HttpError) :
 	status: int = 400
 
 
 class Unauthorized(HttpError) :
+	status: int = 401
+
+
+class FailedLogin(HttpError) :
+	"""
+	this error is used to differentiate between unauthorized due to not being logged in and unauthorized due to a failed login attempt
+	"""
 	status: int = 401
 
 
@@ -132,7 +142,7 @@ def HttpErrorHandler(message: str, exclusions: Iterable[str] = ['self'], handler
 					err = e,
 				)
 
-		wrapper._is_coroutine = _is_coroutine # type: ignore
+		markcoroutinefunction(wrapper)
 		return wrapper
 
 	return decorator

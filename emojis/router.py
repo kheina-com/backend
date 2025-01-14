@@ -1,4 +1,5 @@
 from datetime import datetime
+
 from fastapi import APIRouter
 
 from shared.models.auth import Scope

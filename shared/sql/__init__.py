@@ -13,7 +13,7 @@ from pydantic.fields import ModelField
 
 from ..config.credentials import fetch
 from ..logging import Logger, getLogger
-from ..models._shared import PostId
+from ..models import PostId
 from ..timing import timed
 from .query import Field, Insert, Operator, Query, Table, Update, Value, Where
 

@@ -20,3 +20,4 @@ go install github.com/kheina-com/go-thumbhash/cmd/thumbhash@1efbb9d
 ## requires
 https://exiftool.org/install.html
 https://wiki.python.org/moin/ImageMagick
+https://ffmpeg.org/download.html

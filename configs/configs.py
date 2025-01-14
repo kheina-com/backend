@@ -1,4 +1,5 @@
 from datetime import datetime
+from random import randrange
 from re import Match, Pattern
 from re import compile as re_compile
 from typing import Dict, List, Optional, Self, Tuple, Type, Union
@@ -49,7 +50,7 @@ class Configs(SqlInterface) :
 	async def startup(self) -> bool :
 		Configs.Serializers = {
 			ConfigType.banner: (AvroSerializer(BannerStore), await repo.addSchema(convert_schema(BannerStore))),
-			ConfigType.costs: (AvroSerializer(CostsStore), await repo.addSchema(convert_schema(CostsStore))),
+			ConfigType.costs:  (AvroSerializer(CostsStore),  await repo.addSchema(convert_schema(CostsStore))),
 		}
 		self.UserConfigFingerprint = await repo.addSchema(convert_schema(UserConfig))
 		assert self.Serializers.keys() == set(ConfigType.__members__.values()), 'Did you forget to add serializers for a config?'
@@ -59,7 +60,7 @@ class Configs(SqlInterface) :
 	
 	@AsyncLRU(maxsize=32)
 	@staticmethod
-	async def getSchema(fingerprint: bytes) -> Schema:
+	async def getSchema(fingerprint: bytes) -> Schema :
 		return parse_avro_schema((await repo.getSchema(fingerprint)).decode())
 
 
@@ -67,7 +68,7 @@ class Configs(SqlInterface) :
 	@AerospikeCache('kheina', 'configs', 'patreon-campaign-funds', TTL_minutes=10)
 	async def getFunding(self) -> int :
 		if environment.is_local() :
-			return 1500
+			return randrange(1000, 1500)
 
 		campaign = PatreonClient.fetch_campaign()
 		return campaign.data()[0].attribute('campaign_pledge_sum') # type: ignore
@@ -75,7 +76,7 @@ class Configs(SqlInterface) :
 
 	@HttpErrorHandler('retrieving config')
 	@AerospikeCache('kheina', 'configs', '{config}', _kvs=KVS)
-	async def getConfig[T: BaseModel](self, config: ConfigType, _: Type[T]) -> T :
+	async def getConfig[T: BaseModel](self, config: ConfigType, type_: Type[T]) -> T :
 		data: Optional[tuple[bytes]] = await self.query_async("""
 			SELECT bytes
 			FROM kheina.public.configs
@@ -91,7 +92,10 @@ class Configs(SqlInterface) :
 		value: bytes = bytes(data[0])
 		assert value[:2] == AvroMarker
 
-		deserializer: AvroDeserializer = AvroDeserializer(read_model=self.SerializerTypeMap[config], write_model=await Configs.getSchema(value[2:10]))
+		deserializer: AvroDeserializer = AvroDeserializer(
+			read_model  = self.SerializerTypeMap[config],
+			write_model = await Configs.getSchema(value[2:10]),
+		)
 		return deserializer(value[10:])
 
 

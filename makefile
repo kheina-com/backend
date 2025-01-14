@@ -10,6 +10,12 @@ lock:
 	python3 -m venv ./.venv
 	.venv/bin/python3 -c 'from subprocess import PIPE, Popen; open("requirements.lock", "w").write("\n".join(sorted(filter(None, set(b"".join(Popen([".venv/bin/python3", "-m", "pip", "freeze", "--local"], stdout=PIPE, stderr=PIPE).communicate()).decode().split("\n")) - set(map(str.strip, open("requirements-build.lock").readlines()))), key=str.casefold)))'
 
+.PHONY: dev
+dev:
+	python3 -m venv ./.venv
+	docker compose up -d --wait
+	ENVIRONMENT=LOCAL; fastapi dev server.py
+
 .PHONY: build
 build:
 	DOCKER_DEFAULT_PLATFORM="linux/amd64" docker build -t us-central1-docker.pkg.dev/kheinacom/fuzzly-repo/fuzzly-backend:$(shell git rev-parse --short HEAD) .

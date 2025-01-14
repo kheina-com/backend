@@ -4,7 +4,7 @@ from functools import lru_cache
 from re import Pattern
 from re import compile as re_compile
 from secrets import token_bytes
-from typing import Any, List, Literal, Optional, Type, Union
+from typing import Any, List, Literal, Optional, Self, Type, Union
 
 from pydantic import BaseModel, Field, validator
 from pydantic_core import core_schema
@@ -20,15 +20,49 @@ Example: PostId is used by both user and post models
 """
 
 
-################################################## MANY ##################################################
+'''
+# insane shit
+class __undefined__(type) :
+	def __bool__(cls) :
+		return False
+
+
+class Undefined(metaclass=__undefined__) :
+	pass
+
+
+class BaseModel(PBM) :
+	"""
+	excludes any value set to Undefined from BaseModel.dict, as well as on encoded responses via fastapi
+	"""
+
+	def dict(self: Self, *args, **kwargs) -> dict[str, Any] :
+		values: dict[str, Any] = super().dict(*args, **kwargs)
+		for k, v in tuple(values.items()) :
+			if v is Undefined :
+				del values[k]
+
+		return values
+'''
+
+
+class OmitModel(BaseModel) :
+	"""
+	excludes unset values from OmitModel.dict, as well as on encoded responses via fastapi
+	"""
+
+	def dict(self: Self, *args, **kwargs) -> dict[str, Any] :
+		kwargs.pop('exclude_unset', None)
+		return super().dict(*args, exclude_unset=True, **kwargs)
+
 
 @unique
 class Privacy(Enum) :
-	public = 'public'
-	unlisted = 'unlisted'
-	private = 'private'
+	public      = 'public'
+	unlisted    = 'unlisted'
+	private     = 'private'
 	unpublished = 'unpublished'
-	draft = 'draft'
+	draft       = 'draft'
 
 
 ################################################## POST ##################################################
@@ -113,6 +147,9 @@ class PostId(str) :
 		return int.from_bytes(b64decode(self), 'big')
 
 	__int__ = int
+
+
+PostIdValidator = validator('post_id', pre=True, always=True, allow_reuse=True)(PostId)
 
 
 def convert_path_post_id(post_id: Any) -> PostId :

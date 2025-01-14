@@ -67,9 +67,7 @@ class Sets(Sets) :
 		except AssertionError as e :
 			raise BadRequest(str(e))
 
-		ip = await privacy_map.get(p)
-		assert isinstance(ip, int)
-		return ip
+		return await privacy_map.get_id(p)
 
 
 	@ArgsCache(float('inf'))
@@ -360,6 +358,7 @@ class Sets(Sets) :
 			int, int,  # post index
 			int, Optional[str], Optional[str], int, int, datetime, datetime, int, int,  # posts
 			Optional[str], Optional[int], Optional[int], Optional[int], Optional[int], Optional[datetime], Optional[int],  # media
+			Optional[list[tuple[str, int, int, int, int, int]]],  # thumbnails
 			int, int, int, # first, last, index
 		]] = await self.query_async("""
 			WITH post_sets AS (
@@ -417,6 +416,7 @@ class Sets(Sets) :
 				media.crc,
 				media.updated,
 				media.length,
+				collated_thumbnails.thumbnails,
 				f.first,
 				l.last,
 				l.index
@@ -429,10 +429,12 @@ class Sets(Sets) :
 					ON posts.post_id = set_post.post_id
 				LEFT JOIN kheina.public.media
 					ON media.post_id = posts.post_id
+				LEFT JOIN kheina.public.collated_thumbnails
+					ON collated_thumbnails.post_id = posts.post_id
 				INNER JOIN f
-					ON f.set_id = post_sets.set_id
+					ON 1 = 1
 				INNER JOIN l
-					ON l.set_id = post_sets.set_id
+					ON 1 = 1
 			""", (
 				post_id.int(),
 				neighbor_range, neighbor_range,
@@ -458,9 +460,9 @@ class Sets(Sets) :
 						privacy     = row[4],
 						created     = row[5],
 						updated     = row[6],
-						first       = PostId(row[25]),
-						last        = PostId(row[26]),
-						count       = row[27] + 1,
+						first       = PostId(row[26]),
+						last        = PostId(row[27]),
+						count       = row[28] + 1,
 					),
 				))
 
@@ -480,6 +482,7 @@ class Sets(Sets) :
 						media_type  = row[19],
 						user_id     = row[16],
 						privacy     = row[17],
+						thumbnails  = row[25],  # type: ignore
 						size = PostSize(
 							width  = row[20],
 							height = row[21],

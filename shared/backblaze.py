@@ -1,6 +1,7 @@
 from asyncio import get_event_loop
 from base64 import b64encode
 from concurrent.futures import ThreadPoolExecutor
+from enum import Enum
 from functools import partial
 from hashlib import sha1 as hashlib_sha1
 from io import BytesIO
@@ -45,6 +46,20 @@ class FileResponse :
 			return await get_event_loop().run_in_executor(threadpool, self.res.read)
 
 
+class MimeType(Enum) :
+	jpg  = 'image/jpeg'
+	jpeg = 'image/jpeg'
+	png  = 'image/png'
+	webp = 'image/webp'
+	gif  = 'image/gif'
+	webm = 'video/webm'
+	mp4  = 'video/mp4'
+	mov  = 'video/quicktime'
+
+	def type(self: Self) -> str :
+		return self.value[self.value.rfind('/') + 1:]
+
+
 class B2Interface :
 
 	def __init__(
@@ -52,23 +67,11 @@ class B2Interface :
 		timeout: float = 300,
 		max_backoff: float = 30,
 		max_retries: int = 15,
-		mime_types: Dict[str, str] = { },
 	) -> None :
 		self.logger: Logger = getLogger()
 		self.b2_timeout: float = timeout
 		self.b2_max_backoff: float = max_backoff
 		self.b2_max_retries: int = max_retries
-		self.mime_types: Dict[str, str] = {
-			'jpg': 'image/jpeg',
-			'jpeg': 'image/jpeg',
-			'png': 'image/png',
-			'webp': 'image/webp',
-			'gif': 'image/gif',
-			'webm': 'video/webm',
-			'mp4': 'video/mp4',
-			'mov': 'video/quicktime',
-			**mime_types,
-		}
 		self.client = Minio(
 			fetch('b2.api_url', str),
 			access_key=fetch('b2.key_id', str),
@@ -78,11 +81,14 @@ class B2Interface :
 		self.bucket_name = fetch('b2.bucket_name', str)
 
 
-	def _get_mime_from_filename(self: Self, filename: str) -> str :
+	def _get_mime_from_filename(self: Self, filename: str) -> MimeType :
 		extension: str = filename[filename.rfind('.') + 1:]
-		if extension in self.mime_types :
-			return self.mime_types[extension.lower()]
-		raise ValueError(f'file extention does not have a known mime type: {filename}')
+
+		try :
+			return MimeType[extension]
+
+		except KeyError :
+			raise ValueError(f'file extention does not have a known mime type: {filename}')
 
 
 	# def _obtain_upload_url(self: Self) -> Dict[str, Any] :
@@ -160,9 +166,9 @@ class B2Interface :
 	# 	)
 
 
-	def upload(self: Self, file_data: bytes, filename: str, content_type:Union[str, None]=None, sha1:Union[str, None]=None) -> None :
+	def upload(self: Self, file_data: bytes, filename: str, content_type: Union[MimeType, None] = None, sha1: Union[str, None] = None) -> None :
 		sha1: str = sha1 or b64encode(hashlib_sha1(file_data).digest()).decode()
-		content_type: str = content_type or self._get_mime_from_filename(filename)
+		content_type: str = (content_type or self._get_mime_from_filename(filename)).value
 
 		# print('content_type:', content_type, 'content_length:', len(file_data), 'sha1:', sha1)
 
@@ -202,7 +208,7 @@ class B2Interface :
 
 
 	@timed
-	async def upload_async(self: Self, file_data: bytes, filename: str, content_type:Union[str, None]=None, sha1:Union[str, None]=None) -> None :
+	async def upload_async(self: Self, file_data: bytes, filename: str, content_type: Union[MimeType, None] = None, sha1: Union[str, None] = None) -> None :
 		with ThreadPoolExecutor() as threadpool :
 			return await get_event_loop().run_in_executor(threadpool, partial(self.upload, file_data, filename, content_type, sha1))
 

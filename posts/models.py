@@ -1,29 +1,19 @@
 from datetime import datetime
 from enum import Enum, unique
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Optional, Self
 from urllib.parse import quote
 
 from pydantic import BaseModel, Field, validator
 
 from shared.base64 import b64decode, b64encode
-from shared.config.constants import Environment, environment
+from shared.config.calculated import cdn_host
+from shared.config.constants import environment
 from shared.config.repo import short_hash
 from shared.datetime import datetime as dt
-from shared.models._shared import PostId, Privacy, UserPortable, _post_id_converter
+from shared.models._shared import OmitModel, PostId, PostIdValidator, Privacy, UserPortable, _post_id_converter
 from shared.sql.query import Table
+from tags.models import TagGroups
 
-
-cdn_host: Literal['https://cdn.fuzz.ly', 'http://localhost:9000/kheina-content']
-
-match environment :
-	case Environment.prod :
-		cdn_host = 'https://cdn.fuzz.ly'
-
-	case Environment.dev :
-		cdn_host = 'https://cdn.fuzz.ly'
-
-	case _ :
-		cdn_host = 'http://localhost:9000/kheina-content'
 
 @unique
 class Rating(Enum) :
@@ -40,9 +30,6 @@ class PostSort(Enum) :
 	hot           = 'hot'
 	best          = 'best'
 	controversial = 'controversial'
-
-
-PostIdValidator = validator('post_id', pre=True, always=True, allow_reuse=True)(PostId)
 
 
 class Score(BaseModel) :
@@ -74,7 +61,7 @@ class BaseFetchRequest(TimelineRequest) :
 
 
 class FetchPostsRequest(BaseFetchRequest) :
-	tags: Optional[List[str]]
+	tags: Optional[list[str]]
 
 
 class FetchCommentsRequest(BaseFetchRequest) :
@@ -94,19 +81,6 @@ class MediaType(BaseModel) :
 	mime_type: str = ''
 
 
-@unique
-class TagGroupPortable(Enum) :
-	artist  = 'artist'
-	subject = 'subject'
-	species = 'species'
-	gender  = 'gender'
-	misc    = 'misc'
-
-
-class TagGroups(Dict[TagGroupPortable, List[str]]) :
-	pass
-
-
 def _thumbhash_converter(value: Any) -> Optional[str] :
 	if value :
 		if isinstance(value, bytes) :
@@ -120,31 +94,55 @@ def _thumbhash_converter(value: Any) -> Optional[str] :
 class MediaFlag(Enum) :
 	animated = 'animated'
 	video    = 'video'
+	audio    = 'audio'
+
+
+class Thumbnail(BaseModel) :
+	def __init__(self: Self, *args, **kwargs) -> None :
+		super().__init__(*args, **kwargs)
+		# since the url field is computed and not technically assigned, we must add it here to avoid it getting omitted
+		self.__fields_set__.add('url')
+
+	post_id:  PostId
+	crc:      Optional[int]
+	bounds:   int
+	size:     PostSize
+	type:     MediaType
+	filename: str
+	length:   int
+
+	# computed
+	url: str = ""
+
+	@validator('url', pre=True, always=True)
+	def _url(cls, _, values: dict) -> str | None :
+		if values['crc'] :
+			return f'{cdn_host}/{values["post_id"]}/{values["crc"]}/thumbnails/{quote(values["filename"])}'
+
+		return f'{cdn_host}/{values["post_id"]}/thumbnails/{quote(values["filename"])}'
 
 
 class Media(BaseModel) :
 	_thumbhash_converter = validator('thumbhash', pre=True, always=True, allow_reuse=True)(_thumbhash_converter)
-	_thumbnail_sizes = [
-		1200,
-		800,
-		400,
-		200,
-		100,
-	]
 
-	post_id:   PostId
-	updated:   datetime
-	crc:       Optional[int]
-	filename:  str
-	type:      MediaType
-	size:      PostSize
-	thumbhash: str
-	length:    int
-	flags:     list[MediaFlag] = []
+	def __init__(self: Self, *args, **kwargs) -> None :
+		super().__init__(*args, **kwargs)
+		# since the url field is computed and not technically assigned, we must add it here to avoid it getting omitted
+		self.__fields_set__.add('url')
+
+	post_id:    PostId
+	updated:    datetime
+	crc:        Optional[int]
+	filename:   str
+	type:       MediaType
+	size:       PostSize
+	thumbhash:  str
+	length:     int
+	thumbnails: list[Thumbnail]
+	flags:      list[MediaFlag] = []
 
 	# computed
-	url:        str            = ""
-	thumbnails: dict[str, str] = { }
+	url: str = ""
 
 	@validator('url', pre=True, always=True)
 	def _url(cls, _, values: dict) :
@@ -153,29 +151,9 @@ class Media(BaseModel) :
 
 		return f'{cdn_host}/{values["post_id"]}/{quote(values["filename"])}'
 
-	@validator('thumbnails', pre=True, always=True)
-	def _thumbnails(cls, _, values: dict) :
-		thumbnails: dict[str, str] = { }
-		if values['crc'] :
-			thumbnails['jpeg'] = f'{cdn_host}/{values["post_id"]}/{values["crc"]}/thumbnails/{cls._thumbnail_sizes[0]}.jpg'
-			thumbnails.update({
-				str(th): f'{cdn_host}/{values["post_id"]}/{values["crc"]}/thumbnails/{th}.webp'
-				for th in cls._thumbnail_sizes
-			})
 
-		else :
-			thumbnails['jpeg'] = f'{cdn_host}/{values["post_id"]}/thumbnails/{cls._thumbnail_sizes[0]}.jpg'
-			thumbnails.update({
-				str(th): f'{cdn_host}/{values["post_id"]}/thumbnails/{th}.webp'
-				for th in cls._thumbnail_sizes
-			})
-
-		return thumbnails
-
-
-class Post(BaseModel) :
+class Post(OmitModel) :
 	_post_id_validator = PostIdValidator
-	_post_id_converter = validator('parent', pre=True, always=True, allow_reuse=True)(_post_id_converter)
 
 	post_id:     PostId
 	title:       Optional[str]
@@ -183,12 +161,18 @@ class Post(BaseModel) :
 	user:        UserPortable
 	score:       Optional[Score]
 	rating:      Rating
-	parent:      Optional[PostId]
+	parent_id:   Optional[PostId]
+	parent:      Optional['Post'] = None
 	privacy:     Privacy
 	created:     datetime
 	updated:     datetime
 	media:       Optional[Media]
+	tags:        Optional[TagGroups]
 	blocked:     bool
+	replies:     Optional[list['Post']] = None
+	"""
+	None implies "not retrieved" whereas [] means no replies found
+	"""
 
 
 class SearchResults(BaseModel) :
@@ -205,6 +189,16 @@ def _bytes_converter(value: Any) -> Optional[bytes] :
 
 	if isinstance(value, str) :
 		return b64decode(value)
+
+
+class InternalThumbnail(BaseModel) :
+	post_id:  int
+	size:     int
+	type:     int
+	filename: str
+	length:   int
+	width:    int
+	height:   int
 
 
 class InternalPost(BaseModel) :
@@ -224,16 +218,53 @@ class InternalPost(BaseModel) :
 	rating:         int
 	parent:         Optional[int] = None
 	privacy:        int
-	created:        datetime           = Field(dt.zero(), description='orm:"default:now()"')
-	updated:        datetime           = Field(dt.zero(), description='orm:"default:now()"')
-	crc:            Optional[int]      = None
-	filename:       Optional[str]      = None
-	media_type:     Optional[int]      = None
-	media_updated:  Optional[datetime] = None
-	content_length: Optional[int]      = None
-	size:           Optional[PostSize] = Field(None, description='orm:"map[width:width,height:height]"')
-	thumbhash:      Optional[bytes]    = None
-	locked:         bool               = False
+	created:        datetime                  = Field(dt.zero(), description='orm:"default:now()"')
+	updated:        datetime                  = Field(dt.zero(), description='orm:"default:now()"')
+	crc:            Optional[int]             = None
+	filename:       Optional[str]             = None
+	media_type:     Optional[int]             = None
+	media_updated:  Optional[datetime]        = None
+	content_length: Optional[int]             = None
+	size:           Optional[PostSize]        = Field(None, description='orm:"map[width:width,height:height]"')
+	thumbhash:      Optional[bytes]           = None
+	thumbnails:     Optional[list[InternalThumbnail]] = Field(None, description='orm:"gen"')
+	locked:         bool                      = False
+	deleted:        Optional[datetime]        = None
+
+	# misc info not related to post
+	include_in_results: Optional[bool] = Field(True, description='orm:"-"')
+
+
+	@validator('thumbnails', pre=True)
+	def _thumbnails(cls, value: Optional[list[tuple[str, int, int, int, int, int] | InternalThumbnail]], values: dict[str, Any]) -> Optional[list[InternalThumbnail]] :
+		if not value :
+			return None
+
+		post_id = values['post_id']
+		thumbnails: list[InternalThumbnail] = []
+
+		for th in value :
+			if isinstance(th, InternalThumbnail) :
+				thumbnails.append(th)
+				continue
+
+			if not any(th) :
+				continue
+
+			thumbnails.append(InternalThumbnail(
+				post_id  = post_id,
+				filename = th[0],
+				size     = th[1],
+				type     = th[2],
+				length   = th[3],
+				width    = th[4],
+				height   = th[5],
+			))
+
+		if not thumbnails :
+			return None
+
+		return thumbnails
 
 
 class InternalScore(BaseModel) :

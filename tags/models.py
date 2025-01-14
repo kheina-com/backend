@@ -1,10 +1,9 @@
 from enum import Enum, unique
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel
 
-from posts.models import PostId, PostIdValidator
-from shared.models import UserPortable
+from shared.models import OmitModel, PostId, PostIdValidator, UserPortable
 
 
 @unique
@@ -15,6 +14,7 @@ class TagGroup(Enum) :
 	species = 'species'
 	gender  = 'gender'
 	misc    = 'misc'
+	system  = 'system'
 
 
 class Tag(BaseModel) :
@@ -37,17 +37,16 @@ class TagPortable(BaseModel) :
 	count: int
 
 
-class TagGroups(BaseModel) :
+class TagGroups(OmitModel) :
 	artist:  Optional[list[TagPortable]]
 	subject: Optional[list[TagPortable]]
 	sponsor: Optional[list[TagPortable]]
 	species: Optional[list[TagPortable]]
 	gender:  Optional[list[TagPortable]]
 	misc:    Optional[list[TagPortable]]
+	system:  Optional[list[TagPortable]]
 
-	# def dict(self, *args, **kwargs) -> Dict[str, Any] :
-	# 	kwargs.pop('exclude_none', None)
-	# 	return super().dict(*args, exclude_unset=True, **kwargs)
+assert set(TagGroup._member_names_) == set(TagGroups.__annotations__.keys())
 
 
 class LookupRequest(BaseModel) :

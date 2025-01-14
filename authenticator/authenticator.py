@@ -23,7 +23,7 @@ from shared.base64 import b64decode, b64encode
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import fetch
 from shared.datetime import datetime
-from shared.exceptions.http_error import BadRequest, Conflict, HttpError, InternalServerError, NotFound, Unauthorized, UnprocessableEntity
+from shared.exceptions.http_error import BadRequest, Conflict, FailedLogin, HttpError, InternalServerError, NotFound, UnprocessableEntity
 from shared.hashing import Hashable
 from shared.models import InternalUser
 from shared.models.auth import AuthState, AuthToken, KhUser, Scope, TokenMetadata
@@ -367,7 +367,7 @@ class Authenticator(SqlInterface, Hashable) :
 			)
 
 			if not data :
-				raise Unauthorized('login failed.')
+				raise FailedLogin('login failed.')
 
 			user_id, pwhash, secret, handle, name, mod, otp_secret_index, otp_nonce, otp_key = data
 			delete_otp: Optional[Callable[[], Awaitable[None]]] = None
@@ -389,12 +389,12 @@ class Authenticator(SqlInterface, Hashable) :
 				otp_secret: str = aeskey.decrypt(otp_nonce, otp_key, self._secrets[otp_secret_index]).decode()
 
 				if not pyotp.TOTP(otp_secret).verify(otp) :
-					raise Unauthorized('login failed.')
+					raise FailedLogin('login failed.')
 
 			password_hash = pwhash.decode()
 
 			if not self._argon2.verify(password_hash, password.encode() + self._secrets[secret]) :
-				raise Unauthorized('login failed.')
+				raise FailedLogin('login failed.')
 
 			if self._argon2.check_needs_rehash(password_hash) :
 				password_hash = self._argon2.hash(password.encode() + self._secrets[secret]).encode()
@@ -421,7 +421,7 @@ class Authenticator(SqlInterface, Hashable) :
 			token: TokenResponse = await self.generate_token(user_id, token_data)
 
 		except VerifyMismatchError as e :
-			raise Unauthorized('login failed.', err=e)
+			raise FailedLogin('login failed.', err=e)
 
 		except HttpError :
 			raise
@@ -518,7 +518,7 @@ class Authenticator(SqlInterface, Hashable) :
 			)
 
 			if not data :
-				raise Unauthorized('bot login failed.')
+				raise FailedLogin('bot login failed.')
 
 			bot_type_id: int
 			user_id, pw, secret, bot_type_id = data
@@ -526,10 +526,10 @@ class Authenticator(SqlInterface, Hashable) :
 			bot_type = await bot_type_map.get(bot_type_id)
 
 			if user_id != bot_login.user_id :
-				raise Unauthorized('login failed.')
+				raise FailedLogin('login failed.')
 
 			if not self._argon2.verify(password_hash, bot_login.password + self._secrets[secret]) :
-				raise Unauthorized('login failed.')
+				raise FailedLogin('login failed.')
 
 			if self._argon2.check_needs_rehash(password_hash) :
 				new_pw_hash = self._argon2.hash(bot_login.password + self._secrets[secret]).encode()
@@ -545,7 +545,7 @@ class Authenticator(SqlInterface, Hashable) :
 				)
 
 		except VerifyMismatchError :
-			raise Unauthorized('login failed.')
+			raise FailedLogin('login failed.')
 
 		except HttpError :
 			raise
@@ -603,19 +603,19 @@ class Authenticator(SqlInterface, Hashable) :
 			)
 
 			if not data :
-				raise Unauthorized('password change failed.')
+				raise FailedLogin('password change failed.')
 
 			pwhash, secret = data
 			password_hash  = pwhash
 
 			if not self._argon2.verify(password_hash.decode(), old_password.encode() + self._secrets[secret]) :
-				raise Unauthorized('password change failed.')
+				raise FailedLogin('password change failed.')
 
 			secret = randbelow(len(self._secrets))
 			new_password_hash = self._argon2.hash(new_password.encode() + self._secrets[secret]).encode()
 
 		except VerifyMismatchError :
-			raise Unauthorized('login failed.')
+			raise FailedLogin('login failed.')
 
 		except HttpError :
 			raise
@@ -810,7 +810,7 @@ class Authenticator(SqlInterface, Hashable) :
 		)
 
 		if not otp_data :
-			raise Unauthorized('login failed.')
+			raise FailedLogin('login failed.')
 
 		otp_hash: str    = otp_data[0].decode()
 		otp_secret_index = otp_data[1]

@@ -1,7 +1,7 @@
 from asyncio import Task, ensure_future
 from datetime import timedelta
 from math import ceil
-from typing import Iterable, Optional, Self, Tuple
+from typing import Iterable, Optional, Self
 
 from sets.models import InternalSet, SetId
 from sets.repository import Sets
@@ -9,11 +9,11 @@ from shared.auth import KhUser
 from shared.caching import AerospikeCache, ArgsCache
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
-from shared.sql.query import Field, Join, JoinType, Operator, Order, Query, Table, Value, Where
+from shared.sql.query import CTE, Field, Join, JoinType, Operator, Order, Query, Table, Value, Where
 from shared.timing import timed
 
 from .models import InternalPost, Post, PostId, PostSort, Privacy, Rating, Score, SearchResults
-from .repository import Posts, privacy_map, rating_map, users  # type: ignore
+from .repository import PostKVS, Posts, privacy_map, rating_map, users  # type: ignore
 
 
 sets = Sets()
@@ -61,7 +61,7 @@ class Posts(Posts) :
 				FROM kheina.public.posts
 				WHERE posts.privacy = privacy_to_id('public');
 				""",
-				fetch_one=True,
+				fetch_one = True,
 			)
 			count = data[0]
 
@@ -72,9 +72,10 @@ class Posts(Posts) :
 				FROM kheina.public.posts
 				WHERE posts.uploader = %s
 					AND posts.privacy = privacy_to_id('public');
-				""",
-				(user_id,),
-				fetch_one=True,
+				""", (
+					user_id,
+				),
+				fetch_one = True,
 			)
 			count = data[0]
 
@@ -85,9 +86,9 @@ class Posts(Posts) :
 				WHERE posts.rating = %s
 					AND posts.privacy = privacy_to_id('public');
 				""", (
-					await rating_map.get(tag),
+					await rating_map.get_id(tag),
 				),
-				fetch_one=True,
+				fetch_one = True,
 			)
 			count = data[0]
 
@@ -101,9 +102,10 @@ class Posts(Posts) :
 						ON tag_post.post_id = posts.post_id
 							AND posts.privacy = privacy_to_id('public')
 				WHERE tags.tag = %s;
-				""",
-				(tag,),
-				fetch_one=True,
+				""", (
+					tag,
+				),
+				fetch_one = True,
 			)
 			count = data[0]
 
@@ -118,6 +120,7 @@ class Posts(Posts) :
 		total: int = await self.post_count('_') or 1
 		
 		# since this is just an estimate, after all, we're going to count the tags with the fewest posts higher
+
 		# TODO: this value may need to be revisited, or removed altogether, or a more intelligent estimation system
 		# added in the future when there are more posts
 
@@ -125,7 +128,7 @@ class Posts(Posts) :
 
 		factor: float = 1.1
 
-		counts: list[Tuple[int, bool]] = []
+		counts: list[tuple[int, bool]] = []
 
 		for tag in tags :
 			invert: bool = False
@@ -164,9 +167,10 @@ class Posts(Posts) :
 
 
 	@timed
-	@ArgsCache(60)
-	async def _fetch_posts(self: Self, sort: PostSort, tags: Optional[Tuple[str, ...]], count: int, page: int) -> list[InternalPost] :
+	@AerospikeCache('kheina', 'posts', 'results.{sort}.{tags}.{count}.{page}', TTL_minutes=1, local_TTL=60, _kvs=PostKVS)
+	async def _fetch_posts(self: Self, sort: PostSort, tags: Optional[tuple[str, ...]], count: int, page: int) -> list[InternalPost] :
 		idk = { }
+		cte: Query
 
 		if tags :
 			include_tags = []
@@ -182,9 +186,7 @@ class Posts(Posts) :
 			exclude_sets = []
 
 			for tag in tags :
-				exclude = tag.startswith('-')
-
-				if exclude :
+				if exclude := tag.startswith('-') :
 					tag = tag[1:]
 
 				if tag.startswith('@') :
@@ -192,8 +194,8 @@ class Posts(Posts) :
 					(exclude_users if exclude else include_users).append(tag)
 					continue
 
-				if tag in { 'general', 'mature', 'explicit' } :
-					(exclude_rating if exclude else include_rating).append(tag)
+				if tag in Rating.__members__.keys() :
+					(exclude_rating if exclude else include_rating).append(Rating[tag])
 					continue
 
 				if tag.startswith('set:') :
@@ -205,7 +207,7 @@ class Posts(Posts) :
 						sort = PostSort[tag[5:]]
 
 					except KeyError :
-						raise BadRequest(f'{tag[5:]} is not a valid sort method. valid methods: {list(PostSort.__members__.keys())}')
+						raise BadRequest(f'{tag[5:]} is not a valid sort method. valid methods: [{", ".join(list(PostSort.__members__.keys()))}]')
 
 					continue
 
@@ -217,11 +219,9 @@ class Posts(Posts) :
 			if len(include_rating) > 1 :
 				raise BadRequest('can only search for posts from, at most, one rating at a time.')
 
-			query: Query
-
 			if include_tags or exclude_tags :
-				query = Query(
-					Table('kheina.public.tags')
+				cte = Query(
+					Table('kheina.public.tags'),
 				).join(
 					Join(
 						JoinType.inner,
@@ -245,7 +245,7 @@ class Posts(Posts) :
 						Where(
 							Field('posts', 'privacy'),
 							Operator.equal,
-							Value(await privacy_map.get(Privacy.public)),
+							Value(await privacy_map.get_id(Privacy.public)),
 						),
 						Where(
 							Field('posts', 'locked'),
@@ -253,27 +253,14 @@ class Posts(Posts) :
 							Value(False),
 						),
 					),
-					Join(
-						JoinType.inner,
-						Table('kheina.public.users'),
-					).where(
-						Where(
-							Field('users', 'user_id'),
-							Operator.equal,
-							Field('posts', 'uploader'),
-						),
-					),
-				).having(
-					Where(
-						Value(1, 'count'),
-						Operator.equal,
-						Value(len(include_tags)),
-					),
+				).group(
+					Field('posts', 'post_id'),
 				)
 
 			elif include_users :
-				query = Query(
-					Table('kheina.public.users')
+				# TODO: add relations to user_post and query from there
+				cte = Query(
+					Table('kheina.public.users'),
 				).join(
 					Join(
 						JoinType.inner,
@@ -287,7 +274,7 @@ class Posts(Posts) :
 						Where(
 							Field('posts', 'privacy'),
 							Operator.equal,
-							Value(await privacy_map.get(Privacy.public)),
+							Value(await privacy_map.get_id(Privacy.public)),
 						),
 						Where(
 							Field('posts', 'locked'),
@@ -295,37 +282,31 @@ class Posts(Posts) :
 							Value(False),
 						),
 					),
+				).group(
+					Field('posts', 'post_id'),
+					Field('users', 'user_id'),
 				)
 
 			else :
-				query = Query(
-					Table('kheina.public.posts')
-				).join(
-					Join(
-						JoinType.inner,
-						Table('kheina.public.users'),
-					).where(
-						Where(
-							Field('users', 'user_id'),
-							Operator.equal,
-							Field('posts', 'uploader'),
-						),
-					),
+				cte = Query(
+					Table('kheina.public.posts'),
 				).where(
 					Where(
 						Field('posts', 'privacy'),
 						Operator.equal,
-						Value(await privacy_map.get(Privacy.public)),
+						Value(await privacy_map.get_id(Privacy.public)),
 					),
 					Where(
 						Field('posts', 'locked'),
 						Operator.equal,
 						Value(False),
-					),			
+					),
+				).group(
+					Field('posts', 'post_id'),
 				)
 
 			if include_tags :
-				query.where(
+				cte.where(
 					Where(
 						Field('tags', 'deprecated'),
 						Operator.equal,
@@ -334,12 +315,18 @@ class Posts(Posts) :
 					Where(
 						Field('tags', 'tag'),
 						Operator.equal,
-						Value(include_tags, 'any'),
+						Value(include_tags, ['any']),
+					),
+				).having(
+					Where(
+						Value(1, ['count']),
+						Operator.equal,
+						Value(len(include_tags)),
 					),
 				)
 
 			if exclude_tags :
-				query.where(
+				cte.where(
 					Where(
 						Field('posts', 'post_id'),
 						Operator.not_in,
@@ -362,45 +349,91 @@ class Posts(Posts) :
 							Where(
 								Field('tags', 'tag'),
 								Operator.equal,
-								Value(exclude_tags, 'any'),
+								Value(exclude_tags, ['any']),
 							),
 						),
 					),
 				)
 
 			if include_users :
-				query.where(
-					Where(
-						Field('lower(users', 'handle)'),
-						Operator.equal,
-						Value(include_users[0], 'lower'),
-					),
-				)
+				# TODO: this should be rewritten to use posts and query by user_id directly
+				if cte._table != 'kheina.public.users' :
+					cte.join(
+						Join(
+							JoinType.inner,
+							Table('kheina.public.users'),
+						).where(
+							Where(
+								Field('users', 'user_id'),
+								Operator.equal,
+								Field('posts', 'uploader'),
+							),
+							Where(
+								Field('lower(users', 'handle)'),
+								Operator.equal,
+								Value(include_users[0], ['lower']),
+							),
+						),
+					).group(
+						Field('users', 'user_id'),
+					)
+
+				else :
+					cte.where(
+						Where(
+							Field('users', 'handle', 'lower'),
+							Operator.equal,
+							Value(include_users[0], ['lower']),
+						),
+					)
 
 			if exclude_users :
-				query.where(
-					Where(
-						Field('lower(users', 'handle)'),
-						Operator.not_equal,
-						Value(exclude_users, 'any'),  # TODO: add lower + any
-					),
-				)
+				# TODO: this should be rewritten to use posts and query by user_id directly
+				if cte._table != 'kheina.public.users' :
+					cte.join(
+						Join(
+							JoinType.inner,
+							Table('kheina.public.users'),
+						).where(
+							Where(
+								Field('users', 'user_id'),
+								Operator.equal,
+								Field('posts', 'uploader'),
+								),
+							Where(
+								Field('users', 'handle', 'lower'),
+								Operator.not_equal,
+								Value(tuple(map(str.lower, exclude_users)), ['lower', 'any']),
+							),
+						),
+					).group(
+						Field('users', 'user_id'),
+					)
+
+				else :
+					cte.where(
+						Where(
+							Field('lower(users', 'handle)'),
+							Operator.not_equal,
+							Value(tuple(map(str.lower, exclude_users)), ['lower', 'any']),
+						),
+					)
 
 			if include_rating :
-				query.where(
+				cte.where(
 					Where(
 						Field('posts', 'rating'),
 						Operator.equal,
-						Value(await rating_map.get(include_rating[0])),
+						Value(await rating_map.get_id(include_rating[0])),
 					),
 				)
 
 			if exclude_rating :
-				query.where(
+				cte.where(
 					Where(
 						Field('posts', 'rating'),
 						Operator.not_equal,
-						Value([await rating_map.get(x) for x in exclude_rating], 'all'),
+						Value([await rating_map.get_id(x) for x in exclude_rating], ['all']),
 					),
 				)
 
@@ -421,7 +454,7 @@ class Posts(Posts) :
 						Where(
 							Field('set_post', 'set_id'),
 							Operator.equal,
-							Value(list(map(int, include_sets)), 'all'),
+							Value(list(map(int, include_sets)), ['all']),
 						),
 					)
 
@@ -430,11 +463,12 @@ class Posts(Posts) :
 						Where(
 							Field('set_post', 'set_id'),
 							Operator.not_equal,
-							Value(list(map(int, exclude_sets)), 'any'),
+							Value(list(map(int, exclude_sets)), ['any']),
 						),
 					)
 
-				query.join(join_sets)
+				# this may need group(Field('set_post', 'post_id'))
+				cte.join(join_sets)
 
 			idk = {
 				'tags': tags,
@@ -449,43 +483,54 @@ class Posts(Posts) :
 			}
 
 		else :
-			query = Query(
-				Table('kheina.public.posts')
-			).join(
-				Join(
-					JoinType.inner,
-					Table('kheina.public.users'),
-				).where(
-					Where(
-						Field('users', 'user_id'),
-						Operator.equal,
-						Field('posts', 'uploader'),
-					),
-				),
+			cte = Query(
+				Table('kheina.public.posts'),
 			).where(
 				Where(
 					Field('posts', 'privacy'),
 					Operator.equal,
-					Value(await privacy_map.get(Privacy.public)),
+					Value(await privacy_map.get_id(Privacy.public)),
 				),
 				Where(
 					Field('posts', 'locked'),
 					Operator.equal,
 					Value(False),
-				),			
+				),
+			).group(
+				Field('posts', 'post_id'),
 			)
 
-		query.join(
+		cte.join(
 			Join(
-				JoinType.left,
-				Table('kheina.public.media'),
+				JoinType.inner,
+				Table('kheina.public.post_scores'),
 			).where(
 				Where(
-					Field('media', 'post_id'),
+					Field('post_scores', 'post_id'),
 					Operator.equal,
 					Field('posts', 'post_id'),
 				),
 			),
+		).group(
+			Field('post_scores', 'post_id'),
+		).select(
+			Field('posts', 'post_id'),
+			Field('posts', 'title'),
+			Field('posts', 'description'),
+			Field('posts', 'rating'),
+			Field('posts', 'parent'),
+			Field('posts', 'created'),
+			Field('posts', 'updated'),
+			Field('posts', 'uploader'),
+			Field('posts', 'privacy'),
+			Field('posts', 'locked'),
+			Field('post_scores', 'upvotes'),
+			Field('post_scores', 'downvotes'),
+			Value(True, alias='include_in_results'),
+		).limit(
+			count,
+		).page(
+			page,
 		)
 
 		if sort in { PostSort.new, PostSort.old } :
@@ -493,61 +538,31 @@ class Posts(Posts) :
 			if tags and len(tags) == 1 and len(include_sets) == 1 :
 				# this is a very special case, we want to hijack the new/old sorts to instead sort by set index.
 				# there's really no reason anyone would want to sort by post age for a single set
-				query.order(
+				cte.order(
 					Field('set_post', 'index'),
 					Order.descending_nulls_first if sort == PostSort.new else Order.ascending_nulls_last,
-				).group(
-					Field('posts', 'post_id'),
-					Field('media', 'post_id'),
-					Field('set_post', 'set_id'),
-					Field('set_post', 'index'),
 				)
 
 			else :
-				query.order(
+				cte.order(
 					Field('posts', 'created'),
 					Order.descending_nulls_first if sort == PostSort.new else Order.ascending_nulls_last,
-				).group(
-					Field('posts', 'post_id'),
-					Field('media', 'post_id'),
-					Field('users', 'user_id'),
 				)
 
 		else :
-			query.order(
+			cte.order(
 				Field('post_scores', sort.name),
 				Order.descending_nulls_first,
 			).order(
 				Field('posts', 'created'),
 				Order.descending_nulls_first,
-			).join(
-				Join(
-					JoinType.inner,
-					Table('kheina.public.post_scores'),
-				).where(
-					Where(
-						Field('post_scores', 'post_id'),
-						Operator.equal,
-						Field('posts', 'post_id'),
-					),
-				),
-			).group(
-				Field('posts', 'post_id'),
-				Field('media', 'post_id'),
-				Field('post_scores', 'post_id'),
-				Field('users', 'user_id'),
 			)
 
-		parser = self.internal_select(query.limit(
-				count,
-			).page(
-				page,
-			)
-		)
+		parser = self.internal_select(query := self.CteQuery(cte))
 
 		sql, params = query.build()
 		self.logger.info({
-			'query': sql,
+			'query':  sql,
 			'params': params,
 			**idk,
 		})
@@ -563,7 +578,7 @@ class Posts(Posts) :
 
 		total: Task[int]
 
-		t: Optional[Tuple[str, ...]] = None
+		t: Optional[tuple[str, ...]] = None
 
 		if tags :
 			t = tuple(sorted(map(Posts._normalize_tag, filter(None, map(str.strip, filter(None, tags))))))
@@ -585,248 +600,96 @@ class Posts(Posts) :
 
 	@HttpErrorHandler('retrieving post')
 	@timed
-	async def getPost(self: Self, user: KhUser, post_id: PostId) -> Post :
-		post: InternalPost = await self._get_post(post_id)
+	async def getPost(self: Self, user: KhUser, post_id: PostId, sort: PostSort) -> Post :
+		ipost: InternalPost = await self._get_post(post_id)
 
-		if await self.authorized(user, post) :
-			return await self.post(user, post)
+		if not await self.authorized(user, ipost) :
+			raise NotFound(f'no data was found for the provided post id: {post_id}.')
 
-		raise NotFound(f'no data was found for the provided post id: {post_id}.')
+		replies      = ensure_future(self.fetchComments(user, post_id, sort))
+		post         = await self.post(user, ipost)
+		post.replies = await replies
+		return post
 
 
-	@ArgsCache(5)
+	@AerospikeCache('kheina', 'posts', 'comments.{post_id}.{sort}.{count}.{page}', TTL_minutes=1, local_TTL=60, _kvs=PostKVS)
 	async def _getComments(self: Self, post_id: PostId, sort: PostSort, count: int, page: int) -> list[InternalPost] :
-		query = Query(
-			Table('kheina.public.posts')
-		).join(
-			Join(
-				JoinType.inner,
-				Table('kheina.public.following'),
-			).where(
-				Where(
-					Field('following', 'follows'),
-					Operator.equal,
-					Field('posts', 'uploader'),
-				),
-			),
-			Join(
-				JoinType.left,
-				Table('kheina.public.media'),
-			).where(
-				Where(
-					Field('media', 'post_id'),
-					Operator.equal,
+		cte = Query(
+			Table('post_ids', cte=True),
+		).cte(
+			CTE(
+				'post_ids(post_id)',
+				Query(
+					Table('kheina.public.posts'),
+				).select(
 					Field('posts', 'post_id'),
+					Value(True, alias='include_in_results'),
+				).where(
+					Where(
+						Field('posts', 'parent'),
+						Operator.equal,
+						Value(post_id.int()),
+					),
+					Where(
+						Field('posts', 'privacy'),
+						Operator.equal,
+						Value(await privacy_map.get_id(Privacy.public)),
+					),
+					Where(
+						Field('posts', 'locked'),
+						Operator.equal,
+						Value(False),
+					),
+				).union(
+					Query(
+						Table('kheina.public.posts'),
+						Table('post_ids', cte=True),
+					).select(
+						Field('posts', 'post_id'),
+						Value(False, alias='include_in_results'),
+					).where(
+						Where(
+							Field('posts', 'parent'),
+							Operator.equal,
+							Field('post_ids', 'post_id'),
+						),
+						Where(
+							Field('posts', 'privacy'),
+							Operator.equal,
+							Value(await privacy_map.get_id(Privacy.public)),
+						),
+						Where(
+							Field('posts', 'locked'),
+							Operator.equal,
+							Value(False),
+						),
+					),
 				),
+				recursive = True,
 			),
-		).where(
-			Where(
-				Field('posts', 'parent'),
-				Operator.equal,
-				Value(post_id.int()),
-			),
-			Where(
-				Field('posts', 'privacy'),
-				Operator.equal,
-				Value(await privacy_map.get(Privacy.public)),
-			),
-		).order(
-			Field('posts', 'created'),
-			Order.descending_nulls_first,
-		)
-
-		parser = self.internal_select(query)
-		return parser(await self.query_async(query, fetch_all=True))
-
-
-		# TODO: fix new and old sorts
-		data = await self.query_async(f"""
-			SELECT
-				posts.post_id,
-				posts.title,
-				posts.description,
-				posts.rating,
-				posts.parent,
-				posts.created,
-				posts.updated,
-				posts.filename,
-				posts.media_type,
-				posts.width,
-				posts.height,
-				posts.uploader,
-				posts.privacy,
-				posts.thumbhash,
-				posts.locked,
-				posts.revision
-			FROM kheina.public.posts
-				LEFT JOIN kheina.public.post_scores
-					ON post_scores.post_id = posts.post_id
-			WHERE posts.parent = %s
-				AND posts.privacy = privacy_to_id('public')
-			ORDER BY post_scores.{sort.name} DESC NULLS LAST
-			LIMIT %s
-			OFFSET %s;
-			""", (
-				post_id.int(),
-				count,
-				count * (page - 1),
-			),
-			fetch_all=True,
-		)
-
-		return self.parse_response(data)
-
-
-	@HttpErrorHandler('retrieving comments')
-	async def fetchComments(self: Self, user: KhUser, post_id: PostId, sort: PostSort, count: int, page: int) -> list[Post] :
-		self._validatePageNumber(page)
-		self._validateCount(count)
-
-		# TODO: if there ever comes a time when there are thousands of comments on posts, this may need to be revisited.
-		posts: list[InternalPost] = await self._getComments(post_id, sort, count, page)
-		return await self.posts(user, posts)
-
-
-	@ArgsCache(10)
-	@HttpErrorHandler('retrieving timeline posts')
-	async def timelinePosts(self: Self, user: KhUser, count: int, page: int) -> list[Post] :
-		self._validatePageNumber(page)
-		self._validateCount(count)
-
-		query = Query(
-			Table('kheina.public.posts')
-		).join(
-			Join(
-				JoinType.inner,
-				Table('kheina.public.following'),
-			).where(
-				Where(
-					Field('following', 'user_id'),
-					Operator.equal,
-					Value(user.user_id),
-				),
-				Where(
-					Field('following', 'follows'),
-					Operator.equal,
-					Field('posts', 'uploader'),
-				),
-			),
-			Join(
-				JoinType.left,
-				Table('kheina.public.media'),
-			).where(
-				Where(
-					Field('media', 'post_id'),
-					Operator.equal,
-					Field('posts', 'post_id'),
-				),
-			),
-		).where(
-			Where(
-				Field('posts', 'privacy'),
-				Operator.equal,
-				Value(await privacy_map.get(Privacy.public)),
-			),
-		).order(
-			Field('posts', 'created'),
-			Order.descending_nulls_first,
-		).limit(
-			count,
-		).page(
-			page,
-		)
-
-		parser = self.internal_select(query)
-		posts: list[InternalPost] = parser(await self.query_async(query, fetch_all=True))
-
-		return await self.posts(user, posts)
-
-
-	@ArgsCache(10)
-	@HttpErrorHandler('generating RSS feed')
-	async def RssFeedPosts(self: Self, user: KhUser) -> Tuple[datetime, list[Post]]:
-		now = datetime.now()
-
-		query = Query(
-			Table('kheina.public.posts')
-		).join(
-			Join(
-				JoinType.inner,
-				Table('kheina.public.users'),
-			).where(
-				Where(
-					Field('users', 'user_id'),
-					Operator.equal,
-					Field('posts', 'uploader'),
-				),
-			),
-			Join(
-				JoinType.left,
-				Table('kheina.public.media'),
-			).where(
-				Where(
-					Field('media', 'post_id'),
-					Operator.equal,
-					Field('posts', 'post_id'),
-				),
-			),
-		).where(
-			Where(
-				Field('posts', 'privacy'),
-				Operator.equal,
-				Value(await privacy_map.get(Privacy.public)),
-			),
-			Where(
-				Field('posts', 'created'),
-				Operator.greater_than_equal_to,
-				Value(now - timedelta(days=1)),
-			),
-		).group(
+		).select(
 			Field('posts', 'post_id'),
-			Field('media', 'post_id'),
-			Field('users', 'user_id'),
-		).order(
+			Field('posts', 'title'),
+			Field('posts', 'description'),
+			Field('posts', 'rating'),
+			Field('posts', 'parent'),
 			Field('posts', 'created'),
-			Order.descending_nulls_first,
-		)
-
-		parser = self.internal_select(query)
-		posts: list[InternalPost] = parser(await self.query_async(query, fetch_all=True))
-
-		return now, await self.posts(user, posts)
-
-
-	@HttpErrorHandler('retrieving user posts')
-	async def fetchUserPosts(self: Self, user: KhUser, handle: str, count: int, page: int) -> SearchResults :
-		handle = handle.lower()
-		self._validatePageNumber(page)
-		self._validateCount(count)
-
-		tags: Tuple[str] = (f'@{handle}',)
-		total: Task[int] = ensure_future(self.total_results(tags))
-		iposts: list[InternalPost] = await self._fetch_posts(PostSort.new, tags, count, page)
-		posts: list[Post] = await self.posts(user, iposts)
-
-		return SearchResults(
-			posts=posts,
-			count=len(posts),
-			page=page,
-			total=await total,
-		)
-
-
-	async def _fetch_own_posts(self: Self, user_id: int, sort: PostSort, count: int, page: int) -> list[InternalPost] :
-		query = Query(
-			Table('kheina.public.posts')
+			Field('posts', 'updated'),
+			Field('posts', 'uploader'),
+			Field('posts', 'privacy'),
+			Field('posts', 'locked'),
+			Field('post_scores', 'upvotes'),
+			Field('post_scores', 'downvotes'),
+			Field('post_ids', 'include_in_results'),
 		).join(
 			Join(
 				JoinType.inner,
-				Table('kheina.public.users'),
+				Table('kheina.public.posts'),
 			).where(
 				Where(
-					Field('posts', 'uploader'),
+					Field('posts', 'post_id'),
 					Operator.equal,
-					Field('users', 'user_id'),
+					Field('post_ids', 'post_id'),
 				),
 			),
 			Join(
@@ -839,21 +702,217 @@ class Posts(Posts) :
 					Field('posts', 'post_id'),
 				),
 			),
+		).order(
+			Field('posts', 'created'),
+			Order.ascending_nulls_last if sort == PostSort.old else Order.descending_nulls_first,
+		).limit(
+			count,
+		).page(
+			page,
+		)
+
+		if sort not in { PostSort.new, PostSort.old } :
+			cte.order(
+				Field('post_scores', sort.name),
+				Order.descending_nulls_first,
+			)
+
+		parser = self.internal_select(query := self.CteQuery(cte))
+		return parser(await self.query_async(query, fetch_all=True))
+
+
+	@HttpErrorHandler('retrieving comments')
+	async def fetchComments(
+		self:    Self,
+		user:    KhUser,
+		post_id: PostId,
+		sort:    PostSort = PostSort.hot,
+		count:   int      = 64,
+		page:    int      = 1,
+	) -> list[Post] :
+		self._validatePageNumber(page)
+		self._validateCount(count)
+
+		iposts: list[InternalPost] = await self._getComments(post_id, sort, count, page)
+		return await self.posts(user, iposts, assign_parents=False)
+
+
+	@ArgsCache(10)
+	@HttpErrorHandler('retrieving timeline posts')
+	async def timelinePosts(self: Self, user: KhUser, count: int, page: int) -> list[Post] :
+		self._validatePageNumber(page)
+		self._validateCount(count)
+
+		cte = Query(
+			Table('kheina.public.posts'),
+		).select(
+			Field('posts', 'post_id'),
+			Field('posts', 'title'),
+			Field('posts', 'description'),
+			Field('posts', 'rating'),
+			Field('posts', 'parent'),
+			Field('posts', 'created'),
+			Field('posts', 'updated'),
+			Field('posts', 'uploader'),
+			Field('posts', 'privacy'),
+			Field('posts', 'locked'),
+			Field('post_scores', 'upvotes'),
+			Field('post_scores', 'downvotes'),
+		).where(
+			Where(
+				Field('posts', 'privacy'),
+				Operator.equal,
+				Value(await privacy_map.get_id(Privacy.public)),
+			),
+			Where(
+				Field('posts', 'locked'),
+				Operator.equal,
+				Value(False),
+			),
+		).join(
 			Join(
 				JoinType.left,
-				Table('kheina.public.media'),
+				Table('kheina.public.post_scores'),
 			).where(
 				Where(
-					Field('media', 'post_id'),
+					Field('post_scores', 'post_id'),
 					Operator.equal,
 					Field('posts', 'post_id'),
 				),
 			),
+		).group(
+			Field('posts', 'post_id'),
+			Field('post_scores', 'post_id'),
+		).order(
+			Field('posts', 'created'),
+			Order.descending_nulls_first,
+		).limit(
+			count,
+		).page(
+			page,
+		)
+
+		parser = self.internal_select(query := self.CteQuery(cte))
+		posts: list[InternalPost] = parser(await self.query_async(query, fetch_all=True))
+		return await self.posts(user, posts)
+
+
+	@ArgsCache(10)
+	@HttpErrorHandler('generating RSS feed')
+	async def RssFeedPosts(self: Self, user: KhUser) -> tuple[datetime, list[Post]]:
+		now = datetime.now()
+		cte = Query(
+			Table('kheina.public.posts'),
+		).select(
+			Field('posts', 'post_id'),
+			Field('posts', 'title'),
+			Field('posts', 'description'),
+			Field('posts', 'rating'),
+			Field('posts', 'parent'),
+			Field('posts', 'created'),
+			Field('posts', 'updated'),
+			Field('posts', 'uploader'),
+			Field('posts', 'privacy'),
+			Field('posts', 'locked'),
+			Field('post_scores', 'upvotes'),
+			Field('post_scores', 'downvotes'),
+		).where(
+			Where(
+				Field('posts', 'privacy'),
+				Operator.equal,
+				Value(await privacy_map.get_id(Privacy.public)),
+			),
+			Where(
+				Field('posts', 'locked'),
+				Operator.equal,
+				Value(False),
+			),
+			Where(
+				Field('posts', 'created'),
+				Operator.greater_than_equal_to,
+				Value(now - timedelta(days=1)),
+			),
+		).join(
+			Join(
+				JoinType.left,
+				Table('kheina.public.post_scores'),
+			).where(
+				Where(
+					Field('post_scores', 'post_id'),
+					Operator.equal,
+					Field('posts', 'post_id'),
+				),
+			),
+		).group(
+			Field('posts', 'post_id'),
+			Field('post_scores', 'post_id'),
+		).order(
+			Field('posts', 'created'),
+			Order.descending_nulls_first,
+		)
+
+		parser = self.internal_select(query := self.CteQuery(cte))
+		posts: list[InternalPost] = parser(await self.query_async(query, fetch_all=True))
+		return now, await self.posts(user, posts)
+
+
+	@HttpErrorHandler('retrieving user posts')
+	async def fetchUserPosts(self: Self, user: KhUser, handle: str, count: int, page: int) -> SearchResults :
+		handle = handle.lower()
+		self._validatePageNumber(page)
+		self._validateCount(count)
+
+		tags:   tuple[str]         = (f'@{handle}',)
+		total:  Task[int]          = ensure_future(self.total_results(tags))
+		iposts: list[InternalPost] = await self._fetch_posts(PostSort.new, tags, count, page)
+		posts:  list[Post]         = await self.posts(user, iposts)
+
+		return SearchResults(
+			posts = posts,
+			count = len(posts),
+			page  = page,
+			total = await total,
+		)
+
+
+	@AerospikeCache('kheina', 'posts', 'own_posts.{user_id}.{sort}.{count}.{page}', TTL_minutes=1, local_TTL=60, _kvs=PostKVS)
+	async def _fetch_own_posts(self: Self, user_id: int, sort: PostSort, count: int, page: int) -> list[InternalPost] :
+		cte = Query(
+			Table('kheina.public.posts'),
+		).select(
+			Field('posts', 'post_id'),
+			Field('posts', 'title'),
+			Field('posts', 'description'),
+			Field('posts', 'rating'),
+			Field('posts', 'parent'),
+			Field('posts', 'created'),
+			Field('posts', 'updated'),
+			Field('posts', 'uploader'),
+			Field('posts', 'privacy'),
+			Field('posts', 'locked'),
+			Field('post_scores', 'upvotes'),
+			Field('post_scores', 'downvotes'),
+			Value(True, alias='include_in_results'),
 		).where(
 			Where(
 				Field('posts', 'uploader'),
 				Operator.equal,
-				Value(user_id),				
+				Value(user_id),
+			),
+			Where(
+				Field('posts', 'deleted'),
+				Operator.is_null,
+			),
+		).join(
+			Join(
+				JoinType.left,
+				Table('kheina.public.post_scores'),
+			).where(
+				Where(
+					Field('post_scores', 'post_id'),
+					Operator.equal,
+					Field('posts', 'post_id'),
+				),
 			),
 		).limit(
 			count,
@@ -862,13 +921,13 @@ class Posts(Posts) :
 		)
 
 		if sort in { PostSort.new, PostSort.old } :
-			query.order(
+			cte.order(
 				Field('posts', 'created'),
 				Order.descending_nulls_first if sort == PostSort.new else Order.ascending_nulls_last,
 			)
 
 		else :
-			query.order(
+			cte.order(
 				Field('post_scores', sort.name),
 				Order.descending_nulls_first,
 			).order(
@@ -876,12 +935,11 @@ class Posts(Posts) :
 				Order.descending_nulls_first,
 			)
 
-		parser = self.internal_select(query)
+		parser = self.internal_select(query := self.CteQuery(cte))
 		return parser(await self.query_async(query, fetch_all=True))
 
 
 	@HttpErrorHandler("retrieving user's own posts")
-	@ArgsCache(5)
 	async def fetchOwnPosts(self: Self, user: KhUser, sort: PostSort, count: int, page: int) -> list[Post] :
 		self._validatePageNumber(page)
 		self._validateCount(count)
@@ -893,46 +951,57 @@ class Posts(Posts) :
 	@HttpErrorHandler("retrieving user's drafts")
 	@ArgsCache(5)
 	async def fetchDrafts(self: Self, user: KhUser) -> list[Post] :
-		query = Query(
-			Table('kheina.public.posts')
+		cte = Query(
+			Table('kheina.public.posts'),
+		).select(
+			Field('posts', 'post_id'),
+			Field('posts', 'title'),
+			Field('posts', 'description'),
+			Field('posts', 'rating'),
+			Field('posts', 'parent'),
+			Field('posts', 'created'),
+			Field('posts', 'updated'),
+			Field('posts', 'uploader'),
+			Field('posts', 'privacy'),
+			Field('posts', 'locked'),
+			Field('post_scores', 'upvotes'),
+			Field('post_scores', 'downvotes'),
+			Value(True, alias='include_in_results'),
+		).where(
+			Where(
+				Field('posts', 'privacy'),
+				Operator.equal,
+				Value(await privacy_map.get_id(Privacy.draft)),
+			),
+			Where(
+				Field('posts', 'uploader'),
+				Operator.equal,
+				Value(user.user_id),
+			),
+			Where(
+				Field('posts', 'deleted'),
+				Operator.is_null,
+			),
 		).join(
 			Join(
-				JoinType.inner,
-				Table('kheina.public.users'),
-			).where(
-				Where(
-					Field('posts', 'uploader'),
-					Operator.equal,
-					Field('users', 'user_id'),
-				),
-			),
-			Join(
 				JoinType.left,
-				Table('kheina.public.media'),
+				Table('kheina.public.post_scores'),
 			).where(
 				Where(
-					Field('media', 'post_id'),
+					Field('post_scores', 'post_id'),
 					Operator.equal,
 					Field('posts', 'post_id'),
 				),
 			),
-		).where(
-			Where(
-				Field('posts', 'uploader'),
-				Operator.equal,
-				Value(user.user_id),				
-			),
-			Where(
-				Field('posts', 'privacy'),
-				Operator.equal,
-				Value(await privacy_map.get(Privacy.draft)),
-			),
+		).group(
+			Field('posts', 'post_id'),
+			Field('post_scores', 'post_id'),
 		).order(
 			Field('posts', 'updated'),
 			Order.descending_nulls_first,
 		)
 
-		parser = self.internal_select(query)
+		parser = self.internal_select(query := self.CteQuery(cte))
 		posts: list[InternalPost] = parser(await self.query_async(query, fetch_all=True))
 
 		return await self.posts(user, posts)

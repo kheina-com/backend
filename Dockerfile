@@ -38,8 +38,10 @@ RUN apt update && \
 	libtiff-dev \
 	libwebp-dev \
 	imagemagick \
-	libimage-exiftool-perl && \
-	rm -rf /var/lib/apt/lists/*
+	libimage-exiftool-perl \
+	ffmpeg
+
+RUN rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY . /app

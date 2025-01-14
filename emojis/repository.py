@@ -7,11 +7,11 @@ from shared.auth import KhUser
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadRequest, NotFound
+from shared.maps import privacy_map
 from shared.models import PostId
 from shared.models._shared import InternalUser, UserPortable
 from shared.sql import SqlInterface
 from users.repository import Users
-from shared.maps import privacy_map
 
 from .models import Emoji, InternalEmoji
 

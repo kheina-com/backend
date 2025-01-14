@@ -73,9 +73,7 @@ class Users(Users) :
 			iuser.name = name
 
 		if privacy is not None :
-			p = await privacy_map.get(privacy)
-			assert isinstance(p, int)
-			iuser.privacy = p
+			iuser.privacy = await privacy_map.get_id(privacy)
 
 		if website is not None :
 			website = self._validate_website(website)

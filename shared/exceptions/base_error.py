@@ -1,9 +1,9 @@
-from typing import Any, Dict, Union
+from typing import Any, Optional
 from uuid import UUID, uuid4
 
 
 class BaseError(Exception) :
-	def __init__(self, *args: Any, refid: Union[UUID, str, None] = None, logdata: Dict[str, Any] = { }, **kwargs: Any) -> None :
+	def __init__(self, *args: Any, refid: Optional[UUID | str] = None, logdata: dict[str, Any] = { }, **kwargs: Any) -> None :
 		Exception.__init__(self, *args)
 
 		self.refid = refid or logdata.get('refid') or uuid4()
@@ -23,7 +23,7 @@ class BaseError(Exception) :
 		if 'refid' in logdata :
 			del logdata['refid']
 
-		self.logdata: Dict[str, Any] = {
+		self.logdata: dict[str, Any] = {
 			**logdata,
 			**kwargs,
 		}

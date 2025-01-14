@@ -1,10 +1,10 @@
-from typing import Self
 from datetime import datetime as pydatetime
+from typing import Self
 
 from psycopg.errors import UniqueViolation
 
-from shared.datetime import datetime
 from shared.auth import KhUser
+from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, Conflict, HttpErrorHandler, NotFound
 
 from .models import AliasRequest, CreateRequest, Emoji, InternalEmoji, UpdateRequest

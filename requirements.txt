@@ -17,4 +17,6 @@ scipy~=1.14.0
 ujson>=3.0.0
 uvicorn>=0.11.6
 gunicorn>=20.1.0
-asyncclick~=8.1.7.2
+asyncclick>=8.1.7.2
+aiofiles>=24.1.0
+python-ffmpeg>=2.0.12

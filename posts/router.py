@@ -1,14 +1,14 @@
 from asyncio import ensure_future
 from html import escape
-from typing import List, Optional, Union
-from urllib.parse import quote
+from typing import Literal, Optional, Union
 from uuid import uuid4
 
+import aiofiles
 from fastapi import APIRouter, File, Form, UploadFile
 
 from shared.backblaze import B2Interface
-from shared.config.constants import environment
-from shared.exceptions.http_error import UnprocessableEntity
+from shared.config.constants import Environment, environment
+from shared.exceptions.http_error import NotImplemented, UnprocessableEntity
 from shared.models._shared import convert_path_post_id
 from shared.models.auth import Scope
 from shared.server import Request, Response
@@ -16,7 +16,7 @@ from shared.timing import timed
 from shared.utilities.units import Byte
 from users.users import Users
 
-from .models import BaseFetchRequest, CreateRequest, FetchCommentsRequest, FetchPostsRequest, GetUserPostsRequest, IconRequest, Media, Post, PostId, PrivacyRequest, RssDateFormat, RssDescription, RssFeed, RssItem, RssMedia, RssTitle, Score, SearchResults, TimelineRequest, UpdateRequest, VoteRequest
+from .models import BaseFetchRequest, CreateRequest, FetchCommentsRequest, FetchPostsRequest, GetUserPostsRequest, IconRequest, Media, Post, PostId, PostSort, RssDateFormat, RssDescription, RssFeed, RssItem, RssMedia, RssTitle, Score, SearchResults, TimelineRequest, UpdateRequest, VoteRequest
 from .posts import Posts
 from .uploader import Uploader
 
@@ -33,8 +33,62 @@ posts    = Posts()
 users    = Users()
 uploader = Uploader()
 
+origin: Literal['http://localhost:3000', 'https://dev.fuzz.ly', 'https://fuzz.ly']
 
-@postRouter.put('')
+match environment :
+	case Environment.prod :
+		origin = 'https://fuzz.ly'
+
+	case Environment.dev :
+		origin = 'https://dev.fuzz.ly'
+
+	case _ :
+		origin = 'http://localhost:3000'
+
+postExclude = {
+	'thumbnails': {
+		'__all__': {
+			'post_id': True,
+			'crc':     True,
+		},
+	},
+	'media': {
+		'post_id':    True,
+		'thumbnails': {
+			'__all__': {
+				'post_id': True,
+				'crc':     True,
+			},
+		},
+	},
+	'__all__': {
+		'media': {
+			'post_id':    True,
+			'thumbnails': {
+				'__all__': {
+					'post_id': True,
+					'crc':     True,
+				},
+			},
+		},
+	},
+	'posts': {
+		'__all__': {
+			'media': {
+				'post_id':    True,
+				'thumbnails': {
+					'__all__': {
+						'post_id': True,
+						'crc':     True,
+					},
+				},
+			},
+		},
+	},
+}
+
+
+@postRouter.put('', response_model=Post, response_model_exclude=postExclude)
 @timed.root
 async def v1CreatePost(req: Request, body: CreateRequest) -> Post :
 	"""
@@ -76,23 +130,8 @@ async def v1DeletePost(req: Request, post_id: PostId) -> None :
 	await uploader.deletePost(req.user, convert_path_post_id(post_id))
 
 
-@postRouter.post('/image')
-@timed.root
-async def v1UploadImage(
-	req:        Request,
-	file:       UploadFile    = File(None),
-	post_id:    PostId        = Form(None),
-	web_resize: Optional[int] = Form(None),
-) -> Media :
-	"""
-	FORMDATA: {
-		"post_id":    Optional[str],
-		"file":       image file,
-		"web_resize": Optional[int],
-	}
-	"""
-	await req.user.authenticated()
-
+@timed
+async def handleFile(file: UploadFile, post_id: PostId) -> str :
 	# since it doesn't do this for us, send the proper error back
 	detail: list[dict[str, Union[str, list[str]]]] = []
 
@@ -133,12 +172,33 @@ async def v1UploadImage(
 	assert file.filename
 	file_on_disk: str = f'images/{uuid4().hex}_{file.filename}'
 
-	with open(file_on_disk, 'wb') as f :
+	async with aiofiles.open(file_on_disk, 'wb') as f :
 		while chunk := await file.read(Byte.kilobyte.value * 10) :
-			f.write(chunk)
+			await f.write(chunk)
 
 	await file.close()
+	return file_on_disk
 
+
+@postRouter.post('/image', response_model_exclude=postExclude)
+@timed.root
+async def v1UploadImage(
+	req:        Request,
+	file:       UploadFile    = File(None),
+	post_id:    PostId        = Form(None),
+	web_resize: Optional[int] = Form(None),
+) -> Media :
+	"""
+	FORMDATA: {
+		"post_id":    str,
+		"file":       image file,
+		"web_resize": Optional[int],
+	}
+	"""
+	await req.user.authenticated()
+	file_on_disk = await handleFile(file, post_id)
+
+	assert file.filename
 	return await uploader.uploadImage(
 		user         = req.user,
 		file_on_disk = file_on_disk,
@@ -148,7 +208,32 @@ async def v1UploadImage(
 	)
 
 
-@postRouter.post('/vote', responses={ 200: { 'model': Score } })
+@postRouter.post('/video', response_model_exclude=postExclude)
+@timed.root
+async def v1UploadVideo(
+	req:        Request,
+	file:       UploadFile    = File(None),
+	post_id:    PostId        = Form(None),
+) -> Media :
+	"""
+	FORMDATA: {
+		"post_id": str,
+		"file":    video file,
+	}
+	"""
+	await req.user.authenticated()
+	file_on_disk = await handleFile(file, post_id)
+
+	assert file.filename
+	return await uploader.uploadVideo(
+		user         = req.user,
+		file_on_disk = file_on_disk,
+		filename     = file.filename,
+		post_id      = PostId(post_id),
+	)
+
+
+@postRouter.post('/vote', response_model=Score)
 @timed.root
 async def v1Vote(req: Request, body: VoteRequest) -> Score :
 	await req.user.verify_scope(Scope.user)
@@ -172,65 +257,43 @@ async def v1SetBanner(req: Request, body: IconRequest) -> None :
 	await uploader.setBanner(req.user, body.post_id, body.coordinates)
 
 
-@postsRouter.post('', responses={ 200: { 'model': SearchResults } })
+@postsRouter.post('', response_model=SearchResults, response_model_exclude=postExclude)
 @timed.root
 async def v1FetchPosts(req: Request, body: FetchPostsRequest) -> SearchResults :
 	return await posts.fetchPosts(req.user, body.sort, body.tags, body.count, body.page)
 
 
-@postRouter.post('/comments', responses={ 200: { 'model': List[Post] } })
+@postRouter.post('/comments', response_model=list[Post], response_model_exclude=postExclude)
 @timed.root
-async def v1FetchComments(req: Request, body: FetchCommentsRequest) -> List[Post] :
+async def v1FetchComments(req: Request, body: FetchCommentsRequest) -> list[Post] :
 	return await posts.fetchComments(req.user, body.post_id, body.sort, body.count, body.page)
 
 
-@postsRouter.post('/user', responses={ 200: { 'model': List[Post] } })
+@postsRouter.post('/user', response_model=SearchResults, response_model_exclude=postExclude)
 @timed.root
 async def v1FetchUserPosts(req: Request, body: GetUserPostsRequest) -> SearchResults :
 	return await posts.fetchUserPosts(req.user, body.handle, body.count, body.page)
 
 
-@postsRouter.post('/mine', responses={ 200: { 'model': List[Post] } })
+@postsRouter.post('/mine', response_model=list[Post], response_model_exclude=postExclude)
 @timed.root
-async def v1FetchMyPosts(req: Request, body: BaseFetchRequest) -> List[Post] :
+async def v1FetchMyPosts(req: Request, body: BaseFetchRequest) -> list[Post] :
 	await req.user.authenticated()
 	return await posts.fetchOwnPosts(req.user, body.sort, body.count, body.page)
 
 
-@postsRouter.get('/drafts', responses={ 200: { 'model': List[Post] } })
+@postsRouter.get('/drafts', response_model=list[Post], response_model_exclude=postExclude)
 @timed.root
-async def v1FetchDrafts(req: Request) -> List[Post] :
+async def v1FetchDrafts(req: Request) -> list[Post] :
 	await req.user.authenticated()
 	return await posts.fetchDrafts(req.user)
 
 
-@postsRouter.post('/timeline', responses={ 200: { 'model': List[Post] } })
+@postsRouter.post('/timeline', response_model=list[Post], response_model_exclude=postExclude)
 @timed.root
-async def v1TimelinePosts(req: Request, body: TimelineRequest) -> List[Post] :
+async def v1TimelinePosts(req: Request, body: TimelineRequest) -> list[Post] :
 	await req.user.authenticated()
 	return await posts.timelinePosts(req.user, body.count, body.page)
-
-
-async def get_post_media(post: Post) -> str :
-	if not post.media :
-		return ""
-
-	filename: str
-
-	if post.media.crc :
-		filename = f'{post.post_id}/{post.media.crc}/{escape(quote(post.media.filename))}'
-
-	else :
-		filename = f'{post.post_id}/{escape(quote(post.media.filename))}'
-
-	file_info = await b2.get_file_info(filename)
-	assert file_info
-
-	return RssMedia.format(
-		url='https://cdn.fuzz.ly/' + filename,
-		mime_type=file_info.content_type,
-		length=file_info.size,
-	)
 
 
 @postsRouter.get('/feed.rss', response_model=str)
@@ -238,17 +301,10 @@ async def get_post_media(post: Post) -> str :
 async def v1Rss(req: Request) -> Response :
 	await req.user.verify_scope(Scope.user)
 
-	timeline = ensure_future(posts.RssFeedPosts(req.user))
-	user = ensure_future(users.getSelf(req.user))
+	tl   = ensure_future(posts.RssFeedPosts(req.user))
+	user = await users._get_user(req.user.user_id)
 
-	retrieved, timeline = await timeline
-	media = { }
-
-	for post in timeline :
-		media[post.post_id] = ensure_future(get_post_media(post))
-
-	user = await user
-
+	retrieved, timeline = await tl
 	return Response(
 		media_type = 'application/xml',
 		content    = RssFeed.format(
@@ -260,23 +316,27 @@ async def v1Rss(req: Request) -> Response :
 			last_build_date = retrieved.strftime(RssDateFormat),
 			items           = '\n'.join([
 				RssItem.format(
-					title       = RssTitle.format(escape(post.title)) if post.title else '',
-					link        = f'https://fuzz.ly/p/{post.post_id}' if environment.is_prod() else f'https://dev.fuzz.ly/p/{post.post_id}',
-					description = RssDescription.format(escape(post.description)) if post.description else '',
-					user        = f'https://fuzz.ly/{post.user.handle}' if environment.is_prod() else f'https://dev.fuzz.ly/{post.user.handle}',
-					created     = post.created.strftime(RssDateFormat),
-					media       = await media[post.post_id],
 					post_id     = post.post_id,
+					title       = RssTitle.format(escape(post.title)) if post.title else '',
+					link        = f'{origin}/p/{post.post_id}',
+					description = RssDescription.format(escape(post.description)) if post.description else '',
+					user        = f'{origin}/{post.user.handle}',
+					created     = post.created.strftime(RssDateFormat),
+					media       = RssMedia.format(
+						url       = post.media.url,
+						mime_type = post.media.type.mime_type,
+						length    = post.media.length,
+					) if post.media else '',
 				) for post in timeline
 			]),
 		),
 	)
 
 
-@postRouter.get('/{post_id}', responses={ 200: { 'model': Post } })
+@postRouter.get('/{post_id}', response_model=Post, response_model_exclude=postExclude)
 @timed.root
-async def v1Post(req: Request, post_id: PostId) -> Post :
-	return await posts.getPost(req.user, convert_path_post_id(post_id))
+async def v1Post(req: Request, post_id: PostId, sort: PostSort = PostSort.hot) -> Post :
+	return await posts.getPost(req.user, convert_path_post_id(post_id), sort)
 
 
 app = APIRouter(

@@ -104,7 +104,6 @@ async def v1token(token: str) -> AuthToken :
 	if datetime.now() > expires :
 		raise Unauthorized('Key has expired.')
 
-
 	token_info_task = ensure_future(KVS.get_async(guid.bytes, TokenMetadata))
 
 	try :

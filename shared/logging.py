@@ -14,7 +14,7 @@ from .utilities import getFullyQualifiedClassName
 from .utilities.json import json_stream
 
 
-class colors:
+class colors :
 	reset         = '\033[0m'
 	bold          = '\033[01m'
 	disable       = '\033[02m'
@@ -70,7 +70,7 @@ def getLevelColor(severity: int) -> colors.fg :
 		case 40 :
 			return colors.fg.lightred
 		case _ :
-			return colors.fg.blue
+			return colors.fg.red
 
 
 def getParenColor(it: int) -> colors.fg :
@@ -82,7 +82,7 @@ def getParenColor(it: int) -> colors.fg :
 		case 2 :
 			return colors.fg.lightblue
 		case _ :
-			return colors.fg.black
+			return colors.fg.red
 
 
 class TerminalAgent :
@@ -102,7 +102,7 @@ class TerminalAgent :
 
 	def pretty_struct(self, struct: Any, indent: int = 0, nest: int = 0) -> str :
 		if struct is None :
-			return colors.colorize('null', colors.fg.lightblue)
+			return colors.colorize('null', colors.fg.blue)
 
 		if isinstance(struct, str) :
 			remover = ''
@@ -114,13 +114,13 @@ class TerminalAgent :
 			if struct.count('\n') :
 				return struct.replace('\n' + remover, '\n' + ' ' * indent)
 
-			return colors.colorize(struct, colors.fg.cyan)
+			return colors.colorize(struct, colors.fg.lightcyan)
+
+		if isinstance(struct, bool) :
+			return colors.colorize(str(struct).lower(), colors.fg.blue)
 
 		if isinstance(struct, (int, float)) :
 			return colors.colorize(str(struct), colors.fg.lightgreen)
-
-		if isinstance(struct, bool) :
-			return colors.colorize(str(struct), colors.fg.orange)
 
 		if isinstance(struct, list) :
 			if not len(struct) :
@@ -246,7 +246,10 @@ class LogHandler(logging.Handler) :
 				pass
 
 
-def getLogger(name: Optional[str] = None, level: int = logging.INFO, filter: Callable = lambda x : x, disable: list[str] = [], **kwargs: Any) -> Logger :
+def getLogger(name: Optional[str] = None, level: int = logging.INFO, filter: Optional[Callable[[logging.LogRecord], logging.LogRecord | bool]] = None, disable: list[str] = [], **kwargs: Any) -> Logger :
+	"""
+	where filter is a callable that accepts a record 
+	"""
 	name = name or f'{repo_name}.{short_hash}'
 
 	for loggerName in disable :
@@ -254,18 +257,12 @@ def getLogger(name: Optional[str] = None, level: int = logging.INFO, filter: Cal
 
 	logging.root.setLevel(logging.NOTSET)
 
-	# # TODO: check for names and add a handler for each name
-	# if len(logging.root.handlers) == 1 and type(logging.root.handlers[0]) is LogHandler :
-	# 	logging.root.handlers[0].level = min(logging.root.handlers[0].level, level)
-
-	# else :
-	# 	handler: LogHandler = LogHandler(name, level=level)
-	# 	handler.addFilter(filter)
-	# 	logging.root.handlers.clear()
-	# 	logging.root.addHandler(handler)
-
 	if name not in { h.get_name() for h in logging.root.handlers } :
 		handler: LogHandler = LogHandler(name, level=level)
+
+		if not filter :
+			filter = lambda x : name == x.name
+
 		handler.addFilter(filter)
 		logging.root.addHandler(handler)
 
