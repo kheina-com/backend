@@ -22,7 +22,7 @@ from authenticator.models import LoginRequest
 from shared.base64 import b64decode, b64encode
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import decryptCredentialFile, fetch
-from .shared.datetime import datetime
+from shared.datetime import datetime
 from shared.logging import TerminalAgent
 from shared.sql import SqlInterface
 
@@ -224,8 +224,9 @@ async def uploadEmojis() -> None :
 			strikes: dict[int, Strike] = sbix.strikes  # type: ignore
 			sizes = list(strikes.keys())
 			size = max(sizes)
+			glyphs = len(strikes[size].glyphs)
 
-			for key, glyph in strikes[size].glyphs.items() :
+			for i, (key, glyph) in enumerate(strikes[size].glyphs.items()) :
 				if glyph.graphicType == 'png ':
 					total_emojis += 1
 					key = None
@@ -247,7 +248,7 @@ async def uploadEmojis() -> None :
 						text = re.sub(r'\W+', '-', info['name']).strip('-').lower()
 						alt = info['chars'].strip()
 
-					print('name:', text)
+					progress_bar(glyphs, i)
 					filename = f'{text}{suffix}.png'
 
 					await b2.upload_async(glyph.imageData, f'emoji/{filename}', 'image/png')
@@ -423,6 +424,10 @@ def readSecret(secret: str, format: str = "") -> None :
 	reads an encrypted kube secret
 	"""
 
+	path   = secret.split('.')
+	secret = path[0]
+	path   = path[1:]
+
 	out, err = Popen(['kubectl', 'get', 'secret', 'kh-aes', '-o', 'jsonpath={.data.value}'], stdout=PIPE, stderr=PIPE).communicate()
 	if err :
 		return click.echo(f'{err}: {err.decode()}')
@@ -439,12 +444,23 @@ def readSecret(secret: str, format: str = "") -> None :
 	if err :
 		return click.echo(f'{err}: {err.decode()}')
 
-	cred = b64decode(json.loads(out).values().__iter__().__next__())
+	cred   = b64decode(json.loads(out).values().__iter__().__next__())
+	parsed = decryptCredentialFile(json.loads(cred)['value'].encode())
+
+	for p in path :
+		if not parsed :
+			continue
+
+		if (pint := isint(p)) is not None :
+			parsed = parsed[pint]
+
+		else :
+			parsed = parsed.get(p)
 
 	if format == 'json' :
-		return click.echo(json.dumps(decryptCredentialFile(json.loads(cred)['value'].encode())))
+		return click.echo(json.dumps(parsed))
 
-	click.echo(f'{secret}: ' + TerminalAgent('').pretty_struct(decryptCredentialFile(json.loads(cred)['value'].encode())))
+	click.echo(f'{".".join([secret] + path)}: ' + TerminalAgent('').pretty_struct(parsed))
 
 
 if __name__ == '__main__' :

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from enum import Enum, unique
 from functools import lru_cache
 from re import compile
-from typing import Any, Generator, List, Optional, Self, Tuple, Union
+from typing import Any, Generator, Optional, Self, Tuple, Union
 
 
 @unique
@@ -57,13 +57,23 @@ class Value :
 @dataclass
 class Field :
 	table:    str
-	column:   str
+	column:   Optional[str] = None
 	function: Optional[str] = None
+	alias:    Optional[str] = None
 
 	def __str__(self) :
+		field: str = self.table
+
+		if self.column :
+			field = f'{self.table}.{self.column}'
+
 		if self.function :
-			return f'{self.function}({self.table}.{self.column})'
-		return f'{self.table}.{self.column}'
+			field = f'{self.function}({field})'
+
+		if self.alias :
+			field = f'{field} AS {self.alias}'
+
+		return field
 
 	def __hash__(self) :
 		return hash(str(self))
@@ -92,9 +102,11 @@ class Where :
 
 class Table :
 
-	def __init__(self, string: str, alias: Optional[str] = None) :
-		assert string.startswith('kheina.')
-		assert string.count('.') == 2
+	def __init__(self, string: str, alias: Optional[str] = None, cte: bool = False) :
+		if not cte :
+			assert string.startswith('kheina.')
+			assert string.count('.') == 2
+
 		if alias :
 			self.__value__ = string + ' AS ' + alias
 
@@ -116,7 +128,7 @@ class Join :
 
 		self._join_type: JoinType    = join_type
 		self._table:     Table       = table
-		self._where:     List[Where] = []
+		self._where:     list[Where] = []
 
 	def where(self, *where: Where) :
 		for w in where :
@@ -153,7 +165,7 @@ class Insert :
 	def __init__(self, *columns: str) :
 		self.columns: Tuple[str, ...] = tuple(map(__sanitize__, columns))
 
-		self._values:    List[Tuple[Union[Field, Value, 'Query'], ...]] = []
+		self._values:    list[Tuple[Union[Field, Value, 'Query'], ...]] = []
 
 
 	def values(self: Self, *values: Union[Field, Value, 'Query']) -> Self :
@@ -193,19 +205,41 @@ class Update :
 		yield from self.value.params()
 
 
+class CTE :
+
+	def __init__(self, name: str, query: 'Query', recursive: bool = False) -> None :
+		self.query:     Query = query
+		self.name:      str   = name
+		self.recursive: bool  = recursive
+
+
+	def __str__(self: Self) -> str :
+		cte: str = 'WITH '
+
+		if self.recursive :
+			cte += 'RECURSIVE '
+
+		return cte + self.name + ' AS (' + self.query.__build_query__() + ')'
+
+
+	def params(self) -> Generator[Any, Any, None] :
+		yield from self.query.params()
+
+
 class Query :
 
 	def __init__(self, table: Table) -> None :
 		assert type(table) == Table
 
 		self._table:     Table                     = table
-		self._joins:     List[Join]                = []
-		self._select:    List[Field]               = []
-		self._where:     List[Where]               = []
-		self._having:    List[Where]               = []
-		self._group:     List[Field]               = []
-		self._order:     List[Tuple[Field, Order]] = []
-		self._update:    List[Update]              = []
+		self._joins:     list[Join]                = []
+		self._select:    list[Field]               = []
+		self._where:     list[Where]               = []
+		self._having:    list[Where]               = []
+		self._group:     list[Field]               = []
+		self._order:     list[Tuple[Field, Order]] = []
+		self._update:    list[Update]              = []
+		self._with:      list[CTE]                 = []
 		self._limit:     Optional[int]             = None
 		self._offset:    Optional[int]             = None
 		self._function:  Optional[str]             = None
@@ -224,10 +258,14 @@ class Query :
 
 			return sql
 
-		query: str
+		query: str = ''
 		select = False
 
+		if self._with :
+			query += ','.join(list(map(str, self._with)))
+
 		if self._update :
+			assert not select
 			query = (
 				f'UPDATE {self._table} SET ' +
 				','.join(list(map(str, self._update)))
@@ -235,9 +273,10 @@ class Query :
 
 		elif self._select :
 			select = True
-			query = f'SELECT {",".join(list(map(str, self._select)))} FROM {self._table}'
+			query += f'SELECT {",".join(list(map(str, self._select)))} FROM {self._table}'
 
 		elif self._delete :
+			assert not select
 			query = f'DELETE FROM {self._table}'
 
 		else :
@@ -301,12 +340,17 @@ class Query :
 	def build(self: Self) -> Tuple[str, Tuple[Any, ...]] :
 		return self.__build_query__() + ';', tuple(self.params())
 
-	def params(self: Self) -> List[Any] :
+	def params(self: Self) -> list[Any] :
 		if self._insert :
 			assert not self._select
 			return list(self._insert.params())
 
 		params = []
+
+		if self._with :
+			assert self._select
+			for cte in self._with :
+				params += list(cte.params())
 
 		if self._update :
 			assert not self._select
@@ -337,30 +381,35 @@ class Query :
 		for f in field :
 			assert type(f) == Field
 			self._select.append(f)
+
 		return self
 
 	def join(self: Self, *join: Join) -> Self :
 		for j in join :
 			assert type(j) == Join
 			self._joins.append(j)
+
 		return self
 
 	def where(self: Self, *where: Where) -> Self :
 		for w in where :
 			assert type(w) == Where
 			self._where.append(w)
+
 		return self
 
 	def group(self: Self, *field: Field) -> Self :
 		for f in field :
 			assert type(f) == Field
 			self._group.append(f)
+
 		return self
 
 	def having(self: Self, *having: Where) -> Self :
 		for h in having :
 			assert type(h) == Where
 			self._having.append(h)
+
 		return self
 
 	def order(self: Self, field: Field, order: Order) -> Self :
@@ -397,6 +446,7 @@ class Query :
 		for u in update :
 			assert type(u) == Update
 			self._update.append(u)
+
 		return self
 
 	def delete(self: Self) -> Self :
@@ -409,3 +459,10 @@ class Query :
 
 	def on_conflict(self: Self) -> Self :
 		raise NotImplementedError('not yet')
+
+	def cte(self: Self, *cte: CTE) -> Self :
+		for w in cte :
+			assert type(w) == CTE
+			self._with.append(w)
+
+		return self

@@ -126,8 +126,7 @@ class Users(SqlInterface) :
 
 
 	@staticmethod
-	def _validate_privacy(p: Optional[Union[Privacy, int]]) -> UserPrivacy :
-		assert isinstance(p, Privacy), 'privacy value must of the Privacy type'
+	def _validate_privacy(p: Optional[Privacy]) -> UserPrivacy :
 		assert p == Privacy.public or p == Privacy.private, 'privacy value must be public or private'
 		return p
 

@@ -22,7 +22,7 @@ select post_id, updated, media_type, filename, content_length, thumbhash, width,
 from public.posts
 where filename is not null;
 
-drop view if exists internal_posts;
+drop view if exists public.internal_posts;
 create view public.internal_posts as
 select
 	posts.post_id,
@@ -47,8 +47,8 @@ from public.posts
 left join public.media
 	on media.post_id = posts.post_id;
 
-drop function if exists internal_posts_funcs;
-create function internal_posts_funcs() returns trigger as $$
+drop function if exists public.internal_posts_funcs;
+create function public.internal_posts_funcs() returns trigger as $$
 begin
 
 	if (tg_op = 'DELETE') then
@@ -96,7 +96,7 @@ end;
 $$ language plpgsql;
 
 create trigger internal_posts_funcs
-instead of insert or update or delete on internal_posts
-for each row execute function internal_posts_funcs();
+instead of insert or update or delete on public.internal_posts
+for each row execute function public.internal_posts_funcs();
 
 commit;

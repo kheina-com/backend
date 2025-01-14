@@ -1,3 +1,6 @@
+begin;
+set local SCHEMA 'public';
+
 -- this code is from https://github.com/hashicorp/boundary/blob/cb89422d9d679dd718b66861ee1712b1cbf13179/internal/db/migrations/postgres/01_domain_types.up.sql#L114-L146
 -- licensed under the Mozilla Public License, version 2.0
 
@@ -32,3 +35,5 @@ comment on function
   immutable_columns()
 is
   'function used in before update triggers to make columns immutable';
+
+commit;

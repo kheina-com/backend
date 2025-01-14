@@ -61,7 +61,7 @@ class Posts(Posts) :
 				FROM kheina.public.posts
 				WHERE posts.privacy = privacy_to_id('public');
 				""",
-				fetch_one=True,
+				fetch_one = True,
 			)
 			count = data[0]
 
@@ -72,9 +72,10 @@ class Posts(Posts) :
 				FROM kheina.public.posts
 				WHERE posts.uploader = %s
 					AND posts.privacy = privacy_to_id('public');
-				""",
-				(user_id,),
-				fetch_one=True,
+				""", (
+					user_id,
+				),
+				fetch_one = True,
 			)
 			count = data[0]
 
@@ -85,9 +86,9 @@ class Posts(Posts) :
 				WHERE posts.rating = %s
 					AND posts.privacy = privacy_to_id('public');
 				""", (
-					await rating_map.get(tag),
+					await rating_map.get_id(tag),
 				),
-				fetch_one=True,
+				fetch_one = True,
 			)
 			count = data[0]
 
@@ -101,9 +102,10 @@ class Posts(Posts) :
 						ON tag_post.post_id = posts.post_id
 							AND posts.privacy = privacy_to_id('public')
 				WHERE tags.tag = %s;
-				""",
-				(tag,),
-				fetch_one=True,
+				""", (
+					tag,
+				),
+				fetch_one = True,
 			)
 			count = data[0]
 
@@ -245,7 +247,7 @@ class Posts(Posts) :
 						Where(
 							Field('posts', 'privacy'),
 							Operator.equal,
-							Value(await privacy_map.get(Privacy.public)),
+							Value(await privacy_map.get_id(Privacy.public)),
 						),
 						Where(
 							Field('posts', 'locked'),
@@ -287,7 +289,7 @@ class Posts(Posts) :
 						Where(
 							Field('posts', 'privacy'),
 							Operator.equal,
-							Value(await privacy_map.get(Privacy.public)),
+							Value(await privacy_map.get_id(Privacy.public)),
 						),
 						Where(
 							Field('posts', 'locked'),
@@ -315,7 +317,7 @@ class Posts(Posts) :
 					Where(
 						Field('posts', 'privacy'),
 						Operator.equal,
-						Value(await privacy_map.get(Privacy.public)),
+						Value(await privacy_map.get_id(Privacy.public)),
 					),
 					Where(
 						Field('posts', 'locked'),
@@ -466,13 +468,13 @@ class Posts(Posts) :
 				Where(
 					Field('posts', 'privacy'),
 					Operator.equal,
-					Value(await privacy_map.get(Privacy.public)),
+					Value(await privacy_map.get_id(Privacy.public)),
 				),
 				Where(
 					Field('posts', 'locked'),
 					Operator.equal,
 					Value(False),
-				),			
+				),
 			)
 
 		query.join(
@@ -482,6 +484,16 @@ class Posts(Posts) :
 			).where(
 				Where(
 					Field('media', 'post_id'),
+					Operator.equal,
+					Field('posts', 'post_id'),
+				),
+			),
+			Join(
+				JoinType.left,
+				Table('kheina.public.thumbnails'),
+			).where(
+				Where(
+					Field('thumbnails', 'post_id'),
 					Operator.equal,
 					Field('posts', 'post_id'),
 				),
@@ -538,7 +550,8 @@ class Posts(Posts) :
 				Field('users', 'user_id'),
 			)
 
-		parser = self.internal_select(query.limit(
+		parser = self.internal_select(
+			query.limit(
 				count,
 			).page(
 				page,
@@ -546,6 +559,7 @@ class Posts(Posts) :
 		)
 
 		sql, params = query.build()
+		# print({ 'sql': sql, 'params': params })
 		self.logger.info({
 			'query': sql,
 			'params': params,
@@ -619,6 +633,16 @@ class Posts(Posts) :
 					Field('posts', 'post_id'),
 				),
 			),
+			Join(
+				JoinType.left,
+				Table('kheina.public.thumbnails'),
+			).where(
+				Where(
+					Field('thumbnails', 'post_id'),
+					Operator.equal,
+					Field('posts', 'post_id'),
+				),
+			),
 		).where(
 			Where(
 				Field('posts', 'parent'),
@@ -628,7 +652,7 @@ class Posts(Posts) :
 			Where(
 				Field('posts', 'privacy'),
 				Operator.equal,
-				Value(await privacy_map.get(Privacy.public)),
+				Value(await privacy_map.get_id(Privacy.public)),
 			),
 		).order(
 			Field('posts', 'created'),
@@ -721,11 +745,21 @@ class Posts(Posts) :
 					Field('posts', 'post_id'),
 				),
 			),
+			Join(
+				JoinType.left,
+				Table('kheina.public.thumbnails'),
+			).where(
+				Where(
+					Field('thumbnails', 'post_id'),
+					Operator.equal,
+					Field('posts', 'post_id'),
+				),
+			),
 		).where(
 			Where(
 				Field('posts', 'privacy'),
 				Operator.equal,
-				Value(await privacy_map.get(Privacy.public)),
+				Value(await privacy_map.get_id(Privacy.public)),
 			),
 		).order(
 			Field('posts', 'created'),
@@ -770,11 +804,21 @@ class Posts(Posts) :
 					Field('posts', 'post_id'),
 				),
 			),
+			Join(
+				JoinType.left,
+				Table('kheina.public.thumbnails'),
+			).where(
+				Where(
+					Field('thumbnails', 'post_id'),
+					Operator.equal,
+					Field('posts', 'post_id'),
+				),
+			),
 		).where(
 			Where(
 				Field('posts', 'privacy'),
 				Operator.equal,
-				Value(await privacy_map.get(Privacy.public)),
+				Value(await privacy_map.get_id(Privacy.public)),
 			),
 			Where(
 				Field('posts', 'created'),
@@ -802,16 +846,16 @@ class Posts(Posts) :
 		self._validatePageNumber(page)
 		self._validateCount(count)
 
-		tags: Tuple[str] = (f'@{handle}',)
-		total: Task[int] = ensure_future(self.total_results(tags))
+		tags:   Tuple[str]         = (f'@{handle}',)
+		total:  Task[int]          = ensure_future(self.total_results(tags))
 		iposts: list[InternalPost] = await self._fetch_posts(PostSort.new, tags, count, page)
-		posts: list[Post] = await self.posts(user, iposts)
+		posts:  list[Post]         = await self.posts(user, iposts)
 
 		return SearchResults(
-			posts=posts,
-			count=len(posts),
-			page=page,
-			total=await total,
+			posts = posts,
+			count = len(posts),
+			page  = page,
+			total = await total,
 		)
 
 
@@ -845,6 +889,16 @@ class Posts(Posts) :
 			).where(
 				Where(
 					Field('media', 'post_id'),
+					Operator.equal,
+					Field('posts', 'post_id'),
+				),
+			),
+			Join(
+				JoinType.left,
+				Table('kheina.public.thumbnails'),
+			).where(
+				Where(
+					Field('thumbnails', 'post_id'),
 					Operator.equal,
 					Field('posts', 'post_id'),
 				),
@@ -916,6 +970,16 @@ class Posts(Posts) :
 					Field('posts', 'post_id'),
 				),
 			),
+			Join(
+				JoinType.left,
+				Table('kheina.public.thumbnails'),
+			).where(
+				Where(
+					Field('thumbnails', 'post_id'),
+					Operator.equal,
+					Field('posts', 'post_id'),
+				),
+			),
 		).where(
 			Where(
 				Field('posts', 'uploader'),
@@ -925,7 +989,7 @@ class Posts(Posts) :
 			Where(
 				Field('posts', 'privacy'),
 				Operator.equal,
-				Value(await privacy_map.get(Privacy.draft)),
+				Value(await privacy_map.get_id(Privacy.draft)),
 			),
 		).order(
 			Field('posts', 'updated'),

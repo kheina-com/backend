@@ -273,7 +273,7 @@ async def v1Rss(req: Request) -> Response :
 	)
 
 
-@postRouter.get('/{post_id}', responses={ 200: { 'model': Post } })
+@postRouter.get('/{post_id}', response_model=Post)
 @timed.root
 async def v1Post(req: Request, post_id: PostId) -> Post :
 	return await posts.getPost(req.user, convert_path_post_id(post_id))
