@@ -20,7 +20,6 @@ Example: PostId is used by both user and post models
 """
 
 
-'''
 # insane shit
 class __undefined__(type) :
 	def __bool__(cls) :
@@ -31,6 +30,7 @@ class Undefined(metaclass=__undefined__) :
 	pass
 
 
+'''
 class BaseModel(PBM) :
 	"""
 	excludes any value set to Undefined from BaseModel.dict, as well as on encoded responses via fastapi

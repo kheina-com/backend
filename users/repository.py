@@ -9,7 +9,7 @@ from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadRequest, NotFound
 from shared.maps import privacy_map
-from shared.models import Badge, InternalUser, Privacy, User, UserPortable, UserPrivacy, Verified
+from shared.models import Badge, InternalUser, Privacy, Undefined, User, UserPortable, UserPrivacy, Verified
 from shared.sql import SqlInterface
 from shared.timing import timed
 
@@ -200,7 +200,7 @@ class Users(SqlInterface) :
 			return { }
 
 		cached = await UserKVS.get_many_async(user_ids)
-		misses = [k for k, v in cached.items() if v is None]
+		misses = [k for k, v in cached.items() if v is Undefined]
 
 		if not misses :
 			return cached
@@ -330,7 +330,7 @@ class Users(SqlInterface) :
 			int(k[k.rfind('|') + 1:]): v
 			for k, v in (await FollowKVS.get_many_async([f'{user_id}|{t}' for t in targets])).items()
 		}
-		misses = [k for k, v in cached.items() if v is None]
+		misses = [k for k, v in cached.items() if v is Undefined]
 
 		if not misses :
 			return cached

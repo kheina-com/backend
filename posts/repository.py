@@ -11,10 +11,11 @@ from shared.caching.key_value_store import KeyValueStore
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, NotFound
 from shared.maps import privacy_map
-from shared.models import InternalUser, UserPortable
+from shared.models import InternalUser, Undefined, UserPortable
 from shared.sql import SqlInterface
 from shared.sql.query import CTE, Field, Join, JoinType, Operator, Query, Table, Value, Where
 from shared.timing import timed
+from shared.utilities import flatten
 from tags.models import InternalTag, Tag, TagGroup
 from tags.repository import TagKVS, Tags
 from users.repository import Users
@@ -485,7 +486,7 @@ class Posts(SqlInterface) :
 			return { }
 
 		cached = await ScoreKVS.get_many_async(post_ids)
-		misses = [PostId(k) for k, v in cached.items() if v is None]
+		misses = [PostId(k) for k, v in cached.items() if v is Undefined]
 
 		if not misses :
 			return cached
@@ -551,7 +552,7 @@ class Posts(SqlInterface) :
 			PostId(k[k.rfind('|') + 1:]): v
 			for k, v in (await VoteKVS.get_many_async([f'{user_id}|{post_id}' for post_id in post_ids])).items()
 		}
-		misses = [k for k, v in cached.items() if v is None]
+		misses = [k for k, v in cached.items() if v is Undefined]
 
 		if not misses :
 			return cached
@@ -819,7 +820,7 @@ class Posts(SqlInterface) :
 		misses: list[PostId] = []
 
 		for k, v in list(cached.items()) :
-			if v is not None :
+			if v is not Undefined :
 				continue
 
 			misses.append(k)
@@ -876,8 +877,13 @@ class Posts(SqlInterface) :
 		scores_task:    Task[dict[PostId, Optional[Score]]] = ensure_future(self._scores(user, iposts))
 
 		tags:      dict[PostId, list[InternalTag]] = await self._tags_many(list(map(lambda x : PostId(x.post_id), iposts)))
+		at_task:   Task[list[Tag]]                 = ensure_future(tagger.tags(user, [t for l in tags.values() for t in l]))
 		uploaders: dict[int, UserCombined]         = await uploaders_task
 		scores:    dict[PostId, Optional[Score]]   = await scores_task
+		all_tags:  dict[str, Tag]                  = {
+			tag.tag: tag
+			for tag in await at_task
+		}
 
 		# mapping of post_id -> parent post_id
 		parents:   dict[PostId, PostId] = { }
@@ -888,7 +894,6 @@ class Posts(SqlInterface) :
 			post_id:   PostId           = PostId(ipost.post_id)
 			parent_id: Optional[PostId] = None
 
-			t: Task[list[Tag]] = ensure_future(tagger.tags(user, tags[post_id]))
 			if ipost.parent :
 				parent_id = parents[post_id] = PostId(ipost.parent)
 
@@ -941,7 +946,7 @@ class Posts(SqlInterface) :
 
 				# only the first call retrieves blocked info, all the rest should be cached and not actually await
 				blocked = await is_post_blocked(user, uploaders[ipost.user_id].internal, [t.name for t in tags[post_id]]),
-				tags    = tagger.groups(await t)
+				tags    = tagger.groups([all_tags[t.name] for t in tags[post_id]])
 			)
 
 			if not assign_parents :
@@ -953,6 +958,9 @@ class Posts(SqlInterface) :
 
 		if assign_parents :
 			for post_id, parent in parents.items() :
+				if parent not in all_posts :
+					continue
+
 				all_posts[post_id].parent = all_posts[parent]
 
 		else :

@@ -10,6 +10,7 @@ import aerospike
 
 from ..config.constants import environment
 from ..config.credentials import fetch
+from ..models import Undefined
 from ..timing import timed
 from ..utilities import __clear_cache__, coerse
 
@@ -109,7 +110,7 @@ class KeyValueStore :
 					self._cache[key] = (exp, value)
 
 				else :
-					data_map[key] = None
+					data_map[key] = Undefined
 
 			return {
 				**data_map,

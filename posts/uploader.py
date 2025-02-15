@@ -1,7 +1,7 @@
+import json
 from asyncio import Task, ensure_future
 from enum import Enum
 from io import BytesIO
-import json
 from os import path, remove
 from secrets import token_bytes
 from subprocess import PIPE, Popen
@@ -12,9 +12,9 @@ from uuid import uuid4
 import aerospike
 from aiohttp import ClientResponseError
 from exiftool import ExifToolAlpha as ExifTool
+from ffmpeg.asyncio import FFmpeg
 from wand import resource
 from wand.image import Image
-from ffmpeg.asyncio import FFmpeg
 
 from shared.auth import KhUser, Scope
 from shared.backblaze import B2Interface, MimeType

@@ -8,7 +8,7 @@ from posts.models import PostId
 from shared.auth import KhUser
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
-from shared.models import InternalUser
+from shared.models import InternalUser, Undefined
 from shared.sql import SqlInterface
 from shared.timing import timed
 from shared.utilities import flatten
@@ -139,7 +139,7 @@ class Tags(SqlInterface) :
 
 		counts = await CountKVS.get_many_async(tags)
 		for k, v in counts.items() :
-			if v is None :
+			if v is Undefined :
 				counts[k] = await self._populate_tag_cache(k)
 
 		return counts
