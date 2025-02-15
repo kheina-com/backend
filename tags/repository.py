@@ -74,6 +74,7 @@ class Tags(SqlInterface) :
 		)
 
 
+	@timed
 	async def tags(self: Self, user: KhUser, itags: list[InternalTag]) -> list[Tag] :
 		owners_task: Task[dict[int, InternalUser]] = ensure_future(users._get_users(filter(None, (t.owner for t in itags))))
 		counts_task: Task[dict[str, int]]          = ensure_future(self._get_tag_counts([t.name for t in itags]))
@@ -104,6 +105,7 @@ class Tags(SqlInterface) :
 		return TagGroups(**{ k: sorted(v, key=lambda t : t.tag) for k, v in tg.items() })
 
 
+	@timed
 	async def _populate_tag_cache(self, tag: str) -> int :
 		try :
 			return await CountKVS.get_async(tag)
@@ -129,6 +131,7 @@ class Tags(SqlInterface) :
 			return count
 
 
+	@timed
 	async def _get_tag_counts(self, tags: Iterable[str]) -> dict[str, int] :
 		"""
 		returns a map of tag name -> tag count
