@@ -871,17 +871,8 @@ class Uploader(SqlInterface, B2Interface) :
 		return success
 
 
-	@HttpErrorHandler('setting user icon')
-	@timed
-	async def setIcon(self: Self, user: KhUser, post_id: PostId, coordinates: Coordinates) :
-		if coordinates.width != coordinates.height :
-			raise BadRequest(f'icons must be square. width({coordinates.width}) != height({coordinates.height})')
-
-		ipost_task: Task[InternalPost] = ensure_future(posts._get_post(post_id))
-		iuser_task: Task[InternalUser] = ensure_future(users._get_user(user.user_id))
-		image = None
-
-		ipost: InternalPost = await ipost_task
+	async def getImage(self: Self, ipost: InternalPost, coordinates: Coordinates) -> Image :
+		post_id: PostId = PostId(ipost.post_id)
 
 		if not ipost.filename :
 			raise BadRequest(f'post {post_id} missing filename')
@@ -889,17 +880,31 @@ class Uploader(SqlInterface, B2Interface) :
 		if not ipost.media_type or 'image' not in (await media_type_map.get(ipost.media_type)).mime_type :
 			raise BadRequest(f'post must contain an image')
 
+		filename: str = f'{post_id}/{ipost.crc}/{ipost.filename}' if ipost.crc else f'{post_id}/{ipost.filename}'
+
 		try :
-			with await self.get_file(f'{post_id}/{ipost.filename}') as response :
+			with await self.get_file(filename) as response :
 				image = Image(blob=await response.read())
 
 		except ClientResponseError as e :
 			raise BadGateway('unable to retrieve image from B2.', err=e)
 
-		# upload new icon
+		# upload new banner
 		image.crop(**coordinates.dict())
-		self.convert_image(image, self.icon_size)
+		return image
 
+
+	@HttpErrorHandler('setting user icon')
+	@timed
+	async def setIcon(self: Self, user: KhUser, post_id: PostId, coordinates: Coordinates) -> None :
+		if coordinates.width != coordinates.height :
+			raise BadRequest(f'icons must be square. width({coordinates.width}) != height({coordinates.height})')
+
+		ipost_task: Task[InternalPost] = ensure_future(posts._get_post(post_id))
+		iuser_task: Task[InternalUser] = ensure_future(users._get_user(user.user_id))
+		image:      Image              = await self.getImage(await ipost_task, coordinates)
+
+		self.convert_image(image, self.icon_size)
 		iuser: InternalUser = await iuser_task
 		handle = iuser.handle.lower()
 
@@ -931,31 +936,14 @@ class Uploader(SqlInterface, B2Interface) :
 
 	@HttpErrorHandler('setting user banner')
 	@timed
-	async def setBanner(self: Self, user: KhUser, post_id: PostId, coordinates: Coordinates) :
+	async def setBanner(self: Self, user: KhUser, post_id: PostId, coordinates: Coordinates) -> None :
 		if round(coordinates.width / 3) != coordinates.height :
 			raise BadRequest(f'banners must be a 3x:1 rectangle. round(width / 3)({round(coordinates.width / 3)}) != height({coordinates.height})')
 
 		ipost_task: Task[InternalPost] = ensure_future(posts._get_post(post_id))
 		iuser_task: Task[InternalUser] = ensure_future(users._get_user(user.user_id))
-		image:      Image
+		image:      Image              = await self.getImage(await ipost_task, coordinates)
 
-		ipost: InternalPost = await ipost_task
-
-		if not ipost.filename :
-			raise BadRequest(f'post {post_id} missing filename')
-
-		if not ipost.media_type or 'image' not in (await media_type_map.get(ipost.media_type)).mime_type :
-			raise BadRequest(f'post must contain an image')
-
-		try :
-			with await self.get_file(f'{post_id}/{ipost.filename}') as response :
-				image = Image(blob=await response.read())
-
-		except ClientResponseError as e :
-			raise BadGateway('unable to retrieve image from B2.', err=e)
-
-		# upload new banner
-		image.crop(**coordinates.dict())
 		if image.size[0] > self.banner_size * 3 or image.size[1] > self.banner_size :
 			image.resize(
 				width  = self.banner_size * 3,

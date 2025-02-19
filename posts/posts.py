@@ -9,7 +9,7 @@ from shared.auth import KhUser
 from shared.caching import AerospikeCache, ArgsCache
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
-from shared.sql.query import CTE, Field, Join, JoinType, Operator, Order, Query, Table, Value, Where
+from shared.sql.query import CTE, Field, Join, JoinType, Operator, Order, Query, Table, Value, Where, WindowFunction
 from shared.timing import timed
 
 from .models import InternalPost, Post, PostId, PostSort, Privacy, Rating, Score, SearchResults
@@ -534,23 +534,45 @@ class Posts(Posts) :
 		)
 
 		if sort in { PostSort.new, PostSort.old } :
+			order = Order.descending_nulls_first if sort == PostSort.new else Order.ascending_nulls_last
 
 			if tags and len(tags) == 1 and len(include_sets) == 1 :
 				# this is a very special case, we want to hijack the new/old sorts to instead sort by set index.
 				# there's really no reason anyone would want to sort by post age for a single set
-				cte.order(
+				cte.select(
+					WindowFunction(
+						'row_number',
+						order = [(Field('set_post', 'index'), order)],
+						alias = 'order',
+					),
+				).order(
 					Field('set_post', 'index'),
-					Order.descending_nulls_first if sort == PostSort.new else Order.ascending_nulls_last,
+					order,
 				)
 
 			else :
-				cte.order(
+				cte.select(
+					WindowFunction(
+						'row_number',
+						order = [(Field('posts', 'created'), order)],
+						alias = 'order',
+					),
+				).order(
 					Field('posts', 'created'),
-					Order.descending_nulls_first if sort == PostSort.new else Order.ascending_nulls_last,
+					order,
 				)
 
 		else :
-			cte.order(
+			cte.select(
+				WindowFunction(
+					'row_number',
+					order = [
+						(Field('post_scores', sort.name), Order.descending_nulls_first),
+						(Field('posts', 'created'),       Order.descending_nulls_first),
+					],
+					alias = 'order',
+				),
+			).order(
 				Field('post_scores', sort.name),
 				Order.descending_nulls_first,
 			).order(
@@ -712,9 +734,24 @@ class Posts(Posts) :
 		)
 
 		if sort not in { PostSort.new, PostSort.old } :
-			cte.order(
+			cte.select(
+				WindowFunction(
+					'row_number',
+					order = [(Field('post_scores', sort.name), Order.descending_nulls_first)],
+					alias = 'order',
+				),
+			).order(
 				Field('post_scores', sort.name),
 				Order.descending_nulls_first,
+			)
+
+		else :
+			cte.select(
+				WindowFunction(
+					'row_number',
+					order = [(Field('posts', 'created'), Order.ascending_nulls_last if sort == PostSort.old else Order.descending_nulls_first)],
+					alias = 'order',
+				),
 			)
 
 		parser = self.internal_select(query := self.CteQuery(cte))
@@ -758,6 +795,11 @@ class Posts(Posts) :
 			Field('posts', 'locked'),
 			Field('post_scores', 'upvotes'),
 			Field('post_scores', 'downvotes'),
+			WindowFunction(
+				'row_number',
+				order = [(Field('posts', 'created'), Order.descending_nulls_first)],
+				alias = 'order',
+			),
 		).where(
 			Where(
 				Field('posts', 'privacy'),
@@ -816,6 +858,11 @@ class Posts(Posts) :
 			Field('posts', 'locked'),
 			Field('post_scores', 'upvotes'),
 			Field('post_scores', 'downvotes'),
+			WindowFunction(
+				'row_number',
+				order = [(Field('posts', 'created'), Order.descending_nulls_first)],
+				alias = 'order',
+			),
 		).where(
 			Where(
 				Field('posts', 'privacy'),
@@ -921,13 +968,29 @@ class Posts(Posts) :
 		)
 
 		if sort in { PostSort.new, PostSort.old } :
-			cte.order(
+			order = Order.descending_nulls_first if sort == PostSort.new else Order.ascending_nulls_first
+			cte.select(
+				WindowFunction(
+					'row_number',
+					order = [(Field('posts', 'created'), order)],
+					alias = 'order',
+				),
+			).order(
 				Field('posts', 'created'),
-				Order.descending_nulls_first if sort == PostSort.new else Order.ascending_nulls_last,
+				order,
 			)
 
 		else :
-			cte.order(
+			cte.select(
+				WindowFunction(
+					'row_number',
+					order = [
+						(Field('post_scores', sort.name), Order.descending_nulls_first),
+						(Field('posts', 'created'),       Order.descending_nulls_first),
+					],
+					alias = 'order',
+				),
+			).order(
 				Field('post_scores', sort.name),
 				Order.descending_nulls_first,
 			).order(
@@ -967,6 +1030,7 @@ class Posts(Posts) :
 			Field('post_scores', 'upvotes'),
 			Field('post_scores', 'downvotes'),
 			Value(True, alias='include_in_results'),
+			Field(None, 'row_number() over (order by posts.updated desc nulls first)', alias='order'),
 		).where(
 			Where(
 				Field('posts', 'privacy'),

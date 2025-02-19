@@ -109,27 +109,6 @@ async def v1CreatePost(req: Request, body: CreateRequest) -> Post :
 	return await uploader.createPost(req.user)
 
 
-@postRouter.patch('/{post_id}', status_code=204)
-@timed.root
-async def v1UpdatePost(req: Request, post_id: PostId, body: UpdateRequest) -> None :
-	await req.user.authenticated()
-	await uploader.updatePostMetadata(
-		req.user,
-		convert_path_post_id(post_id),
-		body.title,
-		body.description,
-		body.privacy,
-		body.rating,
-	)
-
-
-@postRouter.delete('/{post_id}', status_code=204)
-@timed.root
-async def v1DeletePost(req: Request, post_id: PostId) -> None :
-	await req.user.authenticated()
-	await uploader.deletePost(req.user, convert_path_post_id(post_id))
-
-
 @timed
 async def handleFile(file: UploadFile, post_id: PostId) -> str :
 	# since it doesn't do this for us, send the proper error back
@@ -212,8 +191,8 @@ async def v1UploadImage(
 @timed.root
 async def v1UploadVideo(
 	req:        Request,
-	file:       UploadFile    = File(None),
-	post_id:    PostId        = Form(None),
+	file:       UploadFile = File(None),
+	post_id:    PostId     = Form(None),
 ) -> Media :
 	"""
 	FORMDATA: {
@@ -337,6 +316,27 @@ async def v1Rss(req: Request) -> Response :
 @timed.root
 async def v1Post(req: Request, post_id: PostId, sort: PostSort = PostSort.hot) -> Post :
 	return await posts.getPost(req.user, convert_path_post_id(post_id), sort)
+
+
+@postRouter.patch('/{post_id}', status_code=204)
+@timed.root
+async def v1UpdatePost(req: Request, post_id: PostId, body: UpdateRequest) -> None :
+	await req.user.authenticated()
+	await uploader.updatePostMetadata(
+		req.user,
+		convert_path_post_id(post_id),
+		body.title,
+		body.description,
+		body.privacy,
+		body.rating,
+	)
+
+
+@postRouter.delete('/{post_id}', status_code=204)
+@timed.root
+async def v1DeletePost(req: Request, post_id: PostId) -> None :
+	await req.user.authenticated()
+	await uploader.deletePost(req.user, convert_path_post_id(post_id))
 
 
 app = APIRouter(

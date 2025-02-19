@@ -92,8 +92,8 @@ class KeyValueStore :
 
 
 	def _get_many[T: KeyType](self: 'KeyValueStore', k: Iterable[T]) -> dict[T, Any] :
-		keys: Set[T] = set(k)
-		remote_keys: Set[T] = keys - self._cache.keys()
+		keys: dict[T, T] = { v: v for v in k }
+		remote_keys: Set[T] = keys.keys() - self._cache.keys()
 
 		if remote_keys :
 			data: list[Tuple[Any, Any, Any]] = KeyValueStore._client.get_many(list(map(lambda k : (self._namespace, self._set, k), remote_keys))) # type: ignore
@@ -101,7 +101,7 @@ class KeyValueStore :
 
 			exp: float = time() + self._local_TTL
 			for datum in data :
-				key: T = datum[0][2]
+				key: T = keys[datum[0][2]]
 
 				# filter on the metadata, since it will always be populated
 				if datum[1] :
@@ -116,14 +116,14 @@ class KeyValueStore :
 				**data_map,
 				**{
 					key: copy(self._cache[key][1])
-					for key in keys - remote_keys
+					for key in keys.keys() - remote_keys
 				},
 			}
 
 		# only local cache is required
 		return {
 			key: self._cache[key][1]
-			for key in keys
+			for key in keys.keys()
 		}
 
 

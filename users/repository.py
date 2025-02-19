@@ -200,7 +200,14 @@ class Users(SqlInterface) :
 			return { }
 
 		cached = await UserKVS.get_many_async(user_ids)
-		misses = [k for k, v in cached.items() if v is Undefined]
+		misses: list[int] = []
+
+		for k, v in list(cached.items()) :
+			if v is not Undefined :
+				continue
+
+			misses.append(k)
+			del cached[k]
 
 		if not misses :
 			return cached
@@ -330,7 +337,14 @@ class Users(SqlInterface) :
 			int(k[k.rfind('|') + 1:]): v
 			for k, v in (await FollowKVS.get_many_async([f'{user_id}|{t}' for t in targets])).items()
 		}
-		misses = [k for k, v in cached.items() if v is Undefined]
+		misses: list[int] = []
+
+		for k, v in list(cached.items()) :
+			if v is not Undefined :
+				continue
+
+			misses.append(k)
+			cached[k] = None
 
 		if not misses :
 			return cached

@@ -82,15 +82,15 @@ class Value :
 
 @dataclass
 class Field :
-	table:    str
-	column:   Optional[str] = None
+	table:    Optional[str]
+	column:   str
 	function: Optional[str] = None
 	alias:    Optional[str] = None
 
 	def __str__(self) :
-		field: str = self.table
+		field: str = self.column
 
-		if self.column :
+		if self.table :
 			field = f'{self.table}.{self.column}'
 
 		if self.function :
@@ -100,6 +100,33 @@ class Field :
 			field = f'{field} AS {self.alias}'
 
 		return field
+
+	def __hash__(self) :
+		return hash(str(self))
+
+
+@dataclass
+class WindowFunction :
+	function:  str
+	partition: list[Field]               = field(default_factory=list)
+	order:     list[tuple[Field, Order]] = field(default_factory=list)
+	alias:     Optional[str]             = None
+
+	def __str__(self) -> str :
+		win: list[str] = []
+
+		if self.partition :
+			win.append('PARTITION BY ' + ','.join(list(map(str, self.partition))))
+
+		if self.order :
+			win.append('ORDER BY ' + ','.join([f'{str(o[0])} {o[1].value}' for o in self.order]))
+
+		func = self.function + '() over (' + ' '.join(win) + ')'
+
+		if self.alias :
+			func += ' AS ' + self.alias
+
+		return func
 
 	def __hash__(self) :
 		return hash(str(self))
@@ -245,22 +272,22 @@ class Query(Composable) :
 		for t in table :
 			assert type(t) == Table
 
-		self._table:     str                       = ','.join(tuple(map(str, table)))
-		self._joins:     list[Join]                = []
-		self._select:    list[Field | Value]       = []
-		self._where:     list[Where]               = []
-		self._having:    list[Where]               = []
-		self._group:     list[Field]               = []
-		self._order:     list[tuple[Field, Order]] = []
-		self._update:    list[Update]              = []
-		self._with:      list[CTE]                 = []
-		self._union:     list[Query]               = []
-		self._limit:     Optional[int]             = None
-		self._offset:    Optional[int]             = None
-		self._function:  Optional[str]             = None
-		self._delete:    Optional[bool]            = None
-		self._insert:    Optional[Insert]          = None
-		self._returning: Optional[tuple[str, ...]] = None
+		self._table:     str                                  = ','.join(tuple(map(str, table)))
+		self._joins:     list[Join]                           = []
+		self._select:    list[Field | Value | WindowFunction] = []
+		self._where:     list[Where]                          = []
+		self._having:    list[Where]                          = []
+		self._group:     list[Field]                          = []
+		self._order:     list[tuple[Field, Order]]            = []
+		self._update:    list[Update]                         = []
+		self._with:      list[CTE]                            = []
+		self._union:     list[Query]                          = []
+		self._limit:     Optional[int]                        = None
+		self._offset:    Optional[int]                        = None
+		self._function:  Optional[str]                        = None
+		self._delete:    Optional[bool]                       = None
+		self._insert:    Optional[Insert]                     = None
+		self._returning: Optional[tuple[str, ...]]            = None
 
 	def as_string(self, _: Optional[AdaptContext] = None) -> str :
 		return self.__build_query__() + ';'
@@ -420,9 +447,9 @@ class Query(Composable) :
 
 		return params
 
-	def select(self: Self, *field: Field | Value) -> Self :
+	def select(self: Self, *field: Field | Value | WindowFunction) -> Self :
 		for f in field :
-			assert type(f) is Field or (type(f) is Value and f.alias)
+			assert type(f) is Field or (type(f) is Value and f.alias) or type(f) is WindowFunction
 			self._select.append(f)
 
 		return self

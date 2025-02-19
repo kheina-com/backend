@@ -13,7 +13,7 @@ from shared.exceptions.http_error import BadRequest, NotFound
 from shared.maps import privacy_map
 from shared.models import InternalUser, Undefined, UserPortable
 from shared.sql import SqlInterface
-from shared.sql.query import CTE, Field, Join, JoinType, Operator, Query, Table, Value, Where
+from shared.sql.query import CTE, Field, Join, JoinType, Operator, Order, Query, Table, Value, Where
 from shared.timing import timed
 from shared.utilities import flatten
 from tags.models import InternalTag, Tag, TagGroup
@@ -237,7 +237,7 @@ class Posts(SqlInterface) :
 			Field('media', 'updated'),
 			Field('media', 'length'),
 			Field('collated_thumbnails', 'thumbnails'),
-			Field('include_in_results'),
+			Field(None, 'include_in_results'),
 		)
 
 		return self.parse_response
@@ -279,6 +279,9 @@ class Posts(SqlInterface) :
 					Field('posts', 'post_id'),
 				),
 			),
+		).order(
+			Field('posts', 'order'),
+			Order.ascending,
 		)
 
 
@@ -358,6 +361,7 @@ class Posts(SqlInterface) :
 			Field('post_scores', 'upvotes'),
 			Field('post_scores', 'downvotes'),
 			Field('post_ids', 'include_in_results'),
+			Field(None, 'row_number() over ()', alias='order'),
 		).join(
 			Join(
 				JoinType.inner,
@@ -486,7 +490,14 @@ class Posts(SqlInterface) :
 			return { }
 
 		cached = await ScoreKVS.get_many_async(post_ids)
-		misses = [PostId(k) for k, v in cached.items() if v is Undefined]
+		misses: list[PostId] = []
+
+		for k, v in list(cached.items()) :
+			if v is not Undefined :
+				continue
+
+			misses.append(k)
+			cached[k] = None
 
 		if not misses :
 			return cached
@@ -552,7 +563,14 @@ class Posts(SqlInterface) :
 			PostId(k[k.rfind('|') + 1:]): v
 			for k, v in (await VoteKVS.get_many_async([f'{user_id}|{post_id}' for post_id in post_ids])).items()
 		}
-		misses = [k for k, v in cached.items() if v is Undefined]
+		misses: list[PostId] = []
+
+		for k, v in list(cached.items()) :
+			if v is not Undefined :
+				continue
+
+			misses.append(k)
+			cached[k] = None
 
 		if not misses :
 			return cached
