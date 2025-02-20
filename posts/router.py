@@ -8,8 +8,8 @@ from fastapi import APIRouter, File, Form, UploadFile
 
 from shared.backblaze import B2Interface
 from shared.config.constants import Environment, environment
-from shared.exceptions.http_error import NotImplemented, UnprocessableEntity
-from shared.models._shared import convert_path_post_id
+from shared.exceptions.http_error import UnprocessableEntity
+from shared.models import Privacy, convert_path_post_id
 from shared.models.auth import Scope
 from shared.server import Request, Response
 from shared.timing import timed
@@ -17,7 +17,7 @@ from shared.utilities.units import Byte
 from users.users import Users
 
 from .models import BaseFetchRequest, CreateRequest, FetchCommentsRequest, FetchPostsRequest, GetUserPostsRequest, IconRequest, Media, Post, PostId, PostSort, RssDateFormat, RssDescription, RssFeed, RssItem, RssMedia, RssTitle, Score, SearchResults, TimelineRequest, UpdateRequest, VoteRequest
-from .posts import Posts
+from .posts import Posts, privacy_map
 from .uploader import Uploader
 
 
@@ -312,16 +312,18 @@ async def v1Rss(req: Request) -> Response :
 	)
 
 
-@postRouter.get('/auth/{post_id}', response_model=bool)
+@postRouter.get('/auth/{post_id}', response_model=Privacy)
 @timed.root
-async def v1Auth(req: Request, post_id: PostId) -> bool :
+async def v1Auth(req: Request, post_id: PostId) -> Privacy :
 	"""
-	returns true if the token used is able to view a post, otherwise raises not found. This logic is shared with the standard '/{post_id}' function
+	returns a post's privacy if the token used is able to view a post, otherwise raises not found.
+	This logic is shared with the standard '/{post_id}' function
 
 	this function is primarily used by the CDN to determine whether or not to serve a given post's media
 	"""
 	ipost = await posts._get_post(convert_path_post_id(post_id))
-	return await posts.authorized(req.user, ipost)
+	await posts.authorized(req.user, ipost)
+	return await privacy_map.get(ipost.privacy)
 
 
 @postRouter.get('/{post_id}', response_model=Post, response_model_exclude=postExclude)
