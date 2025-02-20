@@ -23,7 +23,7 @@ from shared.models import Undefined
 from shared.sql import SqlInterface
 from shared.timing import timed
 
-from .models import OTP, BannerStore, ConfigType, ConfigsResponse, CostsStore, CssProperty, Funding, OtpType, UserConfig, UserConfigKeyFormat, UserConfigRequest, UserConfigResponse
+from .models import OTP, BannerStore, ConfigsResponse, ConfigType, CostsStore, CssProperty, Funding, OtpType, UserConfig, UserConfigKeyFormat, UserConfigRequest, UserConfigResponse
 
 
 repo: SchemaRepository = SchemaRepository()

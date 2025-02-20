@@ -7,7 +7,7 @@ from fastapi.responses import UJSONResponse
 
 from ..logging import Logger, getLogger
 from .base_error import BaseError
-from .http_error import BadGateway, NotImplemented, UnprocessableEntity, InternalServerError
+from .http_error import BadGateway, InternalServerError, NotImplemented, UnprocessableEntity
 
 
 logger: Logger = getLogger()
