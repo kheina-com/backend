@@ -312,6 +312,18 @@ async def v1Rss(req: Request) -> Response :
 	)
 
 
+@postRouter.get('/auth/{post_id}', response_model=bool)
+@timed.root
+async def v1Auth(req: Request, post_id: PostId) -> bool :
+	"""
+	returns true if the token used is able to view a post, otherwise raises not found. This logic is shared with the standard '/{post_id}' function
+
+	this function is primarily used by the CDN to determine whether or not to serve a given post's media
+	"""
+	ipost = await posts._get_post(convert_path_post_id(post_id))
+	return await posts.authorized(req.user, ipost)
+
+
 @postRouter.get('/{post_id}', response_model=Post, response_model_exclude=postExclude)
 @timed.root
 async def v1Post(req: Request, post_id: PostId, sort: PostSort = PostSort.hot) -> Post :

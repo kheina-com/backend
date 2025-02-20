@@ -1,8 +1,10 @@
+from asyncio import ensure_future
+from collections.abc import Iterable
 from datetime import datetime
 from random import randrange
 from re import Match, Pattern
 from re import compile as re_compile
-from typing import Dict, List, Optional, Self, Tuple, Type, Union
+from typing import Any, Optional, Self, Type
 
 from avrofastapi.schema import convert_schema
 from avrofastapi.serialization import AvroDeserializer, AvroSerializer, Schema, parse_avro_schema
@@ -17,10 +19,11 @@ from shared.caching.key_value_store import KeyValueStore
 from shared.config.constants import environment
 from shared.config.credentials import fetch
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
+from shared.models import Undefined
 from shared.sql import SqlInterface
 from shared.timing import timed
 
-from .models import OTP, BannerStore, ConfigType, CostsStore, CssProperty, OtpType, UserConfig, UserConfigKeyFormat, UserConfigRequest, UserConfigResponse
+from .models import OTP, BannerStore, ConfigType, ConfigsResponse, CostsStore, CssProperty, Funding, OtpType, UserConfig, UserConfigKeyFormat, UserConfigRequest, UserConfigResponse
 
 
 repo: SchemaRepository = SchemaRepository()
@@ -30,7 +33,7 @@ KVS: KeyValueStore = KeyValueStore('kheina', 'configs', local_TTL=60)
 UserConfigSerializer: AvroSerializer = AvroSerializer(UserConfig)
 AvroMarker: bytes = b'\xC3\x01'
 ColorRegex: Pattern = re_compile(r'^(?:#(?P<hex>[a-f0-9]{8}|[a-f0-9]{6})|(?P<var>[a-z0-9-]+))$')
-PropValidators: Dict[CssProperty, Pattern] = {
+PropValidators: dict[CssProperty, Pattern] = {
 	CssProperty.background_attachment: re_compile(r'^(?:scroll|fixed|local)(?:,\s*(?:scroll|fixed|local))*$'),
 	CssProperty.background_position: re_compile(r'^(?:top|bottom|left|right|center)(?:\s+(?:top|bottom|left|right|center))*$'),
 	CssProperty.background_repeat: re_compile(r'^(?:repeat-x|repeat-y|repeat|space|round|no-repeat)(?:\s+(?:repeat-x|repeat-y|repeat|space|round|no-repeat))*$'),
@@ -41,8 +44,8 @@ PropValidators: Dict[CssProperty, Pattern] = {
 class Configs(SqlInterface) :
 
 	UserConfigFingerprint: bytes
-	Serializers: Dict[ConfigType, Tuple[AvroSerializer, bytes]]
-	SerializerTypeMap: Dict[ConfigType, Type[BaseModel]] = {
+	Serializers: dict[ConfigType, tuple[AvroSerializer, bytes]]
+	SerializerTypeMap: dict[ConfigType, Type[BaseModel]] = {
 		ConfigType.banner: BannerStore,
 		ConfigType.costs: CostsStore,
 	}
@@ -65,7 +68,7 @@ class Configs(SqlInterface) :
 
 
 	@HttpErrorHandler('retrieving patreon campaign info')
-	@AerospikeCache('kheina', 'configs', 'patreon-campaign-funds', TTL_minutes=10)
+	@AerospikeCache('kheina', 'configs', 'patreon-campaign-funds', TTL_minutes=10, _kvs=KVS)
 	async def getFunding(self) -> int :
 		if environment.is_local() :
 			return randrange(1000, 1500)
@@ -75,33 +78,68 @@ class Configs(SqlInterface) :
 
 
 	@HttpErrorHandler('retrieving config')
-	@AerospikeCache('kheina', 'configs', '{config}', _kvs=KVS)
-	async def getConfig[T: BaseModel](self, config: ConfigType, type_: Type[T]) -> T :
-		data: Optional[tuple[bytes]] = await self.query_async("""
-			SELECT bytes
+	async def getConfigs(self, configs: Iterable[ConfigType]) -> dict[ConfigType, Any] :
+		keys = list(configs)
+
+		if not keys :
+			return { }
+
+		cached = await KVS.get_many_async(keys)
+		misses: list[ConfigType] = []
+
+		for k, v in list(cached.items()) :
+			if v is not Undefined :
+				continue
+
+			misses.append(k)
+			del cached[k]
+
+		if not misses :
+			return cached
+
+		data: Optional[list[tuple[str, bytes]]] = await self.query_async("""
+			SELECT key, bytes
 			FROM kheina.public.configs
-			WHERE key = %s;
-			""",
-			(config,),
-			fetch_one=True,
+			WHERE key = any(%s);
+			""", (
+				misses,
+			),
+			fetch_all = True,
 		)
 
 		if not data :
 			raise NotFound('no data was found for the provided config.')
 
-		value: bytes = bytes(data[0])
-		assert value[:2] == AvroMarker
+		for k, v in data :
+			v: bytes = bytes(v)
+			assert v[:2] == AvroMarker
 
-		deserializer: AvroDeserializer = AvroDeserializer(
-			read_model  = self.SerializerTypeMap[config],
-			write_model = await Configs.getSchema(value[2:10]),
+			config: ConfigType = ConfigType(k)
+			deserializer: AvroDeserializer = AvroDeserializer(
+				read_model  = self.SerializerTypeMap[config],
+				write_model = await Configs.getSchema(v[2:10]),
+			)
+			value = cached[config] = deserializer(v[10:])
+			ensure_future(KVS.put_async(config, value))
+
+		return cached
+
+
+	async def allConfigs(self: Self) -> ConfigsResponse :
+		funds = ensure_future(self.getFunding())
+		configs = await self.getConfigs(self.SerializerTypeMap.keys())
+		return ConfigsResponse(
+			banner  = configs[ConfigType.banner].banner,
+			funding = Funding(
+				funds = await funds,
+				costs = configs[ConfigType.costs].costs,
+			),
 		)
-		return deserializer(value[10:])
 
 
 	@HttpErrorHandler('updating config')
 	async def updateConfig(self, user: KhUser, config: ConfigType, value: BaseModel) -> None :
-		serializer: Tuple[AvroSerializer, bytes] = self.Serializers[config]
+		serializer: tuple[AvroSerializer, bytes] = self.Serializers[config]
 		data: bytes = AvroMarker + serializer[1] + serializer[0](value)
 		await self.query_async("""
 			INSERT INTO kheina.public.configs
@@ -120,15 +158,16 @@ class Configs(SqlInterface) :
 			),
 			commit=True,
 		)
-		await KVS.put_async(str(config), value)
+		print(config, value)
+		await KVS.put_async(config, value)
 
 
 	@staticmethod
-	def _validateColors(css_properties: Optional[Dict[CssProperty, str]]) -> Optional[Dict[str, Union[str, int]]] :
+	def _validateColors(css_properties: Optional[dict[CssProperty, str]]) -> Optional[dict[str, str | int]] :
 		if not css_properties :
 			return None
 
-		output: Dict[str, Union[str, int]] = { }
+		output: dict[str, str | int] = { }
 
 		# color input is very strict
 		for prop, value in css_properties.items() :

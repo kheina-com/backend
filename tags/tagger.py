@@ -208,6 +208,9 @@ class Tagger(Tags) :
 
 		itag = await self._fetch_tag(tag)
 
+		if itag.group == TagGroup.system :
+			raise Forbidden('system tags cannot be edited')
+
 		if user.user_id != itag.owner and Scope.mod not in user.scope :
 			raise Forbidden('You must be the tag owner or a mod to edit a tag.')
 

@@ -162,12 +162,12 @@ def convert_path_post_id(post_id: Any) -> PostId :
 			{
 				'loc': [
 					'path',
-					'post_id'
+					'post_id',
 				],
 				'msg': 'value is not a valid PostId',
 				'type': 'shared.models._shared.PostId',
-			}
-		]
+			},
+		],
 	)
 
 

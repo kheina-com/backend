@@ -42,13 +42,14 @@ class SaveSchemaResponse(BaseModel) :
 	fingerprint: str
 
 
-class FundingResponse(BaseModel) :
+class Funding(BaseModel) :
 	funds: int
 	costs: int
 
 
-class BannerResponse(BannerStore) :
-	pass
+class ConfigsResponse(BaseModel) :
+	banner:  str | None
+	funding: Funding
 
 
 class BlockingBehavior(Enum) :
