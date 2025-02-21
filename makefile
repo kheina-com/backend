@@ -26,4 +26,6 @@ push:
 
 .PHONY: apply
 apply:
+	git add k8s.yml
+	git commit -m apply
 	kubectl apply -f k8s.yml
