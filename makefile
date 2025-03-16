@@ -12,9 +12,8 @@ lock:
 
 .PHONY: dev
 dev:
-	python3 -m venv ./.venv
 	docker compose up -d --wait
-	ENVIRONMENT=LOCAL; fastapi dev server.py
+	ENVIRONMENT=LOCAL; ./.venv/bin/fastapi dev server.py
 
 .PHONY: build
 build:

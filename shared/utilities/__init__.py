@@ -66,8 +66,7 @@ def int_from_bytes(bytestring: bytes) -> int :
 	return int.from_bytes(bytestring, 'big')
 
 
-T = TypeVar('T')
-def coerse(obj: Any, type: Type[T]) -> T :
+def coerse[T](obj: Any, type: Type[T]) -> T :
 	"""
 	attempts to convert an object of any type into the type given
 

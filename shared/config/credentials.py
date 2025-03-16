@@ -56,23 +56,23 @@ __secret_paths__ = ('credentials', '/credentials')
 
 def fetch[T](secret_path: str, type: Optional[Type[T]] = None) -> T :
 	"""
-	returns credentials in a form that is usable by python.
-	secret_path is split by periods and keys used iterably
+	retrieves credentials from locally encrypted files or encrypted kube secrets and returns them parsed into the type provided
 
-	EX: fetch('secret.key', str)
-
-	credential file is {
+	EX: `fetch('secret.key', str)`
+	with credential file: ```{
 		"local": {
 			"secret": {
 				"key": "value"
 			}
 		}
-	}
-	returns "value" but ONLY when $ENVIRONMENT=LOCAL
+	}```
 
-	raises KeyError if the secret does not exist
+	returns `"value"` but ONLY when `$ENVIRONMENT=LOCAL`
 
-	raises ValidationError if a type is provided and the secret cannot be coersed into that type
+	:param secret_path: string representing the secret path within the credential file. path is split by periods and keys are used iterably
+	:returns: credentials in a form that is usable by python.
+	:raises: KeyError if the secret does not exist
+	:raises: ValidationError if a type is provided and the secret cannot be coersed into that type
 	"""
 	sec = { }
 

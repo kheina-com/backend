@@ -467,19 +467,18 @@ class Posts(Posts) :
 						),
 					)
 
-				# this may need group(Field('set_post', 'post_id'))
-				cte.join(join_sets)
+				cte.join(join_sets).group(Field('set_post', 'post_id'))
 
 			idk = {
-				'tags': tags,
-				'include_tags': include_tags,
-				'exclude_tags': exclude_tags,
-				'include_users': include_users,
-				'exclude_users': exclude_users,
+				'tags':           tags,
+				'include_tags':   include_tags,
+				'exclude_tags':   exclude_tags,
+				'include_users':  include_users,
+				'exclude_users':  exclude_users,
 				'include_rating': include_rating,
 				'exclude_rating': exclude_rating,
-				'include_sets': include_sets,
-				'exclude_sets': exclude_sets,
+				'include_sets':   include_sets,
+				'exclude_sets':   exclude_sets,
 			}
 
 		else :
@@ -795,6 +794,7 @@ class Posts(Posts) :
 			Field('posts', 'locked'),
 			Field('post_scores', 'upvotes'),
 			Field('post_scores', 'downvotes'),
+			Value(True, alias='include_in_results'),
 			WindowFunction(
 				'row_number',
 				order = [(Field('posts', 'created'), Order.descending_nulls_first)],
@@ -858,6 +858,7 @@ class Posts(Posts) :
 			Field('posts', 'locked'),
 			Field('post_scores', 'upvotes'),
 			Field('post_scores', 'downvotes'),
+			Value(True, alias='include_in_results'),
 			WindowFunction(
 				'row_number',
 				order = [(Field('posts', 'created'), Order.descending_nulls_first)],

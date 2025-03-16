@@ -25,6 +25,7 @@ class colors :
 
 	@unique
 	class fg(Enum) :
+		none       = ''
 		black      = '\033[30m'
 		red        = '\033[31m'
 		green      = '\033[32m'
@@ -43,6 +44,7 @@ class colors :
 
 	@unique
 	class bg(Enum) :
+		none      = ''
 		black     = '\033[40m'
 		red       = '\033[41m'
 		green     = '\033[42m'
@@ -59,6 +61,18 @@ class colors :
 			s += back.value
 
 		return s + text + colors.reset
+
+	@staticmethod
+	def test() -> str :
+		s: str = ''
+		for dec, decn in [(colors.reset, 'normal'), (colors.bold, 'bold'), (colors.underline, 'underline'), (colors.strikethrough, 'strikethrough')] :
+			s += decn + '\n'
+			for bg in colors.bg._member_map_.values() :
+				for fg in colors.fg._member_map_.values() :
+					s += dec + fg.value + bg.value + fg.name.replace('light', 'l').replace('dark', 'd')[:6].ljust(6) + ' ' + colors.reset
+				s += '\n'
+
+		return s.strip()
 
 
 def getLevelColor(severity: int) -> colors.fg :
@@ -153,13 +167,17 @@ class TerminalAgent :
 				return s
 
 			for k, v in struct.items() :
-				items.append((k, v))
-				keylen = max(keylen, len(k))
-
 				if isinstance(v, (list, dict)) and len(v) :
 					s      = loop(s)
-					keylen = 0
+					keylen = len(k)
+					items  = [(k, v)]
+					s      = loop(s)
 					items  = []
+					keylen = 0
+
+				else :
+					items.append((k, v))
+					keylen = max(keylen, len(k))
 
 			s = loop(s)
 

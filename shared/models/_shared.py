@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, validator
 from pydantic_core import core_schema
 
 from ..base64 import b64decode, b64encode
-from ..exceptions.http_error import UnprocessableEntity
+from ..exceptions.http_error import UnprocessableDetail, UnprocessableEntity
 
 
 """
@@ -159,14 +159,14 @@ def convert_path_post_id(post_id: Any) -> PostId :
 
 	except ValueError :
 		raise UnprocessableEntity(detail=[
-			{
-				'loc': [
+			UnprocessableDetail(
+				loc = [
 					'path',
 					'post_id',
 				],
-				'msg': 'value is not a valid PostId',
-				'type': 'shared.models._shared.PostId',
-			},
+				msg  = 'value is not a valid PostId',
+				type = 'shared.models._shared.PostId',
+			),
 		],
 	)
 

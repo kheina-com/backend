@@ -1,12 +1,12 @@
 import json
-from asyncio import Task, ensure_future
+from asyncio import Task, create_subprocess_exec, ensure_future
 from enum import Enum
 from io import BytesIO
 from os import path, remove
 from secrets import token_bytes
-from subprocess import PIPE, Popen
+from subprocess import PIPE
 from time import time
-from typing import Optional, Self, Set, Tuple
+from typing import Literal, Optional, Self, Set, Tuple
 from uuid import uuid4
 
 import aerospike
@@ -177,12 +177,12 @@ class Uploader(SqlInterface, B2Interface) :
 			self.logger.exception(f'failed to delete local file, as it does not exist. path: {path}')
 
 
-	def _validateTitle(self: Self, title: Optional[str]) :
+	def _validateTitle(self: Self, title: str | None | Literal[False]) :
 		if title and len(title) > 100 :
 			raise BadRequest('the given title is invalid, title cannot be over 100 characters in length.', logdata={ 'title': title })
 
 
-	def _validateDescription(self: Self, description: Optional[str]) :
+	def _validateDescription(self: Self, description: str | None | Literal[False]) :
 		if description and len(description) > 10000 :
 			raise BadRequest('the given description is invalid, description cannot be over 10,000 characters in length.', logdata={ 'description': description })
 
@@ -251,8 +251,8 @@ class Uploader(SqlInterface, B2Interface) :
 			user_id            = user.user_id,
 			rating             = explicit,
 			privacy            = draft,
-			created            = datetime.now(),
-			updated            = datetime.now(),
+			created            = (now := datetime.now()),
+			updated            = now,
 			size               = None,
 			thumbnails         = None,
 			include_in_results = None,
@@ -273,12 +273,21 @@ class Uploader(SqlInterface, B2Interface) :
 			post.rating = await rating_map.get_id(rating)
 
 		internal_post_id: int
-		post_id: PostId
+		post_id:          PostId
 
 		async with self.transaction() as transaction :
 			for _ in range(100) :
 				internal_post_id = int_from_bytes(token_bytes(6))
-				d: Tuple[int] = await transaction.query_async("SELECT count(1) FROM kheina.public.posts WHERE post_id = %s;", (internal_post_id,), fetch_one=True)
+				d: Tuple[int] = await transaction.query_async("""
+					SELECT count(1)
+					FROM kheina.public.posts
+					WHERE post_id = %s;
+					""", (
+						internal_post_id,
+					), 
+					fetch_one = True,
+				)
+
 				if not d[0] :
 					break
 
@@ -311,9 +320,10 @@ class Uploader(SqlInterface, B2Interface) :
 
 
 	@timed
-	def thumbhash(self: Self, image: Image) -> bytes :
+	async def thumbhash(self: Self, image: Image) -> bytes :
 		size  = 100
-		hash, err = Popen(['thumbhash', 'encode-image'], stdin=PIPE, stdout=PIPE, stderr=PIPE).communicate(self.get_image_data(self.convert_image(image, size), False))
+		p = await create_subprocess_exec('thumbhash', 'encode-image', stdin=PIPE, stdout=PIPE, stderr=PIPE)
+		hash, err = await p.communicate(self.get_image_data(self.convert_image(image, size), False))
 
 		if err :
 			raise InternalServerError(f'Failed to generate image thumbhash: {err.decode()}.')
@@ -459,7 +469,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 			# thumbhash
 			with Image(file=open(file_on_disk, 'rb')) as image :
-				thumbhash = self.thumbhash(image)
+				thumbhash = await self.thumbhash(image)
 				del image
 
 			self.logger.debug({
@@ -655,7 +665,7 @@ class Uploader(SqlInterface, B2Interface) :
 				updated    = updated,
 				filename   = filename,
 				type       = await media_type_map.get(media_type),
-				thumbhash  = thumbhash,  # type: ignore
+				thumbhash  = thumbhash,
 				size       = image_size,
 				length     = content_length,
 				crc        = rev,
@@ -673,10 +683,11 @@ class Uploader(SqlInterface, B2Interface) :
 		self:        Self,
 		user:        KhUser,
 		post_id:     PostId,
-		title:       Optional[str]     = None,
-		description: Optional[str]     = None,
-		privacy:     Optional[Privacy] = None,
-		rating:      Optional[Rating]  = None,
+		title:       str    | None | Literal[False] = False,
+		description: str    | None | Literal[False] = False,
+		privacy:     Optional[Privacy]              = None,
+		rating:      Optional[Rating]               = None,
+		reply_to:    PostId | None | Literal[False] = False,
 	) -> None :
 		# TODO: check for active actions on post and determine if update satisfies the required action
 		self._validateTitle(title)
@@ -692,11 +703,11 @@ class Uploader(SqlInterface, B2Interface) :
 		if post.user_id != user.user_id :
 			raise Forbidden('You are not allowed to modify this resource.')
 
-		if title is not None :
+		if title is not False :
 			update = True
 			post.title = title or None
 
-		if description is not None :
+		if description is not False :
 			update = True
 			post.description = description or None
 
@@ -707,6 +718,14 @@ class Uploader(SqlInterface, B2Interface) :
 		if privacy and privacy != await privacy_map.get(post.privacy) :
 			update_privacy = True
 
+		if reply_to is not False :
+			if await privacy_map.get(post.privacy) in { Privacy.draft, Privacy.unpublished } :
+				update = True
+				post.parent = reply_to.int() if reply_to else None
+
+			else :
+				raise BadRequest('cannot set post as reply after publishing')
+
 		if not update and not update_privacy :
 			raise BadRequest('no params were provided.')
 
@@ -716,11 +735,9 @@ class Uploader(SqlInterface, B2Interface) :
 				post.privacy = await privacy_map.get_id(privacy)
 
 			if update :
-				await PostKVS.put_async(post_id, await self.update(post, t.query_async))
+				post = await self.update(post, t.query_async)
 
-			else :
-				await PostKVS.put_async(post_id, post)
-
+			await PostKVS.put_async(post_id, post)
 			await t.commit()
 
 
@@ -1022,6 +1039,41 @@ class Uploader(SqlInterface, B2Interface) :
 
 
 	@timed
+	async def ffprobe(
+		self:         Self,
+		file_on_disk: str,
+	) -> dict :
+		ffprobe = FFmpeg(executable='ffprobe').input(
+			file_on_disk,
+			print_format = 'json',
+			show_streams = None,
+		)
+		return json.loads(await ffprobe.execute())
+
+
+	@timed
+	async def parse_audio_stream(
+		self:         Self,
+		file_on_disk: str,
+	) -> dict[str, str] :
+		p    = await create_subprocess_exec('ffmpeg', '-i', file_on_disk, '-map', '0:a:0', '-af', 'astats', '-f', 'null', '-', stdout=PIPE, stderr=PIPE)
+		raw  = b''.join(await p.communicate())
+		data = { }
+
+		for line in raw.split(b'\n') :
+			if not line.startswith(b'[Parsed_astats_0') :
+				continue
+
+			lstr = line[line.find(b']') + 1:].decode()
+
+			if (idx := lstr.find(':')) > 0 :
+				data[lstr[:idx].strip()] = lstr[idx + 1:].strip()
+
+		return data
+
+
+	@HttpErrorHandler('uploading video')
+	@timed
 	async def uploadVideo(
 		self:         Self,
 		user:         KhUser,
@@ -1042,7 +1094,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 		except Exception as e :
 			self.delete_file(file_on_disk)
-			raise BadRequest('Uploaded file is not an image.', err=e)
+			raise BadRequest('Uploaded file is not a video.', err=e)
 
 		rev:       int
 		mime_type: MimeType
@@ -1083,7 +1135,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 			# thumbhash
 			with Image(file=open(screenshot, 'rb')) as image :
-				thumbhash = self.thumbhash(image)
+				thumbhash = await self.thumbhash(image)
 				del image
 
 			self.logger.debug({
@@ -1124,30 +1176,33 @@ class Uploader(SqlInterface, B2Interface) :
 					),
 				)
 
-				ffprobe = FFmpeg(executable='ffprobe').input(
-					file_on_disk,
-					print_format = 'json',
-					show_streams = None,
-				)
-				media = json.loads(await ffprobe.execute())
+				media = await self.ffprobe(file_on_disk)
 				query:  list[str]       = []
 				params: list[int]       = []
 				flags:  list[MediaFlag] = []
+				audio:  bool            = False
+				video:  bool            = False
 
 				for stream in media['streams'] :
-					if stream['codec_type'] == 'video' :
+					if stream['codec_type'] == 'video' and not video :
+						video = True
 						query.append("(tag_to_id('video'), %s, 0)")
 						params.append(post_id.int())
 						flags.append(MediaFlag.video)
 						continue
 
-					if stream['codec_type'] == 'audio' :
-						query.append("(tag_to_id('audio'), %s, 0)")
-						params.append(post_id.int())
-						flags.append(MediaFlag.audio)
+					if stream['codec_type'] == 'audio' and not audio :
+						audio = True
 						continue
 
-				del media, ffprobe
+				# since there can be empty audio streams, we need to do a further check of the audio stream itself
+				media = await self.parse_audio_stream(file_on_disk)
+				if media.get('RMS level dB') != '-inf' :
+					query.append("(tag_to_id('audio'), %s, 0)")
+					params.append(post_id.int())
+					flags.append(MediaFlag.audio)
+
+				del media
 
 				if not query or not params :
 					raise BadRequest('no media streams found!')
@@ -1210,7 +1265,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 						post_id.int(),
 					),
-					fetch_one=True,
+					fetch_one = True,
 				)
 				updated: datetime = upd[0]
 

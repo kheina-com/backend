@@ -277,23 +277,26 @@ class InternalScore(BaseModel) :
 
 
 class UpdateRequest(BaseModel) :
+	field_mask:  list[str] = []
 	title:       Optional[str]
 	description: Optional[str]
 	rating:      Optional[Rating]
 	privacy:     Optional[Privacy]
-
-
-class CreateRequest(BaseModel) :
 	reply_to:    Optional[PostId]
-	title:       Optional[str]
-	description: Optional[str]
-	rating:      Optional[Rating]
-	privacy:     Optional[Privacy]
 
 	@validator('reply_to', pre=True, always=True)
 	def _parent_validator(cls, value) :
 		if value :
 			return PostId(value)
+
+	def values(self: Self) -> dict[str, Any] :
+		values = { }
+
+		for f in self.field_mask :
+			if f in self.__fields_set__ :
+				values[f] = getattr(self, f)
+
+		return values
 
 
 class Coordinates(BaseModel) :

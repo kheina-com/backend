@@ -8,7 +8,7 @@ from fastapi import APIRouter, File, Form, UploadFile
 
 from shared.backblaze import B2Interface
 from shared.config.constants import Environment, environment
-from shared.exceptions.http_error import UnprocessableEntity
+from shared.exceptions.http_error import UnprocessableDetail, UnprocessableEntity
 from shared.models import Privacy, convert_path_post_id
 from shared.models.auth import Scope
 from shared.server import Request, Response
@@ -16,7 +16,7 @@ from shared.timing import timed
 from shared.utilities.units import Byte
 from users.users import Users
 
-from .models import BaseFetchRequest, CreateRequest, FetchCommentsRequest, FetchPostsRequest, GetUserPostsRequest, IconRequest, Media, Post, PostId, PostSort, RssDateFormat, RssDescription, RssFeed, RssItem, RssMedia, RssTitle, Score, SearchResults, TimelineRequest, UpdateRequest, VoteRequest
+from .models import BaseFetchRequest, FetchCommentsRequest, FetchPostsRequest, GetUserPostsRequest, IconRequest, Media, Post, PostId, PostSort, RssDateFormat, RssDescription, RssFeed, RssItem, RssMedia, RssTitle, Score, SearchResults, TimelineRequest, UpdateRequest, VoteRequest
 from .posts import Posts, privacy_map
 from .uploader import Uploader
 
@@ -90,20 +90,16 @@ postExclude = {
 
 @postRouter.put('', response_model=Post, response_model_exclude=postExclude)
 @timed.root
-async def v1CreatePost(req: Request, body: CreateRequest) -> Post :
+async def v1CreatePost(req: Request, body: UpdateRequest) -> Post :
 	"""
 	only auth required
 	"""
 	await req.user.authenticated()
 
-	if any(body.dict().values()) :
+	if values := body.values() :
 		return await uploader.createPostWithFields(
 			req.user,
-			body.reply_to,
-			body.title,
-			body.description,
-			body.privacy,
-			body.rating,
+			**values,
 		)
 
 	return await uploader.createPost(req.user)
@@ -112,38 +108,38 @@ async def v1CreatePost(req: Request, body: CreateRequest) -> Post :
 @timed
 async def handleFile(file: UploadFile, post_id: PostId) -> str :
 	# since it doesn't do this for us, send the proper error back
-	detail: list[dict[str, Union[str, list[str]]]] = []
+	detail: list[UnprocessableDetail] = []
 
 	if not file :
-		detail.append({
-			'loc': [
+		detail.append(UnprocessableDetail(
+			loc = [
 				'body',
 				'file',
 			],
-			'msg': 'field required',
-			'type': 'value_error.missing',
-		})
+			msg  = 'field required',
+			type = 'value_error.missing',
+		))
 
 	if not file.filename :
-		detail.append({
-			'loc': [
+		detail.append(UnprocessableDetail(
+			loc = [
 				'body',
 				'file',
 				'filename',
 			],
-			'msg': 'field required',
-			'type': 'value_error.missing',
-		})
+			msg  = 'field required',
+			type = 'value_error.missing',
+		))
 
 	if not post_id :
-		detail.append({
-			'loc': [
+		detail.append(UnprocessableDetail(
+			loc = [
 				'body',
 				'post_id',
 			],
-			'msg': 'field required',
-			'type': 'value_error.missing',
-		})
+			msg  = 'field required',
+			type = 'value_error.missing',
+		))
 
 	if detail :
 		raise UnprocessableEntity(detail=detail)
@@ -238,32 +234,32 @@ async def v1SetBanner(req: Request, body: IconRequest) -> None :
 
 @postsRouter.post('', response_model=SearchResults, response_model_exclude=postExclude)
 @timed.root
-async def v1FetchPosts(req: Request, body: FetchPostsRequest) -> SearchResults :
+async def v1Posts(req: Request, body: FetchPostsRequest) -> SearchResults :
 	return await posts.fetchPosts(req.user, body.sort, body.tags, body.count, body.page)
 
 
 @postRouter.post('/comments', response_model=list[Post], response_model_exclude=postExclude)
 @timed.root
-async def v1FetchComments(req: Request, body: FetchCommentsRequest) -> list[Post] :
+async def v1Comments(req: Request, body: FetchCommentsRequest) -> list[Post] :
 	return await posts.fetchComments(req.user, body.post_id, body.sort, body.count, body.page)
 
 
 @postsRouter.post('/user', response_model=SearchResults, response_model_exclude=postExclude)
 @timed.root
-async def v1FetchUserPosts(req: Request, body: GetUserPostsRequest) -> SearchResults :
+async def v1UserPosts(req: Request, body: GetUserPostsRequest) -> SearchResults :
 	return await posts.fetchUserPosts(req.user, body.handle, body.count, body.page)
 
 
 @postsRouter.post('/mine', response_model=list[Post], response_model_exclude=postExclude)
 @timed.root
-async def v1FetchMyPosts(req: Request, body: BaseFetchRequest) -> list[Post] :
+async def v1MyPosts(req: Request, body: BaseFetchRequest) -> list[Post] :
 	await req.user.authenticated()
 	return await posts.fetchOwnPosts(req.user, body.sort, body.count, body.page)
 
 
 @postsRouter.get('/drafts', response_model=list[Post], response_model_exclude=postExclude)
 @timed.root
-async def v1FetchDrafts(req: Request) -> list[Post] :
+async def v1Drafts(req: Request) -> list[Post] :
 	await req.user.authenticated()
 	return await posts.fetchDrafts(req.user)
 
@@ -339,10 +335,7 @@ async def v1UpdatePost(req: Request, post_id: PostId, body: UpdateRequest) -> No
 	await uploader.updatePostMetadata(
 		req.user,
 		convert_path_post_id(post_id),
-		body.title,
-		body.description,
-		body.privacy,
-		body.rating,
+		**body.values(),
 	)
 
 

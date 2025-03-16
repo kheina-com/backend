@@ -15,7 +15,6 @@ from shared.models import InternalUser, Undefined, UserPortable
 from shared.sql import SqlInterface
 from shared.sql.query import CTE, Field, Join, JoinType, Operator, Order, Query, Table, Value, Where
 from shared.timing import timed
-from shared.utilities import flatten
 from tags.models import InternalTag, Tag, TagGroup
 from tags.repository import TagKVS, Tags
 from users.repository import Users
@@ -34,6 +33,7 @@ tagger = Tags()
 
 class RatingMap(SqlInterface) :
 
+	@timed
 	@AsyncLRU(maxsize=0)
 	async def get(self, key: int) -> Rating :
 		data: Tuple[str] = await self.query_async("""
@@ -50,6 +50,7 @@ class RatingMap(SqlInterface) :
 		# key is the id, return rating
 		return Rating(value=data[0])
 
+	@timed
 	@AsyncLRU(maxsize=0)
 	async def get_id(self, key: str | Rating) -> int :
 		data: Tuple[int] = await self.query_async("""
@@ -72,6 +73,7 @@ rating_map: RatingMap = RatingMap()
 
 class MediaTypeMap(SqlInterface) :
 
+	@timed
 	@AsyncLRU(maxsize=0)
 	async def get(self, key: int) -> MediaType :
 		data: Tuple[str, str] = await self.query_async("""
@@ -89,6 +91,7 @@ class MediaTypeMap(SqlInterface) :
 			mime_type = data[1],
 		)
 
+	@timed
 	@AsyncLRU(maxsize=0)
 	async def get_id(self, mime: str) -> int :
 		data: Tuple[int] = await self.query_async("""
@@ -865,7 +868,7 @@ class Posts(SqlInterface) :
 			""", (
 				list(map(int, misses)),
 			),
-			fetch_all=True,
+			fetch_all = True,
 		)
 
 		for post_id, tag, group, deprecated, owner in data :
@@ -906,23 +909,27 @@ class Posts(SqlInterface) :
 		# mapping of post_id -> parent post_id
 		parents:   dict[PostId, PostId] = { }
 		all_posts: dict[PostId, Post]   = { }
+		posts:     list[Post]           = []
 
-		posts: list[Post] = []
 		for ipost in iposts :
 			post_id:   PostId           = PostId(ipost.post_id)
 			parent_id: Optional[PostId] = None
+			tag_names: list[str]        = []
+			post_tags: list[Tag]        = []
+			flags:     list[MediaFlag]  = []
 
 			if ipost.parent :
 				parent_id = parents[post_id] = PostId(ipost.parent)
 
+			for itag in tags[post_id] :
+				tag_names.append(itag.name)
+				post_tags.append(all_tags[itag.name])
+
+				if itag.name in MediaFlag.__members__ :
+					flags.append(MediaFlag[itag.name])
+
 			media: Optional[Media] = None
 			if ipost.filename and ipost.media_type and ipost.size and ipost.content_length and ipost.thumbnails :
-				flags: list[MediaFlag] = []
-
-				for itag in tags[post_id] :
-					if itag.group == TagGroup.system :
-						flags.append(MediaFlag[itag.name])
-
 				media = Media(
 					post_id    = post_id,
 					crc        = ipost.crc,
@@ -963,8 +970,8 @@ class Posts(SqlInterface) :
 				parent_id   = parent_id,
 
 				# only the first call retrieves blocked info, all the rest should be cached and not actually await
-				blocked = await is_post_blocked(user, uploaders[ipost.user_id].internal, [t.name for t in tags[post_id]]),
-				tags    = tagger.groups([all_tags[t.name] for t in tags[post_id]])
+				blocked = await is_post_blocked(user, uploaders[ipost.user_id].internal, tag_names),
+				tags    = tagger.groups(post_tags)
 			)
 
 			if not assign_parents :
@@ -988,6 +995,6 @@ class Posts(SqlInterface) :
 
 				post = all_posts[parent]
 				assert post.replies is not None
-				post.replies.insert(0, (all_posts[post_id]))
+				post.replies.insert(0, all_posts[post_id])
 
 		return posts

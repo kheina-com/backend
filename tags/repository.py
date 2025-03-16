@@ -97,7 +97,7 @@ class Tags(SqlInterface) :
 
 
 	def groups(self: Self, tags: list[Tag]) -> TagGroups :
-		tg:   defaultdict[str, list[TagPortable]] = defaultdict(list)
+		tg: defaultdict[str, list[TagPortable]] = defaultdict(list)
 
 		for t in tags :
 			tg[t.group.name].append(self.portable(t))

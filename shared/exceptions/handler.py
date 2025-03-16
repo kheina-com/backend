@@ -36,7 +36,7 @@ def jsonErrorHandler(_: Request, e: Exception) -> UJSONResponse :
 	if isinstance(e, BaseError) :
 		if isinstance(e, UnprocessableEntity) and e.detail :
 			return UJSONResponse(
-				{ 'detail': e.detail },
+				{ 'detail': [d.dict() for d in e.detail] },
 				status_code = UnprocessableEntity.status,
 			)
 

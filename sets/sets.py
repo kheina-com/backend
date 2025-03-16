@@ -48,7 +48,7 @@ class Sets(Sets) :
 
 	@staticmethod
 	async def _verify_authorized(user: KhUser, iset: InternalSet) -> bool :
-		return user.user_id == iset.set_id or await user.verify_scope(Scope.mod, raise_error=False)
+		return user.user_id == iset.owner or await user.verify_scope(Scope.mod, raise_error=False)
 
 
 	@staticmethod
@@ -200,7 +200,7 @@ class Sets(Sets) :
 	async def update_set(self: Self, user: KhUser, set_id: SetId, req: UpdateSetRequest) :
 		iset: InternalSet = await self._get_set(set_id)
 
-		if not Sets._verify_authorized(user, iset) :
+		if not await Sets._verify_authorized(user, iset) :
 			raise NotFound(SetNotFound.format(set_id=set_id))
 
 		params: list[Union[str, Privacy, int, None]] = []
@@ -263,7 +263,7 @@ class Sets(Sets) :
 	async def delete_set(self: Self, user: KhUser, set_id: SetId) -> None :
 		iset: InternalSet = await self._get_set(set_id)
 
-		if not Sets._verify_authorized(user, iset) :
+		if not await Sets._verify_authorized(user, iset) :
 			raise NotFound(SetNotFound.format(set_id=set_id))
 
 		await self.delete(iset)
