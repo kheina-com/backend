@@ -158,7 +158,7 @@ class Post(OmitModel) :
 	post_id:     PostId
 	title:       Optional[str]
 	description: Optional[str]
-	user:        UserPortable
+	user:        Optional[UserPortable]
 	score:       Optional[Score]
 	rating:      Rating
 	parent_id:   Optional[PostId]
@@ -169,6 +169,7 @@ class Post(OmitModel) :
 	media:       Optional[Media]
 	tags:        Optional[TagGroups]
 	blocked:     bool
+	locked:      bool                   = False
 	replies:     Optional[list['Post']] = None
 	"""
 	None implies "not retrieved" whereas [] means no replies found
@@ -273,7 +274,7 @@ class InternalScore(BaseModel) :
 	total: int
 
 
-######################### uploader things
+##################################################  uploader things  ##################################################
 
 
 class UpdateRequest(BaseModel) :

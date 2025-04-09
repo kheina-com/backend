@@ -23,7 +23,8 @@ class BaseError(Exception) :
 		if 'refid' in logdata :
 			del logdata['refid']
 
-		self.logdata: dict[str, Any] = {
+		self.__dict__: dict[str, Any] = {
 			**logdata,
 			**kwargs,
+			**self.__dict__,
 		}

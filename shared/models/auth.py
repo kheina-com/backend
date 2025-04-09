@@ -27,7 +27,7 @@ class Scope(IntEnum) :
 		return [v for v in Scope.__members__.values() if Scope.user.value <= v.value <= self.value] or [self]
 
 
-class KhUser(NamedTuple) :
+class _KhUser(NamedTuple) :
 	user_id: int                 = -1
 	token:   Optional[AuthToken] = None
 	scope:   set[Scope]          = set()

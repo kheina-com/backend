@@ -6,7 +6,7 @@ import aerospike
 from psycopg.errors import NotNullViolation, UniqueViolation
 
 from posts.models import InternalPost, PostId, Privacy
-from posts.repository import Posts
+from posts.repository import Repository as Posts
 from shared.auth import KhUser, Scope
 from shared.caching import AerospikeCache, SimpleCache
 from shared.exceptions.http_error import BadRequest, Conflict, Forbidden, HttpErrorHandler, NotFound
@@ -16,14 +16,14 @@ from shared.timing import timed
 from shared.utilities import flatten
 
 from .models import InternalTag, Tag, TagGroup, TagGroups
-from .repository import TagKVS, Tags, users
+from .repository import Repository, TagKVS, users
 
 
 posts = Posts()
 Misc: TagGroup = TagGroup('misc')
 
 
-class Tagger(Tags) :
+class Tagger(Repository) :
 
 	def _validateDescription(self, description: str) :
 		if len(description) > 1000 :

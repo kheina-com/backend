@@ -1,6 +1,7 @@
 import json
 from asyncio import Task, create_subprocess_exec, ensure_future
 from enum import Enum
+from hashlib import sha1
 from io import BytesIO
 from os import path, remove
 from secrets import token_bytes
@@ -16,11 +17,11 @@ from ffmpeg.asyncio import FFmpeg
 from wand import resource
 from wand.image import Image
 
+from notifications.repository import Notifier
 from shared.auth import KhUser, Scope
 from shared.backblaze import B2Interface, MimeType
-from shared.base64 import b64decode
+from shared.base64 import b64decode, b64encode
 from shared.caching.key_value_store import KeyValueStore
-from shared.crc import CRC
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadGateway, BadRequest, Forbidden, HttpErrorHandler, InternalServerError, NotFound
 from shared.models import InternalUser
@@ -29,11 +30,15 @@ from shared.timing import timed
 from shared.utilities import flatten, int_from_bytes
 from shared.utilities.units import Byte
 from tags.models import InternalTag
-from tags.repository import CountKVS, Tags
-from users.repository import UserKVS, Users
+from tags.repository import CountKVS
+from tags.repository import Repository as Tags
+from users.repository import Repository as Users
+from users.repository import UserKVS
 
 from .models import Coordinates, InternalPost, Media, MediaFlag, Post, PostId, PostSize, Privacy, Rating, Thumbnail
-from .repository import PostKVS, Posts, VoteKVS, media_type_map, privacy_map, rating_map
+from .repository import PostKVS
+from .repository import Repository as Posts
+from .repository import VoteKVS, media_type_map, privacy_map, rating_map
 from .scoring import confidence
 from .scoring import controversial as calc_cont
 from .scoring import hot as calc_hot
@@ -44,27 +49,59 @@ resource.limits.set_resource_limit('map',    Byte.gigabyte.value)
 resource.limits.set_resource_limit('disk',   Byte.gigabyte.value * 100)
 UnpublishedPrivacies: Set[Privacy] = { Privacy.unpublished, Privacy.draft }
 
-posts  = Posts()
-users  = Users()
-tagger = Tags()
-_crc   = CRC(32)
+posts:    Posts    = Posts()
+users:    Users    = Users()
+tagger:   Tags     = Tags()
+notifier: Notifier = Notifier()
 
 
 @timed
 def crc(value: bytes) -> int :
-	return _crc(value)
+	# return int.from_bytes(sha1(value).digest()[:8], signed=True)
+	return int.from_bytes(sha1(value).digest()[:4])
+
+
+@timed
+async def extract_frame(file_on_disk: str, filename: str) -> str :
+	await FFmpeg().input(
+		file_on_disk,
+		accurate_seek = None,
+		ss            = '0',
+	).output(
+		(screenshot := f'images/{uuid4().hex}_{filename}.webp'),
+		{ 'frames:v': '1' },
+	).execute()
+	return screenshot
+
+
+@timed
+async def validate_image(file_on_disk: str) -> None :
+	with Image(file=open(file_on_disk, 'rb')) :
+		pass
+
+
+@timed
+async def validate_video(file_on_disk: str) -> None :
+	# ffmpeg -v error -i file.avi -f null -
+	await FFmpeg().input(
+		file_on_disk,
+		v = 'error',
+	).output(
+		'-',
+		f = 'null',
+	).execute()
 
 
 class Uploader(SqlInterface, B2Interface) :
 
 	def __init__(self: Self) -> None :
+		B2Interface.__init__(self, max_retries=5)
 		SqlInterface.__init__(
 			self,
 			conversions={
 				Enum: lambda x: x.name,
 			},
 		)
-		B2Interface.__init__(self, max_retries=5)
 		self.thumbnail_sizes: list[int] = [
 			1200,
 			800,
@@ -195,7 +232,13 @@ class Uploader(SqlInterface, B2Interface) :
 
 			for _ in range(100) :
 				post_id = PostId.generate()
-				data = await t.query_async("SELECT count(1) FROM kheina.public.posts WHERE post_id = %s;", (post_id.int(),), fetch_one=True)
+				data = await t.query_async("""
+					SELECT count(1) FROM kheina.public.posts WHERE post_id = %s;
+					""", (
+						post_id.int(),
+					),
+					fetch_one = True,
+				)
 
 				if not data[0] :
 					break
@@ -223,7 +266,7 @@ class Uploader(SqlInterface, B2Interface) :
 					user.user_id,
 					user.user_id,
 				),
-				fetch_one=True,
+				fetch_one = True,
 			)
 
 			post_id = PostId(data[0])
@@ -274,6 +317,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 		internal_post_id: int
 		post_id:          PostId
+		notify:           bool = False
 
 		async with self.transaction() as transaction :
 			for _ in range(100) :
@@ -297,12 +341,17 @@ class Uploader(SqlInterface, B2Interface) :
 			post = await transaction.insert(post)
 
 			if privacy :
-				await self._update_privacy(user, post_id, privacy, transaction=transaction, commit=False)
+				notify = await self._update_privacy(user, post_id, privacy, transaction=transaction, commit=False)
 				post.privacy = await privacy_map.get_id(privacy)
 
 			await transaction.commit()
 
 		await PostKVS.put_async(post_id, post)
+
+		if notify :
+			"""
+			TODO: check for mentions in the post, and notify users that they were mentioned
+			"""
 
 		return await posts.post(user, post)
 
@@ -374,18 +423,28 @@ class Uploader(SqlInterface, B2Interface) :
 
 
 	@timed
-	async def upload_thumbnail(self: Self, run: str, t: Transaction, post_id: PostId, crc: int, image: Image, size: int, ext: str) -> Thumbnail :
-		mime: MimeType = MimeType[ext]
-		url:  str      = f'{post_id}/{crc}/thumbnails/{size}.{ext}'
-		data: bytes    = self.get_image_data(image.convert(mime.type()))
-		await self.upload_async(data, url, mime)
-		th = await self.insert_thumbnail(t, post_id, crc, mime, size, f'{size}.{ext}', len(data), image.size[0], image.size[1])
-		self.logger.debug({
-			'run':     run,
-			'post':    post_id,
-			'message': f'uploaded thumbnail {mime.name}({size}) image to cdn',
-		})
-		return th
+	async def upload_thumbnails(self: Self, run: str, t: Transaction, post_id: PostId, crc: int, image: Image, formats: list[tuple[int, str]]) -> list[Thumbnail] :
+		"""
+		formats is a tuple of size and file extension, used to resize each thumbnail and upload it
+		"""
+		ths: list[Thumbnail] = []
+		# query: list[str] = []
+		# params: list[Any] = []
+
+		for size, ext in sorted(formats, key=lambda x : x[0], reverse=True) :
+			image = self.convert_image(image, size)
+			mime: MimeType = MimeType[ext]
+			url:  str      = f'{post_id}/{crc}/thumbnails/{size}.{ext}'
+			data: bytes    = self.get_image_data(image.convert(mime.type()))
+			await self.upload_async(data, url, mime)
+			ths.append(await self.insert_thumbnail(t, post_id, crc, mime, size, f'{size}.{ext}', len(data), image.size[0], image.size[1]))
+			self.logger.debug({
+				'run':     run,
+				'post':    post_id,
+				'message': f'uploaded thumbnail {mime.name}({size}) image to cdn',
+			})
+
+		return ths
 
 
 	@timed
@@ -422,16 +481,24 @@ class Uploader(SqlInterface, B2Interface) :
 		emoji_name:   Optional[str] = None,
 		web_resize:   Optional[int] = None,
 	) -> Media :
-		run: str = uuid4().hex
+		start: datetime = datetime.now()
+		run:   str      = uuid4().hex
 
 		# validate it's an actual photo
 		try :
-			with Image(file=open(file_on_disk, 'rb')) :
-				pass
+			await validate_image(file_on_disk)
 
 		except Exception as e :
 			self.delete_file(file_on_disk)
 			raise BadRequest('Uploaded file is not an image.', err=e)
+
+		self.logger.debug({
+			'run':          run,
+			'post':         post_id,
+			'elapsed':      datetime.now() - start,
+			'file_on_disk': file_on_disk,
+			'message':      'validated input image file',
+		})
 
 		rev:       int
 		mime_type: MimeType
@@ -461,6 +528,7 @@ class Uploader(SqlInterface, B2Interface) :
 			self.logger.debug({
 				'run':          run,
 				'post':         post_id,
+				'elapsed':      datetime.now() - start,
 				'file_on_disk': file_on_disk,
 				'content_type': mime_type,
 				'filename':     filename,
@@ -474,7 +542,9 @@ class Uploader(SqlInterface, B2Interface) :
 
 			self.logger.debug({
 				'run':       run,
-				'thumbhash': thumbhash,
+				'post':      post_id,
+				'elapsed':   datetime.now() - start,
+				'thumbhash': b64encode(thumbhash).decode(),
 			})
 
 			async with self.transaction() as transaction :
@@ -523,6 +593,7 @@ class Uploader(SqlInterface, B2Interface) :
 						self.logger.debug({
 							'run':     run,
 							'post':    post_id,
+							'elapsed': datetime.now() - start,
 							'message': 'resized for web',
 						})
 
@@ -556,14 +627,14 @@ class Uploader(SqlInterface, B2Interface) :
 					(     %s,   %s,       %s,     %s,        %s,    %s,     %s,  %s)
 					on conflict (post_id) do update
 					set updated   = now(),
-						type      = %s,
-						filename  = %s,
-						length    = %s,
-						thumbhash = %s,
-						width     = %s,
-						height    = %s,
-						crc       = %s
-					WHERE media.post_id = %s
+						type      = excluded.type,
+						filename  = excluded.filename,
+						length    = excluded.length,
+						thumbhash = excluded.thumbhash,
+						width     = excluded.width,
+						height    = excluded.height,
+						crc       = excluded.crc
+					WHERE media.post_id = excluded.post_id
 					RETURNING media.updated;
 					""", (
 						post_id.int(),
@@ -574,18 +645,8 @@ class Uploader(SqlInterface, B2Interface) :
 						image_size.width,
 						image_size.height,
 						rev,
-
-						media_type,
-						filename,
-						content_length,
-						thumbhash,
-						image_size.width,
-						image_size.height,
-						rev,
-
-						post_id.int(),
 					),
-					fetch_one=True,
+					fetch_one = True,
 				)
 				updated: datetime = upd[0]
 
@@ -602,6 +663,7 @@ class Uploader(SqlInterface, B2Interface) :
 					self.logger.debug({
 						'run':     run,
 						'post':    post_id,
+						'elapsed': datetime.now() - start,
 						'message': 'deleted old file from cdn',
 					})
 
@@ -612,37 +674,21 @@ class Uploader(SqlInterface, B2Interface) :
 				self.logger.debug({
 					'run':     run,
 					'post':    post_id,
+					'elapsed': datetime.now() - start,
 					'message': 'uploaded fullsize image to cdn',
 				})
 
 				# upload thumbnails
-				thumbnails: list[Thumbnail] = []
-
+				thumbnails: list[Thumbnail]
 				with Image(file=open(file_on_disk, 'rb')) as image :
-					for i, size in enumerate(self.thumbnail_sizes) :
-						image = self.convert_image(image, size)
-
-						if not i :
-							# jpeg thumbnail
-							thumbnails.append(await self.upload_thumbnail(
-								run,
-								transaction,
-								post_id,
-								rev,
-								image,
-								size,
-								'jpg',
-							))
-
-						thumbnails.append(await self.upload_thumbnail(
-							run,
-							transaction,
-							post_id,
-							rev,
-							image,
-							size,
-							'webp',
-						))
+					thumbnails: list[Thumbnail] = await self.upload_thumbnails(
+						run,
+						transaction,
+						post_id,
+						rev,
+						image,
+						[(s, 'webp') for s in self.thumbnail_sizes] + [(self.thumbnail_sizes[0], 'jpg')],
+					)
 
 					del image
 
@@ -729,9 +775,10 @@ class Uploader(SqlInterface, B2Interface) :
 		if not update and not update_privacy :
 			raise BadRequest('no params were provided.')
 
+		notify: bool = False
 		async with self.transaction() as t :
 			if update_privacy and privacy :
-				await self._update_privacy(user, post_id, privacy, t, commit = False)
+				notify = await self._update_privacy(user, post_id, privacy, t, commit = False)
 				post.privacy = await privacy_map.get_id(privacy)
 
 			if update :
@@ -739,6 +786,11 @@ class Uploader(SqlInterface, B2Interface) :
 
 			await PostKVS.put_async(post_id, post)
 			await t.commit()
+
+		if notify :
+			"""
+			TODO: check for mentions and tags in the post, and notify users that they were mentioned, tagged, or a post matched one of their tag sets
+			"""
 
 
 	@timed
@@ -750,11 +802,16 @@ class Uploader(SqlInterface, B2Interface) :
 		transaction: Optional[Transaction] = None,
 		commit:      bool                  = True,
 	) -> bool :
+		"""
+		returns True if the post was published, false otherwise
+		"""
 		if privacy == Privacy.unpublished :
 			raise BadRequest('post privacy cannot be updated to unpublished.')
 
 		if not transaction :
 			transaction = self.transaction()
+
+		published: bool = False
 
 		async with transaction as t :
 			data = await t.query_async("""
@@ -786,6 +843,7 @@ class Uploader(SqlInterface, B2Interface) :
 			vote_task: Optional[Task] = None
 
 			if old_privacy in UnpublishedPrivacies and privacy not in UnpublishedPrivacies :
+				published = True
 				await t.query_async("""
 					INSERT INTO kheina.public.post_votes
 					(user_id, post_id, upvote)
@@ -873,19 +931,7 @@ class Uploader(SqlInterface, B2Interface) :
 			if vote_task :
 				await vote_task
 
-		return True
-
-
-	@HttpErrorHandler('updating post privacy')
-	@timed
-	async def updatePrivacy(self: Self, user: KhUser, post_id: PostId, privacy: Privacy) :
-		success = await self._update_privacy(user, post_id, privacy)
-
-		if await PostKVS.exists_async(post_id) :
-			# we need the created and updated values set by db, so just remove
-			ensure_future(PostKVS.remove_async(post_id))
-
-		return success
+		return published
 
 
 	async def getImage(self: Self, ipost: InternalPost, coordinates: Coordinates) -> Image :
@@ -1081,20 +1127,24 @@ class Uploader(SqlInterface, B2Interface) :
 		filename:     str,
 		post_id:      PostId,
 	) -> Media :
-		run: str = uuid4().hex
+		start: datetime = datetime.now()
+		run: str        = uuid4().hex
 
 		# validate it's an actual video
 		try :
-			await FFmpeg().input(
-				file_on_disk,
-			).output(
-				'-',
-				f = 'null',
-			).execute()
+			await validate_video(file_on_disk)
 
 		except Exception as e :
 			self.delete_file(file_on_disk)
 			raise BadRequest('Uploaded file is not a video.', err=e)
+
+		self.logger.debug({
+			'run':          run,
+			'post':         post_id,
+			'elapsed':      datetime.now() - start,
+			'file_on_disk': file_on_disk,
+			'message':      'validated input video file',
+		})
 
 		rev:       int
 		mime_type: MimeType
@@ -1115,19 +1165,13 @@ class Uploader(SqlInterface, B2Interface) :
 
 		try :
 			# extract the first frame of the video to use for thumbnails/hash
-			await FFmpeg().input(
-				file_on_disk,
-				accurate_seek = None,
-				ss            = '0',
-			).output(
-				(screenshot := f'images/{uuid4().hex}_{filename}.webp'),
-				{ 'frames:v': '1' },
-			).execute()
+			screenshot = await extract_frame(file_on_disk, filename)
 
 			post: InternalPost = await posts._get_post(post_id)
 			self.logger.debug({
 				'run':          run,
 				'post':         post_id,
+				'elapsed':      datetime.now() - start,
 				'file_on_disk': file_on_disk,
 				'content_type': mime_type,
 				'filename':     filename,
@@ -1140,7 +1184,9 @@ class Uploader(SqlInterface, B2Interface) :
 
 			self.logger.debug({
 				'run':       run,
-				'thumbhash': thumbhash,
+				'post':      post_id,
+				'elapsed':   datetime.now() - start,
+				'thumbhash': b64encode(thumbhash).decode(),
 			})
 
 			async with self.transaction() as transaction :
@@ -1164,7 +1210,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 				old_filename: Optional[str] = data[0]
 				old_crc:      Optional[int] = data[1]
-				image_size: PostSize
+				image_size:   PostSize
 				del data
 
 				await self.purgeSystemTags(run, transaction, post_id)
@@ -1195,14 +1241,15 @@ class Uploader(SqlInterface, B2Interface) :
 						audio = True
 						continue
 
-				# since there can be empty audio streams, we need to do a further check of the audio stream itself
-				media = await self.parse_audio_stream(file_on_disk)
-				if media.get('RMS level dB') != '-inf' :
-					query.append("(tag_to_id('audio'), %s, 0)")
-					params.append(post_id.int())
-					flags.append(MediaFlag.audio)
+				if audio :
+					# since there can be empty audio streams, we need to do a further check of the audio stream itself
+					media = await self.parse_audio_stream(file_on_disk)
+					if (rms := media.get('RMS level dB')) and rms != '-inf' :
+						query.append("(tag_to_id('audio'), %s, 0)")
+						params.append(post_id.int())
+						flags.append(MediaFlag.audio)
 
-				del media
+					del media
 
 				if not query or not params :
 					raise BadRequest('no media streams found!')
@@ -1236,14 +1283,14 @@ class Uploader(SqlInterface, B2Interface) :
 					(     %s,   %s,       %s,     %s,        %s,    %s,     %s,  %s)
 					on conflict (post_id) do update
 					set updated   = now(),
-						type      = %s,
-						filename  = %s,
-						length    = %s,
-						thumbhash = %s,
-						width     = %s,
-						height    = %s,
-						crc       = %s
-					WHERE media.post_id = %s
+						type      = excluded.type,
+						filename  = excluded.filename,
+						length    = excluded.length,
+						thumbhash = excluded.thumbhash,
+						width     = excluded.width,
+						height    = excluded.height,
+						crc       = excluded.crc
+					WHERE media.post_id = excluded.post_id
 					RETURNING media.updated;
 					""", (
 						post_id.int(),
@@ -1254,75 +1301,44 @@ class Uploader(SqlInterface, B2Interface) :
 						image_size.width,
 						image_size.height,
 						rev,
-
-						media_type,
-						filename,
-						content_length,
-						thumbhash,
-						image_size.width,
-						image_size.height,
-						rev,
-
-						post_id.int(),
 					),
 					fetch_one = True,
 				)
 				updated: datetime = upd[0]
 
 				if old_filename :
-					old_url: str
-
-					if old_crc :
-						old_url = f'{post_id}/{old_crc}/{old_filename}'
-
-					else :
-						old_url = f'{post_id}/{old_filename}'
-
+					old_url: str = f'{post_id}/{old_crc}/{old_filename}' if old_crc else f'{post_id}/{old_filename}'
 					await self.delete_file_async(old_url)
 					self.logger.debug({
 						'run':     run,
 						'post':    post_id,
+						'elapsed': datetime.now() - start,
+						'url':     old_url,
 						'message': 'deleted old file from cdn',
 					})
 
-				url: str = f'{post_id}/{rev}/{filename}'
-
 				# upload fullsize
+				url: str = f'{post_id}/{rev}/{filename}'
 				await self.upload_async(open(file_on_disk, 'rb').read(), url, content_type = mime_type)
 				self.logger.debug({
 					'run':     run,
 					'post':    post_id,
+					'elapsed': datetime.now() - start,
+					'url':     url,
 					'message': 'uploaded fullsize image to cdn',
 				})
 
 				# upload thumbnails
-				thumbnails: list[Thumbnail] = []
-
+				thumbnails: list[Thumbnail]
 				with Image(file=open(screenshot, 'rb')) as image :
-					for i, size in enumerate(self.thumbnail_sizes) :
-						image = self.convert_image(image, size)
-
-						if not i :
-							# jpeg thumbnail
-							thumbnails.append(await self.upload_thumbnail(
-								run,
-								transaction,
-								post_id,
-								rev,
-								image,
-								size,
-								'jpg',
-							))
-
-						thumbnails.append(await self.upload_thumbnail(
-							run,
-							transaction,
-							post_id,
-							rev,
-							image,
-							size,
-							'webp',
-						))
+					thumbnails: list[Thumbnail] = await self.upload_thumbnails(
+						run,
+						transaction,
+						post_id,
+						rev,
+						image,
+						[(s, 'webp') for s in self.thumbnail_sizes] + [(self.thumbnail_sizes[0], 'jpg')],
+					)
 
 					del image
 

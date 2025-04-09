@@ -5,8 +5,8 @@ from fastapi import APIRouter
 from shared.exceptions.http_error import HttpErrorHandler
 from shared.models import Badge, User
 from shared.models.auth import Scope
+from shared.models.server import Request
 from shared.models.user import SetMod, SetVerified, UpdateSelf
-from shared.server import Request
 from shared.timing import timed
 
 from .users import Users
@@ -22,14 +22,6 @@ usersRouter = APIRouter(
 users: Users = Users()
 
 
-################################################## INTERNAL ##################################################
-# @app.get('/i1/{user_id}', response_model=InternalUser)
-# async def i1User(req: Request, user_id: int) :
-# 	await req.user.verify_scope(Scope.internal)
-# 	return await users._get_user(user_id)
-
-
-##################################################  PUBLIC  ##################################################
 @userRouter.get('/self', response_model=User)
 @timed.root
 @HttpErrorHandler("retrieving user's own profile")

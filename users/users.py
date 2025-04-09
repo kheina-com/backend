@@ -1,25 +1,38 @@
-from asyncio import Task, ensure_future
-from typing import List, Optional
+from asyncio import Task, create_task
+from typing import List, Optional, Self
 
+from notifications.models import InternalUserNotification, UserNotificationEvent
+from notifications.repository import Notifier
 from shared.auth import KhUser
 from shared.caching import SimpleCache
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
 from shared.models import Badge, InternalUser, User, UserPrivacy, Verified
+from shared.models._shared import UserPortable
+from shared.timing import timed
+from shared.utilities import ensure_future
 
-from .repository import FollowKVS, UserKVS, Users, badge_map, privacy_map  # type: ignore
+from .repository import FollowKVS, Repository, UserKVS, badge_map, privacy_map
 
 
-class Users(Users) :
+notifier: Notifier = Notifier()
+
+
+class Users(Repository) :
 
 	@HttpErrorHandler('retrieving user')
-	async def getUser(self: 'Users', user: KhUser, handle: str) -> User :
+	async def getUser(self: Self, user: KhUser, handle: str) -> User :
 		iuser: InternalUser = await self._get_user_by_handle(handle)
 		return await self.user(user, iuser)
 
 
-	async def followUser(self: 'Users', user: KhUser, handle: str) -> None :
+	@timed
+	async def followUser(self: Self, user: KhUser, handle: str) -> None :
 		user_id: int = await self._handle_to_user_id(handle.lower())
 		following: bool = await self.following(user.user_id, user_id)
+		portable: Task[UserPortable] = create_task(self.portable(
+			KhUser(user_id=user_id),
+			await self._get_user(user.user_id),
+		))
 
 		if following :
 			raise BadRequest('you are already following this user.')
@@ -34,15 +47,22 @@ class Users(Users) :
 			commit=True,
 		)
 
-		FollowKVS.put(f'{user.user_id}|{user_id}', True)
+		ensure_future(FollowKVS.put_async(f'{user.user_id}|{user_id}', True))
+		ensure_future(notifier.sendNotification(
+			user_id,
+			InternalUserNotification(
+				event   = UserNotificationEvent.follow,
+				user_id = user.user_id,
+			),
+			user = await portable,
+		), name = 'sending notifications')
 
-
-	async def unfollowUser(self: 'Users', user: KhUser, handle: str) -> None :
+	async def unfollowUser(self: Self, user: KhUser, handle: str) -> None :
 		user_id: int = await self._handle_to_user_id(handle.lower())
 		following: bool = await self.following(user.user_id, user_id)
 
 		if following is False :
-			raise BadRequest('you are already not following this user.')
+			raise BadRequest('you are not currently following this user.')
 
 		await self.query_async("""
 			DELETE FROM kheina.public.following
@@ -53,16 +73,16 @@ class Users(Users) :
 			commit=True,
 		)
 
-		FollowKVS.put(f'{user.user_id}|{user_id}', False)
+		ensure_future(FollowKVS.put_async(f'{user.user_id}|{user_id}', False))
 
 
-	async def getSelf(self: 'Users', user: KhUser) -> User :
+	async def getSelf(self: Self, user: KhUser) -> User :
 		iuser: InternalUser = await self._get_user(user.user_id)
 		return await self.user(user, iuser)
 
 
 	@HttpErrorHandler('updating user profile')
-	async def updateSelf(self: 'Users', user: KhUser, name: Optional[str], privacy: Optional[UserPrivacy], website: Optional[str], description: Optional[str]) -> None :
+	async def updateSelf(self: Self, user: KhUser, name: Optional[str], privacy: Optional[UserPrivacy], website: Optional[str], description: Optional[str]) -> None :
 		iuser: InternalUser = await self._get_user(user.user_id)
 
 		if not any([name, privacy, website, description]) :
@@ -87,7 +107,7 @@ class Users(Users) :
 
 
 	@HttpErrorHandler('fetching all users')
-	async def getUsers(self: 'Users', user: KhUser) :
+	async def getUsers(self: Self, user: KhUser) :
 		# TODO: this function desperately needs to be reworked
 		data = await self.query_async("""
 			SELECT
@@ -145,9 +165,9 @@ class Users(Users) :
 
 
 	@HttpErrorHandler('setting mod')
-	async def setMod(self: 'Users', handle: str, mod: bool) -> None :
+	async def setMod(self: Self, handle: str, mod: bool) -> None :
 		user_id: int = await self._handle_to_user_id(handle.lower())
-		user_task: Task[InternalUser] = ensure_future(self._get_user(user_id))
+		user_task: Task[InternalUser] = create_task(self._get_user(user_id))
 
 		await self.query_async("""
 			UPDATE kheina.public.users
@@ -165,13 +185,13 @@ class Users(Users) :
 
 
 	@SimpleCache(60)
-	async def fetchBadges(self: 'Users') -> List[Badge] :
+	async def fetchBadges(self: Self) -> List[Badge] :
 		return await badge_map.all()
 
 
 	@HttpErrorHandler('adding badge to self')
-	async def addBadge(self: 'Users', user: KhUser, badge: Badge) -> None :
-		iuser_task: Task[InternalUser] = ensure_future(self._get_user(user.user_id))
+	async def addBadge(self: Self, user: KhUser, badge: Badge) -> None :
+		iuser_task: Task[InternalUser] = create_task(self._get_user(user.user_id))
 		try :
 			badge_id: int = await badge_map.get_id(badge)
 
@@ -198,8 +218,8 @@ class Users(Users) :
 
 
 	@HttpErrorHandler('removing badge from self')
-	async def removeBadge(self: 'Users', user: KhUser, badge: Badge) -> None :
-		iuser_task: Task[InternalUser] = ensure_future(self._get_user(user.user_id))
+	async def removeBadge(self: Self, user: KhUser, badge: Badge) -> None :
+		iuser_task: Task[InternalUser] = create_task(self._get_user(user.user_id))
 		try :
 			badge_id: int = await badge_map.get_id(badge)
 
@@ -227,7 +247,7 @@ class Users(Users) :
 
 
 	@HttpErrorHandler('creating badge')
-	async def createBadge(self: 'Users', badge: Badge) -> None :
+	async def createBadge(self: Self, badge: Badge) -> None :
 		await self.query_async("""
 			INSERT INTO kheina.public.badges
 			(emoji, label)
@@ -240,9 +260,9 @@ class Users(Users) :
 
 
 	@HttpErrorHandler('verifying user')
-	async def verifyUser(self: 'Users', handle: str, verified: Verified) -> None :
+	async def verifyUser(self: Self, handle: str, verified: Verified) -> None :
 		user_id: int = await self._handle_to_user_id(handle.lower())
-		user_task: Task[InternalUser] = ensure_future(self._get_user(user_id))
+		user_task: Task[InternalUser] = create_task(self._get_user(user_id))
 
 		await self.query_async(f"""
 			UPDATE kheina.public.users

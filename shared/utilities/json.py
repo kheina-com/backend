@@ -1,23 +1,21 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import Enum, IntEnum
+from hashlib import sha1
 from traceback import format_tb
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel
 
 from ..base64 import b64decode
-from ..crc import CRC
-from ..models.auth import AuthToken, KhUser
+from ..models.auth import AuthToken, _KhUser
 from . import getFullyQualifiedClassName
 
 
-crc = CRC(32)
-
-
-_conversions: dict[type, Callable] = {
+_conversions: dict[type[T := TypeVar('T')], Callable[[T], Any]] = {
 	datetime: str,
+	timedelta: timedelta.total_seconds,
 	Decimal: float,
 	float: float,
 	int: int,
@@ -31,7 +29,7 @@ _conversions: dict[type, Callable] = {
 	IntEnum: lambda x : x.name,
 	Enum: lambda x : x.name,
 	UUID: lambda x : x.hex,
-	KhUser: lambda x : {
+	_KhUser: lambda x : {
 		'user_id': x.user_id,
 		'scope': json_stream(x.scope),
 		'token': json_stream(x.token) if x.token else None,
@@ -44,7 +42,7 @@ _conversions: dict[type, Callable] = {
 		'token': {
 			'len': len(x.token_string),
 			'version': int(b64decode(x.token_string[:x.token_string.find('.')]).decode()),
-			'hash': f'{crc(x.token_string.encode()):x}',
+			'hash': sha1(x.token_string.encode()).hexdigest(),
 		},
 	},
 	BaseModel: lambda x : json_stream(x.dict()),

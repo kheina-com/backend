@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.serialization import load_der_public_key
 from fastapi import Request
 
 from authenticator.authenticator import AuthAlgorithm, Authenticator, AuthState, PublicKeyResponse, Scope, TokenMetadata
-from shared.models.auth import AuthToken, KhUser  # type: ignore
+from shared.models.auth import AuthToken, _KhUser
 
 from ..base64 import b64decode, b64encode
 from ..caching import ArgsCache
@@ -33,7 +33,7 @@ class InvalidToken(ValueError) :
 	pass
 
 
-class KhUser(KhUser) :
+class KhUser(_KhUser) :
 	async def authenticated(self, raise_error: bool = True) -> bool :
 		if self.banned :
 			if raise_error :

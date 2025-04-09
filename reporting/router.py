@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Request
 
 from shared.auth import Scope
-from shared.models import PostId
+from shared.models import PostId, convert_path_post_id
 from shared.timing import timed
 
-from .models import CreateActionRequest, CreateRequest, ReportReponseRequest
+from .models import CloseReponseRequest, CreateActionRequest, CreateRequest
 from .models.actions import ModAction
 from .models.bans import Ban
 from .models.mod_queue import ModQueueEntry
@@ -13,25 +13,25 @@ from .reporting import Reporting
 
 
 reportRouter = APIRouter(
-	prefix='/report',
+	prefix = '/report',
 )
 reportsRouter = APIRouter(
-	prefix='/reports',
+	prefix = '/reports',
 )
 
 actionRouter = APIRouter(
-	prefix='/action',
+	prefix = '/action',
 )
 actionsRouter = APIRouter(
-	prefix='/actions',
+	prefix = '/actions',
 )
 
 queueRouter = APIRouter(
-	prefix='/mod',
+	prefix = '/mod',
 )
 
 bansRouter = APIRouter(
-	prefix='/bans',
+	prefix = '/bans',
 )
 
 
@@ -66,6 +66,13 @@ async def v1List(req: Request) -> list[Report] :
 	return await reporting.list_(req.user)
 
 
+@reportRouter.delete('/{report_id}')
+@timed.root
+async def v1CloseWithoutAction(req: Request, report_id: int, body: CloseReponseRequest) -> Report :
+	await req.user.verify_scope(Scope.mod)
+	return await reporting.close_response(req.user, report_id, body.response)
+
+
 ######################### queue #########################
 
 
@@ -83,13 +90,6 @@ async def v1AssignSelf(req: Request, queue_id: int) -> None :
 	return await reporting.assign_self(req.user, queue_id)
 
 
-@queueRouter.patch('/{queue_id}')
-@timed.root
-async def v1CloseWithoutAction(req: Request, queue_id: int, body: ReportReponseRequest) -> Report :
-	await req.user.verify_scope(Scope.mod)
-	return await reporting.close_response(req.user, queue_id, body.response)
-
-
 ######################### actions #########################
 
 @actionRouter.put('')
@@ -103,7 +103,14 @@ async def v1CloseWithAction(req: Request, body: CreateActionRequest) -> ModActio
 @timed.root
 async def v1Actions(req: Request, post_id: PostId) -> list[ModAction] :
 	await req.user.verify_scope(Scope.mod)
-	return await reporting.actions(req.user, post_id)
+	return await reporting.actions(req.user, convert_path_post_id(post_id))
+
+
+@actionsRouter.get('/user/{handle}')
+@timed.root
+async def v1UserActions(req: Request, handle: str) -> list[ModAction] :
+	await req.user.verify_scope(Scope.mod)
+	return await reporting.user_actions(req.user, handle)
 
 
 ######################### bans #########################

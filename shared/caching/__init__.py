@@ -182,9 +182,16 @@ def KwargsCache(TTL_seconds:float=0, TTL_minutes:float=0, TTL_hours:float=0, TTL
 
 
 def deepTypecheck(type_: type | tuple, instance: Any) -> bool :
+	"""
+	returns true if instance is an instance of type_
+	"""
+
+	if instance is None and type(None) in getattr(type_, '__args__', tuple()) :
+		return True
+
 	if isinstance(type_, tuple) :
 		if type(instance) not in type_ :
-			return False	
+			return False
 
 	else :
 		t = getattr(type_, '__origin__', type_)
@@ -267,7 +274,6 @@ def AerospikeCache(
 						await decorator.kvs.put_async(key, data, TTL)
 
 				else :
-					
 					if not deepTypecheck(return_type, data) :
 						data = await func(*args, **kwargs)
 

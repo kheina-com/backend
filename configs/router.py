@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse
 
 from shared.auth import Scope
-from shared.server import Request
+from shared.models.server import Request
 
 from .configs import Configs
 from .models import ConfigsResponse, UpdateConfigRequest, UserConfigRequest, UserConfigResponse
@@ -17,24 +17,11 @@ app = APIRouter(
 configs: Configs = Configs()
 
 
-@app.on_event('startup')
-async def startup() :
-	await configs.startup()
-
-
 @app.on_event('shutdown')
 async def shutdown() :
 	await configs.close()
 
 
-################################################## INTERNAL ##################################################
-# @app.get('/i1/user/{user_id}', response_model=UserConfig)
-# async def i1UserConfig(req: Request, user_id: int) -> UserConfig :
-# 	await req.user.verify_scope(Scope.internal)
-# 	return await configs._getUserConfig(user_id)
-
-
-##################################################  PUBLIC  ##################################################
 @app.get('s', response_model=ConfigsResponse)
 async def v1Configs() -> ConfigsResponse :
 	return await configs.allConfigs()
@@ -45,7 +32,7 @@ async def v1UpdateUserConfig(req: Request, body: UserConfigRequest) -> None :
 	await req.user.verify_scope(Scope.user)
 	await configs.setUserConfig(
 		req.user,
-		body,
+		**body.values(),
 	)
 
 

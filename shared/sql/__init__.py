@@ -1,21 +1,23 @@
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from enum import Enum
+from enum import Enum, IntEnum
 from functools import lru_cache, partial
 from re import compile
 from types import TracebackType
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Self, Tuple, Type, Union
+from typing import Any, Awaitable, Callable, Optional, Protocol, Self, Union
+from uuid import UUID
 
 from psycopg import AsyncClientCursor, AsyncConnection, AsyncCursor, Binary, OperationalError
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 from pydantic.fields import ModelField
 
+from ..config.constants import environment
 from ..config.credentials import fetch
-from ..logging import Logger, getLogger
+from ..logging import DEBUG, INFO, Logger, getLogger
 from ..models import PostId
 from ..timing import timed
-from .query import Field, Insert, Operator, Query, Table, Update, Value, Where
+from .query import Field, Insert, Operator, Order, Query, Table, Update, Value, Where
 
 
 _orm_regex = compile(r'orm:"([^\n]*?)(?<!\\)"')
@@ -24,7 +26,7 @@ _orm_attr_regex = compile(r'(col|map|pk|gen|default)(?:\[([\s\S]*?)\])?')
 
 @dataclass
 class FieldAttributes :
-	map: List[Tuple[Tuple[str, ...], str]] = dataclass_field(default_factory=list)
+	map: list[tuple[tuple[str, ...], str]] = dataclass_field(default_factory=list)
 	"""
 	list of paths to columns.
 	first entry of each list member is the route to the field within the model.
@@ -69,21 +71,26 @@ class AwaitableQuery(Protocol) :
 
 class SqlInterface :
 
-	db:   Dict[str, str] = fetch('db', Dict[str, str])
+	db:   dict[str, str]
 	pool: AsyncConnectionPool
 
 	_read_conversions = { }
 
-	def __init__(self: Self, long_query_metric: float = 1, conversions: Dict[type, Callable] = { }) -> None :
-		self.logger: Logger = getLogger()
+	def __init__(self: Self, long_query_metric: float = 1, conversions: dict[type, Callable] = { }) -> None :
+		self.logger: Logger = getLogger(level=DEBUG if environment.is_local() else INFO)
 		self._long_query = long_query_metric	
-		self._conversions: Dict[type, Callable] = {
+		self._conversions: dict[type, Callable] = {
 			tuple: list,
 			bytes: Binary,
+			IntEnum: lambda x : x.value,
 			Enum: lambda x : x.name,
+			UUID: str,
 			PostId: PostId.int,
 			**conversions,
 		}
+
+		if getattr(SqlInterface, 'db', None) is None :
+			SqlInterface.db = fetch('db', dict[str, str])
 
 
 	async def open(self: Self) :
@@ -116,6 +123,7 @@ class SqlInterface :
 			sql, params = sql.build()
 
 		params = tuple(map(self._convert_item, params))
+		self.logger.debug({ 'sql': sql, 'params': params })
 
 		for _ in range(attempts) :
 			async with SqlInterface.pool.connection() as conn :
@@ -161,7 +169,7 @@ class SqlInterface :
 
 
 	@staticmethod
-	def _table_name(model: Union[BaseModel, Type[BaseModel]]) -> Table :
+	def _table_name(model: Union[BaseModel, type[BaseModel]]) -> Table :
 		if not hasattr(model, '__table_name__') :
 			raise AttributeError('model must be defined with the __table_name__ attribute')
 
@@ -225,11 +233,11 @@ class SqlInterface :
 			map[subtype.field:column,field:column2] - maps a subtype's field to columns. separate nested fields by periods.
 		"""
 		table: Table                 = self._table_name(model)
-		d:     Dict[str, Any]        = model.dict()
-		paths: List[Tuple[str, ...]] = []
-		vals:  List[Value]           = []
-		cols:  List[str]             = []
-		ret:   List[str]             = []
+		d:     dict[str, Any]        = model.dict()
+		paths: list[tuple[str, ...]] = []
+		vals:  list[Value]           = []
+		cols:  list[str]             = []
+		ret:   list[str]             = []
 
 		for key, field in model.__fields__.items() :
 			attrs = SqlInterface._orm_attr_parser(field)
@@ -279,7 +287,7 @@ class SqlInterface :
 			query = partial(self.query_async, commit=True)
 
 		assert query
-		data: Tuple[Any, ...] = await query(sql, fetch_one=bool(ret))
+		data: tuple[Any, ...] = await query(sql, fetch_one=bool(ret))
 
 		for i, path in enumerate(paths) :
 			v2 = d
@@ -306,7 +314,7 @@ class SqlInterface :
 
 
 	@staticmethod
-	def _assign_field_values[T: BaseModel](model: Type[T], data: Tuple[Any, ...]) -> T :
+	def _assign_field_values[T: BaseModel](model: type[T], data: tuple[Any, ...]) -> T :
 		i = 0
 		d: dict = { }
 		for key, field in model.__fields__.items() :
@@ -386,7 +394,7 @@ class SqlInterface :
 			query = partial(self.query_async, commit=False)
 
 		assert query
-		data: Tuple[Any, ...] = await query(sql, fetch_one=True)
+		data: tuple[Any, ...] = await query(sql, fetch_one=True)
 
 		if not data :
 			raise KeyError('value does not exist in database')
@@ -406,11 +414,11 @@ class SqlInterface :
 		"""
 		table: Table                 = self._table_name(model)
 		sql:   Query                 = Query(table)
-		d:     Dict[str, Any]        = model.dict()
-		paths: List[Tuple[str, ...]] = []
-		vals:  List[Value]           = []
-		cols:  List[str]             = []
-		ret:   List[str]             = []
+		d:     dict[str, Any]        = model.dict()
+		paths: list[tuple[str, ...]] = []
+		vals:  list[Value]           = []
+		cols:  list[str]             = []
+		ret:   list[str]             = []
 
 		_, t  = str(table).rsplit('.', 1)
 		pk    = 0
@@ -468,7 +476,7 @@ class SqlInterface :
 			query = partial(self.query_async, commit=True)
 
 		assert query
-		data: Tuple[Any, ...] = await query(sql, fetch_one=bool(ret))
+		data: tuple[Any, ...] = await query(sql, fetch_one=bool(ret))
 
 		for i, path in enumerate(paths) :
 			v2 = d
@@ -520,10 +528,13 @@ class SqlInterface :
 		await query(sql)
 
 
-	async def where[T: BaseModel](self: Self, model: Type[T], *where: Where, query: Optional[AwaitableQuery] = None) -> List[T] :
+	async def where[T: BaseModel](self: Self, model: type[T], *where: Where, order: list[tuple[Field, Order]] = [], query: Optional[AwaitableQuery] = None) -> list[T] :
 		table = self._table_name(model)
 		sql   = Query(table).where(*where)
 		_, t  = str(table).rsplit('.', 1)
+
+		for o in order :
+			sql.order(*o)
 
 		for _, field in model.__fields__.items() :
 			attrs = SqlInterface._orm_attr_parser(field)
@@ -541,7 +552,7 @@ class SqlInterface :
 			query = partial(self.query_async, commit=False)
 
 		assert query
-		data: List[Tuple[Any, ...]] = await query(sql, fetch_all=True)
+		data: list[tuple[Any, ...]] = await query(sql, fetch_all=True)
 
 		return [SqlInterface._assign_field_values(model, row) for row in data]
 
@@ -572,7 +583,11 @@ class Transaction :
 		return self
 
 
-	async def __aexit__(self: Self, exc_type: Optional[Type[BaseException]], exc_obj: Optional[BaseException], exc_tb: Optional[TracebackType]) :
+	async def __await__(self: Self) :
+		pass
+
+
+	async def __aexit__(self: Self, exc_type: Optional[type[BaseException]], exc_obj: Optional[BaseException], exc_tb: Optional[TracebackType]) :
 		if not self.nested :
 			if self.conn :
 				await self.conn.__aexit__(exc_type, exc_obj, exc_tb)
@@ -609,6 +624,7 @@ class Transaction :
 
 		assert self.conn
 		params = tuple(map(self._sql._convert_item, params))
+		self._sql.logger.debug({ 'sql': sql, 'params': params })
 
 		try :
 			# TODO: convert fuzzly's Query implementation into a psycopg composable

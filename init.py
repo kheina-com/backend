@@ -3,7 +3,6 @@ import random
 import re
 import shutil
 import time
-from dataclasses import dataclass
 from os import environ, listdir, remove
 from os.path import isdir, isfile, join
 from secrets import token_bytes
@@ -25,6 +24,7 @@ from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import decryptCredentialFile, fetch
 from shared.datetime import datetime
 from shared.logging import TerminalAgent
+from shared.models.encryption import Keys
 from shared.sql import SqlInterface
 
 
@@ -92,11 +92,16 @@ cli.command('nuke-cache')(nukeCache)
 	default=False,
 )
 @click.option(
+	'-l',
+	'--lock',
+	default=None,
+)
+@click.option(
 	'-f',
 	'--file',
 	default='',
 )
-async def execSql(unlock: bool = False, file: str = '') -> None :
+async def execSql(unlock: bool = False, file: str = '', lock: Optional[int] = None) -> None :
 	"""
 	connects to the database and runs all files stored under the db folder
 	folders under db are sorted numberically and run in descending order
@@ -112,9 +117,14 @@ async def execSql(unlock: bool = False, file: str = '') -> None :
 	async with sql.pool.connection() as conn :
 		async with conn.cursor() as cur :
 			sqllock = None
-			if not unlock and isfile('sql.lock') :
+
+			if lock is not None :
+				sqllock = int(lock)
+
+			if not unlock and sqllock is None and isfile('sql.lock') :
 				sqllock = int(open('sql.lock').read().strip())
-				click.echo(f'==> sql.lock: {sqllock}')
+
+			click.echo(f'==> sql.lock: {sqllock}')
 
 			if file :
 				if not isfile(file) :
@@ -319,45 +329,24 @@ async def updatePassword() -> LoginRequest :
 	return acct
 
 
-@dataclass
-class Keys :
-	aes: AESGCM
-	ed25519: Ed25519PrivateKey
-	associated_data: bytes
-
-	def encrypt(self, data: bytes) -> bytes :
-		nonce = token_bytes(12)
-		return b'.'.join(map(b64encode, [nonce, self.aes.encrypt(nonce, data, self.associated_data), self.ed25519.sign(data)]))
-
-
 def _generate_keys() -> Keys :
+	keys = Keys.generate()
+
 	if isfile('credentials/aes.key') :
 		remove('credentials/aes.key')
 
 	if isfile('credentials/ed25519.pub') :
 		remove('credentials/ed25519.pub')
 
-	aesbytes = AESGCM.generate_key(256)
-	aeskey = AESGCM(aesbytes)
-	ed25519priv = Ed25519PrivateKey.generate()
+	data = keys.dump()
 
 	with open('credentials/aes.key', 'wb') as file :
-		file.write(b'.'.join(map(b64encode, [aesbytes, ed25519priv.sign(aesbytes)])))
+		file.write(data['aes'].encode())
 
-	pub = ed25519priv.public_key().public_bytes(
-		encoding=serialization.Encoding.DER,
-		format=serialization.PublicFormat.SubjectPublicKeyInfo,
-	)
 	with open('credentials/ed25519.pub', 'wb') as file :
-		nonce = token_bytes(12)
-		aeskey.encrypt
-		file.write(b'.'.join(map(b64encode, [nonce, aeskey.encrypt(nonce, pub, aesbytes), ed25519priv.sign(pub)])))
+		file.write(data['pub'].encode())
 
-	return Keys(
-		aes=aeskey,
-		ed25519=ed25519priv,
-		associated_data=pub,
-	)
+	return keys
 
 
 def writeAesFile(file: BinaryIO, contents: bytes) :

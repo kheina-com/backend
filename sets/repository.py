@@ -3,16 +3,17 @@ from enum import Enum
 from typing import Optional, Self, Tuple, Union
 
 from posts.models import InternalPost, Post, PostId, Privacy
-from posts.repository import Posts, privacy_map
+from posts.repository import Repository as Posts
+from posts.repository import privacy_map
 from shared.auth import KhUser, Scope
-from shared.caching import AerospikeCache, ArgsCache
+from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.datetime import datetime
 from shared.exceptions.http_error import NotFound
 from shared.hashing import Hashable
 from shared.models import InternalUser, UserPrivacy
 from shared.sql import SqlInterface
-from users.repository import Users
+from users.repository import Repository as Users
 
 from .models import InternalSet, Set, SetId
 
@@ -23,9 +24,9 @@ users = Users()
 posts = Posts()
 
 
-class Sets(SqlInterface, Hashable) :
+class Repository(SqlInterface, Hashable) :
 
-	def __init__(self: 'Sets') -> None :
+	def __init__(self) -> None :
 		SqlInterface.__init__(
 			self,
 			conversions={
@@ -132,7 +133,7 @@ class Sets(SqlInterface, Hashable) :
 			count=iset.count,
 			title=iset.title,
 			description=iset.description,
-			privacy=Sets._validate_privacy(await privacy_map.get(iset.privacy)),
+			privacy=Repository._validate_privacy(await privacy_map.get(iset.privacy)),
 			created=iset.created,
 			updated=iset.updated,
 			first=first_post,

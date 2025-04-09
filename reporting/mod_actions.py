@@ -10,8 +10,7 @@ from cache import AsyncLRU
 from pydantic import BaseModel
 
 from avro_schema_repository.schema_repository import SchemaRepository
-from posts.models import InternalPost
-from posts.repository import Posts
+from posts.repository import Repository as Posts
 from shared.auth import KhUser, Scope
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
@@ -20,12 +19,12 @@ from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, Conflict, NotFound
 from shared.models import PostId, UserPortable
 from shared.sql import SqlInterface
-from shared.sql.query import Field, Operator, Order, Query, Update, Value, Where
-from users.repository import Users
+from shared.sql.query import Field, Operator, Order, Query, Table, Update, Value, Where
+from users.repository import Repository as Users
 
 from .models.actions import ActionType, BanAction, ForceUpdateAction, InternalActionType, InternalBanAction, InternalModAction, ModAction, RemovePostAction
 from .models.bans import Ban, InternalBan, InternalBanType, InternalIpBan
-from .repository import Reporting
+from .repository import Repository
 from .repository import kvs as reporting_kvs
 
 
@@ -34,7 +33,7 @@ users:      Users            = Users()
 posts:      Posts            = Posts()
 AvroMarker: bytes            = b'\xC3\x01'
 kvs:        KeyValueStore    = KeyValueStore('kheina', 'actions')
-reporting:  Reporting        = Reporting()
+reporting:  Repository       = Repository()
 
 
 class ModActions(SqlInterface) :
@@ -113,10 +112,11 @@ class ModActions(SqlInterface) :
 
 
 	async def ban(self: Self, user: KhUser, iban: InternalBan) -> Ban :
+		iuser = await users._get_user(iban.user_id)
 		return Ban(
 			ban_id    = iban.ban_id,
 			ban_type  = iban.ban_type.to_type(),
-			user      = await self.user_portable(user, iban.user_id),
+			user      = await users.portable(user, iuser),
 			created   = iban.created,
 			completed = iban.completed,
 			reason    = iban.reason,
@@ -238,7 +238,7 @@ class ModActions(SqlInterface) :
 			match action.action : 
 				case ForceUpdateAction() :
 					await t.query_async(
-						Query(InternalPost.__table_name__).update(
+						Query(Table('kheina.public.posts')).update(
 							Update('locked', Value(True)),
 						).where(
 							Where(
@@ -252,7 +252,7 @@ class ModActions(SqlInterface) :
 
 				case RemovePostAction() :
 					await t.query_async(
-						Query(InternalPost.__table_name__).update(
+						Query(Table('kheina.public.posts')).update(
 							Update('locked', Value(True)),
 						).where(
 							Where(
@@ -276,8 +276,8 @@ class ModActions(SqlInterface) :
 						completed = completed,
 						reason    = action.reason,
 					))
-					await kvs.put_async(f'ban={iban.user_id}', iban)
-					await kvs.put_async(f'user_id={user_id}', iaction)
+					await kvs.put_async(f'active_ban={user_id}', iban, action.action.duration)
+					await kvs.remove_async(f'user_bans={user_id}')
 
 			await t.commit()
 
@@ -453,26 +453,29 @@ class ModActions(SqlInterface) :
 		)
 
 
-	@AerospikeCache('kheina', 'actions', 'active_action={post_id}', _kvs=kvs)
+	@AerospikeCache('kheina', 'actions', 'post_actions={post_id}', _kvs=kvs)
 	async def _actions(self: Self, post_id: PostId) -> list[InternalModAction] :
-		data: list[tuple[int, int, Optional[int], Optional[int], Optional[int], datetime, Optional[datetime], str, int, bytes]] = await self.query_async(Query(InternalModAction.__table_name__).select(
-			Field('mod_actions', 'action_id'),
-			Field('mod_actions', 'report_id'),
-			Field('mod_actions', 'post_id'),
-			Field('mod_actions', 'user_id'),
-			Field('mod_actions', 'assignee'),
-			Field('mod_actions', 'created'),
-			Field('mod_actions', 'completed'),
-			Field('mod_actions', 'reason'),
-			Field('mod_actions', 'action_type'),
-			Field('mod_actions', 'action'),
-		).where(
-			Where(
-			Field('mod_actions', 'post_id'),
-				Operator.equal,
-				Value(post_id.int()),
+		data: list[tuple[int, int, Optional[int], Optional[int], Optional[int], datetime, Optional[datetime], str, int, bytes]] = await self.query_async(
+			Query(InternalModAction.__table_name__).select(
+				Field('mod_actions', 'action_id'),
+				Field('mod_actions', 'report_id'),
+				Field('mod_actions', 'post_id'),
+				Field('mod_actions', 'user_id'),
+				Field('mod_actions', 'assignee'),
+				Field('mod_actions', 'created'),
+				Field('mod_actions', 'completed'),
+				Field('mod_actions', 'reason'),
+				Field('mod_actions', 'action_type'),
+				Field('mod_actions', 'action'),
+			).where(
+				Where(
+					Field('mod_actions', 'post_id'),
+					Operator.equal,
+					Value(post_id.int()),
+				),
 			),
-		), fetch_all = True)
+			fetch_all = True,
+		)
 
 		if not data :
 			return []
@@ -497,4 +500,55 @@ class ModActions(SqlInterface) :
 		return [
 			await self.action(user, iaction)
 			for iaction in await self._actions(post_id)
+		]
+
+
+	@AerospikeCache('kheina', 'actions', 'user_actions={user_id}', _kvs=kvs)
+	async def _user_actions(self: Self, user_id: int) -> list[InternalModAction] :
+		data: list[tuple[int, int, Optional[int], Optional[int], Optional[int], datetime, Optional[datetime], str, int, bytes]] = await self.query_async(
+			Query(InternalModAction.__table_name__).select(
+				Field('mod_actions', 'action_id'),
+				Field('mod_actions', 'report_id'),
+				Field('mod_actions', 'post_id'),
+				Field('mod_actions', 'user_id'),
+				Field('mod_actions', 'assignee'),
+				Field('mod_actions', 'created'),
+				Field('mod_actions', 'completed'),
+				Field('mod_actions', 'reason'),
+				Field('mod_actions', 'action_type'),
+				Field('mod_actions', 'action'),
+			).where(
+				Where(
+					Field('mod_actions', 'user_id'),
+					Operator.equal,
+					Value(user_id),
+				),
+			),
+			fetch_all = True,
+		)
+
+		if not data :
+			return []
+
+		return [
+			InternalModAction(
+				action_id   = row[0],
+				report_id   = row[1],
+				post_id     = row[2],
+				user_id     = row[3],
+				assignee    = row[4],
+				created     = row[5],
+				completed   = row[6],
+				reason      = row[7],
+				action_type = InternalActionType(row[8]),
+				action      = bytes(row[9]),
+			)
+			for row in data
+		]
+
+	async def user_actions(self: Self, user: KhUser, handle: str) -> list[ModAction] :
+		user_id: int = await users._handle_to_user_id(handle)
+		return [
+			await self.action(user, iaction)
+			for iaction in await self._user_actions(user_id)
 		]

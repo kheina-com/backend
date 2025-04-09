@@ -30,5 +30,6 @@ class CreateActionRequest(BaseModel) :
 	action:      RemovePostAction | ForceUpdateAction | BanActionInput | None
 
 
-class ReportReponseRequest(BaseModel) :
+class CloseReponseRequest(BaseModel) :
+	report_id: int
 	response:  str

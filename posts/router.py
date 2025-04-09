@@ -1,17 +1,17 @@
 from asyncio import ensure_future
 from html import escape
-from typing import Literal, Optional, Union
+from typing import Literal, Optional
 from uuid import uuid4
 
 import aiofiles
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, Response, UploadFile
 
 from shared.backblaze import B2Interface
 from shared.config.constants import Environment, environment
 from shared.exceptions.http_error import UnprocessableDetail, UnprocessableEntity
 from shared.models import Privacy, convert_path_post_id
 from shared.models.auth import Scope
-from shared.server import Request, Response
+from shared.models.server import Request
 from shared.timing import timed
 from shared.utilities.units import Byte
 from users.users import Users
@@ -302,7 +302,7 @@ async def v1Rss(req: Request) -> Response :
 						mime_type = post.media.type.mime_type,
 						length    = post.media.length,
 					) if post.media else '',
-				) for post in timeline
+				) for post in timeline if post.user
 			]),
 		),
 	)

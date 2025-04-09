@@ -8,7 +8,7 @@ from cache import AsyncLRU
 from pydantic import BaseModel
 
 from avro_schema_repository.schema_repository import SchemaRepository
-from posts.repository import Posts
+from posts.repository import Repository as Posts
 from shared.auth import KhUser, Scope
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
@@ -17,7 +17,7 @@ from shared.exceptions.http_error import BadRequest, Conflict, NotFound
 from shared.models import UserPortable
 from shared.sql import SqlInterface
 from shared.sql.query import Field, Operator, Order, Query, Value, Where
-from users.repository import Users
+from users.repository import Repository as Users
 
 from .models.mod_queue import InternalModQueueEntry, ModQueueEntry
 from .models.reports import BaseReport, BaseReportHistory, CopyrightReport, HistoryMask, InternalReport, InternalReportType, Report
@@ -30,7 +30,7 @@ AvroMarker: bytes            = b'\xC3\x01'
 kvs:        KeyValueStore    = KeyValueStore('kheina', 'reports')
 
 
-class Reporting(SqlInterface) :
+class Repository(SqlInterface) :
 
 	_report_type_map: dict[InternalReportType, type[BaseModel]] = {
 		InternalReportType.other:           BaseReport,
@@ -43,7 +43,7 @@ class Reporting(SqlInterface) :
 	}
 
 	def __init__(self, *args: Any, **kwargs: Any) :
-		assert set(Reporting._report_type_map.keys()) == set(InternalReportType.__members__.values())
+		assert set(Repository._report_type_map.keys()) == set(InternalReportType.__members__.values())
 		super().__init__(*args, conversions={ IntEnum: lambda x: x.value }, **kwargs)
 
 
@@ -55,14 +55,14 @@ class Reporting(SqlInterface) :
 
 	@AsyncLRU(maxsize=0)
 	async def _get_serializer(self: Self, report_type: InternalReportType) -> tuple[bytes, AvroSerializer] :
-		model = Reporting._report_type_map[report_type]
+		model = Repository._report_type_map[report_type]
 		return AvroMarker + await repo.addSchema(convert_schema(model)), AvroSerializer(model)
 
 
 	async def _get_deserializer(self: Self, report_type: InternalReportType, fp: bytes) -> AvroDeserializer :
 		assert fp[:2] == AvroMarker
-		model = Reporting._report_type_map[report_type]
-		return AvroDeserializer(read_model=model, write_model=await Reporting._get_schema(fp[2:10]))
+		model = Repository._report_type_map[report_type]
+		return AvroDeserializer(read_model=model, write_model=await Repository._get_schema(fp[2:10]))
 
 
 	async def user_portable(self: Self, user: KhUser, user_id: Optional[int]) -> Optional[UserPortable] :
@@ -165,7 +165,7 @@ class Reporting(SqlInterface) :
 		prev = report_data.dict()
 		self.logger.debug({
 			'incoming data': data,
-			'prev': prev,
+			'prev':          prev,
 		})
 		for k, v in data.items() :
 			if prev.get(k) == v :
@@ -224,20 +224,22 @@ class Reporting(SqlInterface) :
 			raise Conflict('another moderator has assigned this report to themselves')
 
 
-	async def close_response(self: Self, user: KhUser, queue_id: int, response: str) -> Report :
+	async def close_response(self: Self, user: KhUser, report_id: int, response: str) -> Report :
 		ireport: InternalReport
 
 		async with self.transaction() as t :
 			data: Optional[tuple[int, Optional[int]]] = await t.query_async("""
 				delete from kheina.public.mod_queue
-				where mod_queue.queue_id = %s
-				returning mod_queue.report_id, mod_queue.assignee;
-			""", (
-				queue_id,
-			), fetch_one = True)
+				where mod_queue.report_id = %s
+				returning mod_queue.assignee;
+				""", (
+					report_id,
+				),
+				fetch_one = True,
+			)
 
 			if not data :
-				raise NotFound('provided queue entry does not exist')
+				raise NotFound('provided report does not exist')
 
 			if data[1] != user.user_id :
 				raise BadRequest('cannot close a report that is assigned to someone else')

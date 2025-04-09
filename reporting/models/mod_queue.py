@@ -17,6 +17,6 @@ class InternalModQueueEntry(BaseModel) :
 
 
 class ModQueueEntry(BaseModel) :
-	queue_id:  int = Field(description='orm:"pk;gen"')
+	queue_id:  int
 	assignee:  Optional[UserPortable]
 	report:    Report
