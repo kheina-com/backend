@@ -1,45 +1,45 @@
-FROM python:3.12
-# FROM python:3.12-alpine
+# FROM python:3.13-slim
+FROM python:3.13-alpine
 
 # can't install aerospike==8.0.0 on alpine
-# RUN apk update && \
-# 	apk upgrade && \
-# 	apk add --no-cache git && \
-# 	apk add --no-cache --virtual \
-# 		.build-deps \
-# 		gcc \
-# 		g++ \
-# 		musl-dev \
-# 		libffi-dev \
-# 		postgresql-dev \
-# 		build-base \
-# 		bash linux-headers \
-# 		libuv libuv-dev \
-# 		openssl openssl-dev \
-# 		lua5.1 lua5.1-dev \
-# 		zlib zlib-dev \
-# 		python3-dev \
-# 		exiftool
-
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt update && \
-	apt upgrade -y && \
-	apt install -y \
-	build-essential \
-	libssl-dev \
+RUN apk update && \
+	apk upgrade && \
+	apk add --no-cache git && \
+	apk add --no-cache --virtual \
+	.build-deps \
+	gcc \
+	g++ \
+	musl-dev \
 	libffi-dev \
-	git \
-	jq \
-	libpq-dev \
+	postgresql-dev \
+	build-base \
+	bash linux-headers \
+	libuv libuv-dev \
+	openssl openssl-dev \
+	lua5.1 lua5.1-dev \
+	zlib zlib-dev \
 	python3-dev \
-	libpng-dev \
-	libjpeg-dev \
-	libtiff-dev \
-	libwebp-dev \
-	imagemagick \
-	libimage-exiftool-perl \
-	ffmpeg
+	exiftool
+
+# ENV DEBIAN_FRONTEND=noninteractive
+
+# RUN apt update && \
+# 	apt upgrade -y && \
+# 	apt install -y \
+# 	build-essential \
+# 	libssl-dev \
+# 	libffi-dev \
+# 	git \
+# 	jq \
+# 	libpq-dev \
+# 	python3-dev \
+# 	libpng-dev \
+# 	libjpeg-dev \
+# 	libtiff-dev \
+# 	libwebp-dev \
+# 	imagemagick \
+# 	libimage-exiftool-perl \
+# 	ffmpeg
 
 RUN rm -rf /var/lib/apt/lists/*
 
@@ -54,6 +54,8 @@ RUN wget https://go.dev/dl/go1.22.5.linux-amd64.tar.gz && \
 	rm go1.22.5.linux-amd64.tar.gz
 
 ENV GOROOT=/usr/local/go
+# redefine $HOME to the default so that it stops complaining
+ENV HOME="/root"
 ENV GOPATH=$HOME/go
 ENV PATH=$GOPATH/bin:$GOROOT/bin:$PATH
 
@@ -67,6 +69,4 @@ ENV PATH="/opt/.venv/bin:$PATH"
 
 ENV PORT=80
 ENV ENVIRONMENT=DEV
-CMD jq '.fullchain' -r /etc/certs/cert.json > fullchain.pem && \
-	jq '.privkey'   -r /etc/certs/cert.json > privkey.pem && \
-	gunicorn -w 2 -k uvicorn.workers.UvicornWorker --certfile fullchain.pem --keyfile privkey.pem -b 0.0.0.0:443 --timeout 1200 server:app
+CMD ["docker-exec.sh"]

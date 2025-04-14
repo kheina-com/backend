@@ -54,11 +54,11 @@ async def v1UserTheme(req: Request) -> PlainTextResponse :
 	)
 
 
-@app.patch('', status_code=204)
-async def v1UpdateConfig(req: Request, body: UpdateConfigRequest) -> None :
-	await req.user.verify_scope(Scope.mod)
-	await configs.updateConfig(
-		req.user,
-		body.config,
-		body.value,
-	)
+# @app.patch('', status_code=204)
+# async def v1UpdateConfig(req: Request, body: UpdateConfigRequest) -> None :
+# 	await req.user.verify_scope(Scope.mod)
+# 	await configs.updateConfig(
+# 		req.user,
+# 		body.config,
+# 		body.value,
+# 	)

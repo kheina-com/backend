@@ -228,7 +228,7 @@ class Repository(SqlInterface) :
 		ireport: InternalReport
 
 		async with self.transaction() as t :
-			data: Optional[tuple[int, Optional[int]]] = await t.query_async("""
+			data: Optional[tuple[int]] = await t.query_async("""
 				delete from kheina.public.mod_queue
 				where mod_queue.report_id = %s
 				returning mod_queue.assignee;
@@ -241,7 +241,7 @@ class Repository(SqlInterface) :
 			if not data :
 				raise NotFound('provided report does not exist')
 
-			if data[1] != user.user_id :
+			if data[0] != user.user_id :
 				raise BadRequest('cannot close a report that is assigned to someone else')
 
 			ireport = await self._read(data[0])

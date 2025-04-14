@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 
 from shared.auth import Scope
 from shared.models import PostId, convert_path_post_id
+from shared.models.server import Request
 from shared.timing import timed
 
 from .models import CloseReponseRequest, CreateActionRequest, CreateRequest

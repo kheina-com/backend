@@ -48,7 +48,7 @@ class Store(BaseModel, metaclass=ABCMeta) :
 		assert data[:2] == AvroMarker
 		deserializer: AvroDeserializer = AvroDeserializer(
 			read_model  = cls,
-			# write_model = await getSchema(data[2:10]),
+			write_model = await getSchema(data[2:10]),
 		)
 		return deserializer(data[10:])
 

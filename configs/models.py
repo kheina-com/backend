@@ -6,8 +6,8 @@ from avrofastapi.schema import AvroInt
 from pydantic import BaseModel, Field
 
 from shared.models import PostId
-from shared.sql.query import Table
 from shared.models.config import Store
+from shared.sql.query import Table
 
 
 UserConfigKeyFormat: Literal['user.{user_id}.{key}'] = 'user.{user_id}.{key}'
@@ -70,6 +70,8 @@ class CssProperty(Enum) :
 	background_repeat     = 'background_repeat'
 	background_size       = 'background_size'
 
+
+class CssValue(Enum) :
 	transition        = 'transition'
 	fadetime          = 'fadetime'
 	warning           = 'warning'
@@ -136,8 +138,8 @@ class BlockBehavior(Store) :
 
 
 class Theme(Store) :
-	wallpaper:      Optional[PostId]                                 = None
-	css_properties: Optional[dict[str, CssProperty | AvroInt | str]] = None
+	wallpaper:      Optional[PostId]                           = None
+	css_properties: Optional[dict[str, CssValue | AvroInt | str]] = None
 
 	@staticmethod
 	def type_() -> UserConfigType :
@@ -188,5 +190,4 @@ class Config(BaseModel) :
 	created:    datetime = Field(description='orm:"gen"')
 	updated:    datetime = Field(description='orm:"gen"')
 	updated_by: int
-	value:      Optional[str]   = None
 	bytes_:     Optional[bytes] = Field(None, description='orm:"col[bytes]"')

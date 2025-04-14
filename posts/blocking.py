@@ -2,9 +2,9 @@ from typing import Iterable, Optional, Self
 
 from configs.configs import Configs
 from configs.models import Blocking
+from .models import Rating
 from shared.auth import KhUser
 from shared.caching import ArgsCache
-from shared.models import InternalUser
 from shared.timing import timed
 
 
@@ -112,13 +112,14 @@ async def fetch_block_tree(user: KhUser) -> tuple[BlockTree, Optional[set[int]]]
 
 
 @timed
-async def is_post_blocked(user: KhUser, uploader: InternalUser, tags: Iterable[str]) -> bool :
+async def is_post_blocked(user: KhUser, uploader: int, rating: Rating, tags: Iterable[str]) -> bool :
 	block_tree, blocked_users = await fetch_block_tree(user)
 
-	if blocked_users and uploader.user_id in blocked_users :
+	if blocked_users and uploader in blocked_users :
 		return True
 
 	tags: set[str | int] = set(tags)  # TODO: convert handles to user_ids (int)
-	tags.add(uploader.user_id)
+	tags.add(uploader)
+	tags.add(f'rating:{rating.name}')
 
 	return block_tree.blocked(tags)

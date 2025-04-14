@@ -12,12 +12,11 @@ from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
 from cryptography.hazmat.primitives.serialization import load_der_public_key
 from fastapi import Request
 
-from authenticator.authenticator import AuthAlgorithm, Authenticator, AuthState, PublicKeyResponse, Scope, TokenMetadata
+from authenticator.authenticator import AuthAlgorithm, Authenticator, AuthState, PublicKeyResponse, Scope, TokenMetadata, token_kvs
 from shared.models.auth import AuthToken, _KhUser
 
 from ..base64 import b64decode, b64encode
 from ..caching import ArgsCache
-from ..caching.key_value_store import KeyValueStore
 from ..datetime import datetime
 from ..exceptions.http_error import Forbidden, Unauthorized
 from ..utilities import int_from_bytes
@@ -26,7 +25,6 @@ from ..utilities import int_from_bytes
 authenticator = Authenticator()
 
 ua_strip = re_compile(r'\/\d+(?:\.\d+)*')
-KVS: KeyValueStore = KeyValueStore('kheina', 'token')
 
 
 class InvalidToken(ValueError) :
@@ -53,7 +51,10 @@ class KhUser(_KhUser) :
 		await self.authenticated(raise_error)
 
 		if scope not in self.scope :
-			raise Forbidden('User is not authorized to access this resource.', user=self)
+			if raise_error :
+				raise Forbidden('User is not authorized to access this resource.', user=self)
+
+			return False
 
 		return True
 
@@ -104,7 +105,8 @@ async def v1token(token: str) -> AuthToken :
 	if datetime.now() > expires :
 		raise Unauthorized('Key has expired.')
 
-	token_info_task = ensure_future(KVS.get_async(guid.bytes, TokenMetadata))
+	token_info_task = ensure_future(tokenMetadata(guid.bytes))
+	token_info: TokenMetadata
 
 	try :
 		public_key = await _fetchPublicKey(key_id, algorithm)
@@ -133,6 +135,7 @@ async def v1token(token: str) -> AuthToken :
 		expires      = expires,
 		data         = json.loads(data),
 		token_string = token,
+		metadata     = token_info,
 	)
 
 
@@ -151,15 +154,28 @@ async def verifyToken(token: str) -> AuthToken :
 	raise InvalidToken('The given token uses a version that is unable to be decoded.')
 
 
+async def tokenMetadata(guid: bytes | UUID) -> TokenMetadata :
+	if isinstance(guid, UUID) :
+		guid = guid.bytes
+
+	token = await token_kvs.get_async(guid, TokenMetadata)
+
+	# though the kvs should only retain the token for as long as it's active, check the expiration anyway
+	if token.expires <= datetime.now() :
+		token.state = AuthState.inactive
+
+	return token
+
+
 async def deactivateAuthToken(token: str, guid: Optional[bytes] = None) -> None :
 	atoken = await verifyToken(token)
 
 	if not guid :
-		return await KVS.remove_async(atoken.guid.bytes)
+		return await token_kvs.remove_async(atoken.guid.bytes)
 
-	tm = await KVS.get_async(guid, TokenMetadata)
+	tm = await tokenMetadata(guid)
 	if tm.user_id == atoken.user_id :
-		return await KVS.remove_async(guid)
+		return await token_kvs.remove_async(guid)
 
 
 async def retrieveAuthToken(request: Request) -> AuthToken :

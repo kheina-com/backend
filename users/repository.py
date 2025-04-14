@@ -202,16 +202,16 @@ class Repository(SqlInterface) :
 		if not user_ids :
 			return { }
 
-		cached = await UserKVS.get_many_async(user_ids)
+		cached = await UserKVS.get_many_async(map(str, user_ids))
 		found: dict[int, InternalUser] = { }
 		misses: list[int] = []
 
 		for k, v in cached.items() :
 			if isinstance(v, InternalUser) :
-				found[k] = v
+				found[int(k)] = v
 				continue
 
-			misses.append(k)
+			misses.append(int(k))
 
 		if not misses :
 			return found

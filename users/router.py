@@ -97,18 +97,18 @@ async def v1User(req: Request, handle: str) :
 	return await users.getUser(req.user, handle)
 
 
-@userRouter.put('/{handle}/follow', status_code=204)
+@userRouter.put('/{handle}/follow', response_model=bool)
 @timed.root
-async def v1FollowUser(req: Request, handle: str) :
+async def v1FollowUser(req: Request, handle: str) -> bool :
 	await req.user.authenticated()
-	await users.followUser(req.user, handle.lower())
+	return await users.followUser(req.user, handle.lower())
 
 
-@userRouter.delete('/{handle}/follow', status_code=204)
+@userRouter.delete('/{handle}/follow', response_model=bool)
 @timed.root
-async def v1UnfollowUser(req: Request, handle: str) :
+async def v1UnfollowUser(req: Request, handle: str) -> bool :
 	await req.user.authenticated()
-	await users.unfollowUser(req.user, handle.lower())
+	return await users.unfollowUser(req.user, handle.lower())
 
 
 app = APIRouter(

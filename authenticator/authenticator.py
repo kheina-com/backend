@@ -89,6 +89,13 @@ Access method: heap
 
 BotLoginSerializer: AvroSerializer = AvroSerializer(BotLogin)
 BotLoginDeserializer: AvroDeserializer = AvroDeserializer(BotLogin)
+token_kvs: KeyValueStore = KeyValueStore('kheina', 'token')
+KeyValueStore._client.index_integer_create(  # type: ignore
+	'kheina',
+	'token',
+	'user_id',
+	'kheina_token_user_id_idx',
+)
 
 
 class BotTypeMap(SqlInterface):
@@ -130,7 +137,6 @@ bot_type_map: BotTypeMap = BotTypeMap()
 class Authenticator(SqlInterface, Hashable) :
 
 	EmailRegex = re_compile(r'^(?P<user>[A-Z0-9._%+-]+)@(?P<domain>[A-Z0-9.-]+\.[A-Z]{2,})$', flags=IGNORECASE)
-	KVS: KeyValueStore
 
 	def __init__(self) :
 		Hashable.__init__(self)
@@ -150,16 +156,6 @@ class Authenticator(SqlInterface, Hashable) :
 			'end': 0,
 			'id': 0,
 		}
-
-		if not getattr(Authenticator, 'KVS', None) :
-			Authenticator.KVS = KeyValueStore('kheina', 'token')
-			# create the index used to query active logins
-			KeyValueStore._client.index_integer_create(  # type: ignore
-				'kheina',
-				'token',
-				'user_id',
-				'kheina_token_user_id_idx',
-			)
 
 
 	def _validateEmail(self, email: str) -> Dict[str, str] :
@@ -271,7 +267,7 @@ class Authenticator(SqlInterface, Hashable) :
 			algorithm   = self._token_algorithm,
 			fingerprint = token_data.get('fp', '').encode(),
 		)
-		await Authenticator.KVS.put_async(
+		await token_kvs.put_async(
 			guid.bytes,
 			token_info,
 			ttl or self._token_expires_interval,

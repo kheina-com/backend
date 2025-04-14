@@ -1,4 +1,4 @@
-from asyncio import Task, ensure_future
+from asyncio import Task, create_task
 from collections.abc import Iterable
 from datetime import datetime
 from enum import Enum
@@ -21,7 +21,7 @@ from shared.sql import SqlInterface
 from shared.timing import timed
 from users.repository import Repository as Users
 
-from .models import OTP, BannerStore, BlockBehavior, Blocking, BlockingBehavior, ConfigsResponse, ConfigType, CostsStore, CssProperty, Funding, OtpType, Store, Theme, UserConfigKeyFormat, UserConfigResponse, UserConfigType
+from .models import OTP, BannerStore, BlockBehavior, Blocking, BlockingBehavior, ConfigsResponse, ConfigType, CostsStore, CssProperty, CssValue, Funding, OtpType, Store, Theme, UserConfigKeyFormat, UserConfigResponse, UserConfigType
 
 
 PatreonClient: PatreonApi = PatreonApi(fetch('creator_access_token', str))
@@ -93,13 +93,13 @@ class Configs(SqlInterface) :
 		for k, v in data :
 			config: ConfigType = ConfigType(k)
 			value = found[config] = await self.SerializerTypeMap[config].deserialize(bytes(v))
-			ensure_future(KVS.put_async(config, value))
+			create_task(KVS.put_async(config, value))
 
 		return found
 
 
 	async def allConfigs(self: Self) -> ConfigsResponse :
-		funds = ensure_future(self.getFunding())
+		funds = create_task(self.getFunding())
 		configs = await self.getConfigs([
 			ConfigType.banner,
 			ConfigType.costs,
@@ -141,11 +141,11 @@ class Configs(SqlInterface) :
 
 
 	@staticmethod
-	def _validateColors(css_properties: Optional[dict[CssProperty, str]]) -> Optional[dict[str, str | int]] :
+	def _validateColors(css_properties: Optional[dict[CssProperty, str]]) -> Optional[dict[str, CssValue | int | str]] :
 		if not css_properties :
 			return None
 
-		output: dict[str, str | int] = { }
+		output: dict[str, CssValue | int | str] = { }
 
 		# color input is very strict
 		for prop, value in css_properties.items() :
@@ -175,8 +175,8 @@ class Configs(SqlInterface) :
 
 			else :
 				c: str = match.group('var').replace('-', '_')
-				if c in CssProperty._member_map_ :
-					output[color.value] = c
+				if c in CssValue._member_map_ :
+					output[color.value] = CssValue(c)
 
 				else :
 					raise BadRequest(f'{value} is not a valid color. value must be in the form "#xxxxxx", "#xxxxxxxx", or the name of another color variable (without the preceding deshes)')
@@ -258,7 +258,7 @@ class Configs(SqlInterface) :
 		)
 
 		for store in stores :
-			ensure_future(KVS.put_async(
+			create_task(KVS.put_async(
 				UserConfigKeyFormat.format(
 					user_id = user.user_id,
 					key     = store.key(),
@@ -343,13 +343,11 @@ class Configs(SqlInterface) :
 		)
 
 		res = UserConfigResponse()
-		otp: Task[list[OTP]] = ensure_future(self._getUserOTP(user.user_id))
-		print('==> data:', data)
+		otp: Task[list[OTP]] = create_task(self._getUserOTP(user.user_id))
 		if data :
 			for key, type_, value in data :
-				t = UserConfigType(type_)
-				
-				match v := await Configs.SerializerTypeMap[t].deserialize(value) :
+				t: type[Store] = Configs.SerializerTypeMap[UserConfigType(type_)]
+				match v := await t.deserialize(value) :
 					case BlockBehavior() :
 						res.blocking_behavior = v.behavior
 
@@ -380,7 +378,7 @@ class Configs(SqlInterface) :
 			if isinstance(value, int) :
 				css_properties += f'--{name}:#{value:08x} !important;'
 
-			elif isinstance(value, CssProperty) :
+			elif isinstance(value, CssValue) :
 				css_properties += f'--{name}:var(--{value.value.replace("_", "-")}) !important;'
 
 			else :

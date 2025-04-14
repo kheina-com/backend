@@ -95,6 +95,7 @@ class KeyValueStore :
 
 
 	def _get_many[T, K: KeyType](self: Self, k: Iterable[K], type: Optional[type[T]] = None) -> dict[K, T | type[Undefined]] :
+		# this weird ass dict is so that we can "convert" the returned aerospike keytype back to K
 		keys:        dict[K, K] = { v: v for v in k }
 		remote_keys: set[K]     = keys.keys() - self._cache.keys()
 		values:      dict[K, Any]
@@ -133,7 +134,7 @@ class KeyValueStore :
 
 		if type :
 			return {
-				k: coerse(v, type)
+				k: coerse(v, type) if v is not Undefined else v
 				for k, v in values.items()
 			}
 

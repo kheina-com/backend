@@ -1,10 +1,10 @@
-from typing import Self
+from typing import Optional, Self
 from urllib.parse import urlparse
 from uuid import UUID
 
+import aerospike
 import ujson
 from aiohttp import ClientResponse, ClientSession, ClientTimeout
-from cache import AsyncLRU
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
 from py_vapid import Vapid02
@@ -12,23 +12,33 @@ from pydantic import BaseModel
 from pywebpush import WebPusher as _WebPusher
 
 from configs.models import Config
-from posts.models import Post
-from shared.auth import KhUser
+from posts.models import InternalPost, Post
+from shared.auth import KhUser, tokenMetadata
 from shared.base64 import b64encode
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import fetch
 from shared.datetime import datetime
 from shared.exceptions.http_error import HttpErrorHandler, InternalServerError
-from shared.models import UserPortable
+from shared.models import PostId, UserPortable
+from shared.models.auth import AuthState, TokenMetadata
 from shared.models.encryption import Keys
 from shared.sql import SqlInterface
-from shared.sql.query import Field, Operator, Value, Where
+from shared.sql.query import Field, Operator, Order, Value, Where
 from shared.timing import timed
 from shared.utilities import uuid7
 from shared.utilities.json import json_stream
 
 from .models import InteractNotification, InternalInteractNotification, InternalNotification, InternalPostNotification, InternalUserNotification, NotificationType, PostNotification, ServerKey, Subscription, SubscriptionInfo, UserNotification
+
+
+@timed
+async def getTokenMetadata(guid: UUID) -> Optional[TokenMetadata] :
+	try :
+		return await tokenMetadata(guid)
+
+	except aerospike.exception.RecordNotFound :
+		return None
 
 
 class WebPusher(_WebPusher) :
@@ -74,6 +84,7 @@ class Notifier(SqlInterface) :
 			Notifier.keys = Keys.load(**fetch('notifications', dict[str, str]))
 
 
+	@timed
 	@AerospikeCache('kheina', 'notifications', 'vapid-config', _kvs=kvs)
 	async def getVapidPem(self: Self) -> bytes :
 		async with self.transaction() as t :
@@ -176,10 +187,17 @@ class Notifier(SqlInterface) :
 
 	@timed
 	async def _send(self: Self, user_id: int, data: dict) -> int :
-		subs = await self.getSubInfo(user_id)
 		unregister: list[UUID] = []
 		successes: int = 0
+		subs = await self.getSubInfo(user_id)
 		for sub_id, sub in subs.items() :
+			# sub_id is the token guid of the token that created the subscription
+			# check that it's still active before sending the notification
+			token = await getTokenMetadata(sub_id)
+			if not token or token.state != AuthState.active :
+				unregister.append(sub_id)
+				continue
+
 			res = await WebPusher(
 				sub.dict(),
 				verbose = True,
@@ -215,13 +233,13 @@ class Notifier(SqlInterface) :
 		return successes
 
 
-	@timed
+	@timed.root
 	async def sendNotification(
 		self: Self,
 		user_id: int,
 		data: InternalInteractNotification | InternalPostNotification | InternalUserNotification,
 		**kwargs: UserPortable | Post,
-	) -> int :
+	) -> None :
 		"""
 		creates, persists and then sends the given notification to the provided user_id.
 		kwargs must include the user and/or post of the notification's user_id/post_id in the form of
@@ -229,58 +247,69 @@ class Notifier(SqlInterface) :
 		await sendNotification(..., user=UserPortable(...), post=Post(...))
 		```
 		"""
-		type_: NotificationType = data.type_()
-		inotification = await self.insert(InternalNotification(
-			id      = uuid7(),
-			user_id = user_id,
-			type_   = type_,
-			created = datetime.zero(),
-			data    = await data.serialize(),
-		))
+		try :
+			inotification = await self.insert(InternalNotification(
+				id      = uuid7(),
+				user_id = user_id,
+				type_   = data.type_(),
+				created = datetime.zero(),
+				data    = await data.serialize(),
+			))
 
-		self.logger.debug({
-			'message':      'notification',
-			'to':           user_id,
-			'notification': {
-				'type':     type(data),
-				'type_enm': data.type_(),
-				**data.dict(),
-			},
-		})
+			self.logger.debug({
+				'message':      'notification',
+				'to':           user_id,
+				'notification': {
+					'type':     type(data),
+					'type_enm': data.type_(),
+					**data.dict(),
+				},
+			})
 
-		match data :
-			case InternalInteractNotification() :
-				user, post = kwargs.get('user'), kwargs.get('post')
-				assert isinstance(user, UserPortable) and isinstance(post, Post)
-				notification = InteractNotification(
-					event   = data.event,
-					created = inotification.created,
-					user    = user,
-					post    = post,
-				)
-				return await self._send(user_id, notification.dict())
+			match data :
+				case InternalInteractNotification() :
+					user, post = kwargs.get('user'), kwargs.get('post')
+					assert isinstance(user, UserPortable) and isinstance(post, Post), 'interact notifications must include user and post kwargs'
+					notification = InteractNotification(
+						id      = inotification.id,
+						event   = data.event,
+						created = inotification.created,
+						user    = user,
+						post    = post,
+					)
+					await self._send(user_id, notification.dict())
 
-			case InternalPostNotification() :
-				post = kwargs.get('post')
-				assert isinstance(post, Post)
-				notification = PostNotification(
-					event   = data.event,
-					created = inotification.created,
-					post    = post,
-				)
-				return await self._send(user_id, notification.dict())
+				case InternalPostNotification() :
+					post = kwargs.get('post')
+					assert isinstance(post, Post), 'post notifications must include a post kwarg'
+					notification = PostNotification(
+						id      = inotification.id,
+						event   = data.event,
+						created = inotification.created,
+						post    = post,
+					)
+					await self._send(user_id, notification.dict())
 
-			case InternalUserNotification() :
-				user = kwargs.get('user')
-				assert isinstance(user, UserPortable)
-				notification = UserNotification(
-					event   = data.event,
-					created = inotification.created,
-					user    = user,
-				)
-				return await self._send(user_id, notification.dict())
+				case InternalUserNotification() :
+					user = kwargs.get('user')
+					assert isinstance(user, UserPortable), 'user notifications must include a user kwarg'
+					notification = UserNotification(
+						id      = inotification.id,
+						event   = data.event,
+						created = inotification.created,
+						user    = user,
+					)
+					await self._send(user_id, notification.dict())
+
+		except :
+			# since this function will almost always be run async using ensure_future, handle errors internally
+			self.logger.exception('failed to send notification')
 
 
 	@HttpErrorHandler('sending some random cunt a notif')
+	@timed
 	async def debugSendNotification(self: Self, user_id: int, data: dict) -> int :
 		return await self._send(user_id, data)
+
+
+notifier: Notifier = Notifier()

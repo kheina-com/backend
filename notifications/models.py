@@ -91,6 +91,7 @@ class InteractNotification(Notification) :
 	"""
 	an interact notification represents a user taking an action on a post
 	"""
+	id:      UUID
 	type:    Literal['interact'] = 'interact'
 	event:   InteractNotificationEvent
 	created: datetime
@@ -113,6 +114,7 @@ class InternalPostNotification(Store) :
 
 
 class PostNotification(Notification) :
+	id:      UUID
 	type:    Literal['post'] = 'post'
 	event:   PostNotificationEvent
 	created: datetime
@@ -137,6 +139,7 @@ class InternalUserNotification(Store) :
 
 
 class UserNotification(Notification) :
+	id:      UUID
 	type:    Literal['user'] = 'user'
 	event:   UserNotificationEvent
 	created: datetime

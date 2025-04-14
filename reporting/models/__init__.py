@@ -31,5 +31,4 @@ class CreateActionRequest(BaseModel) :
 
 
 class CloseReponseRequest(BaseModel) :
-	report_id: int
 	response:  str

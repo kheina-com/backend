@@ -1,8 +1,8 @@
 from asyncio import Task, create_task
-from typing import List, Optional, Self
+from typing import Optional, Self
 
 from notifications.models import InternalUserNotification, UserNotificationEvent
-from notifications.repository import Notifier
+from notifications.repository import notifier
 from shared.auth import KhUser
 from shared.caching import SimpleCache
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
@@ -14,9 +14,6 @@ from shared.utilities import ensure_future
 from .repository import FollowKVS, Repository, UserKVS, badge_map, privacy_map
 
 
-notifier: Notifier = Notifier()
-
-
 class Users(Repository) :
 
 	@HttpErrorHandler('retrieving user')
@@ -26,28 +23,31 @@ class Users(Repository) :
 
 
 	@timed
-	async def followUser(self: Self, user: KhUser, handle: str) -> None :
-		user_id: int = await self._handle_to_user_id(handle.lower())
+	async def followUser(self: Self, user: KhUser, handle: str) -> bool :
+		user_id:   int  = await self._handle_to_user_id(handle.lower())
 		following: bool = await self.following(user.user_id, user_id)
+
+		if following :
+			raise BadRequest('you are already following this user.')
+
 		portable: Task[UserPortable] = create_task(self.portable(
 			KhUser(user_id=user_id),
 			await self._get_user(user.user_id),
 		))
-
-		if following :
-			raise BadRequest('you are already following this user.')
 
 		await self.query_async("""
 			INSERT INTO kheina.public.following
 			(user_id, follows)
 			VALUES
 			(%s, %s);
-			""",
-			(user.user_id, user_id),
-			commit=True,
+			""", (
+				user.user_id,
+				user_id,
+			),
+			commit = True,
 		)
 
-		ensure_future(FollowKVS.put_async(f'{user.user_id}|{user_id}', True))
+		ensure_future(FollowKVS.put_async(f'{user.user_id}|{user_id}', following := True))
 		ensure_future(notifier.sendNotification(
 			user_id,
 			InternalUserNotification(
@@ -55,10 +55,12 @@ class Users(Repository) :
 				user_id = user.user_id,
 			),
 			user = await portable,
-		), name = 'sending notifications')
+		))
+		return following
 
-	async def unfollowUser(self: Self, user: KhUser, handle: str) -> None :
-		user_id: int = await self._handle_to_user_id(handle.lower())
+
+	async def unfollowUser(self: Self, user: KhUser, handle: str) -> bool :
+		user_id:   int  = await self._handle_to_user_id(handle.lower())
 		following: bool = await self.following(user.user_id, user_id)
 
 		if following is False :
@@ -68,12 +70,15 @@ class Users(Repository) :
 			DELETE FROM kheina.public.following
 			WHERE following.user_id = %s
 				AND following.follows = %s
-			""",
-			(user.user_id, user_id),
-			commit=True,
+			""", (
+				user.user_id,
+				user_id,
+			),
+			commit = True,
 		)
 
-		ensure_future(FollowKVS.put_async(f'{user.user_id}|{user_id}', False))
+		ensure_future(FollowKVS.put_async(f'{user.user_id}|{user_id}', following := False))
+		return following
 
 
 	async def getSelf(self: Self, user: KhUser) -> User :
@@ -139,7 +144,7 @@ class Users(Repository) :
 				users.admin,
 				users.verified;
 			""",
-			fetch_all=True,
+			fetch_all = True,
 		)
 
 		return [
@@ -158,7 +163,7 @@ class Users(Repository) :
 						Verified.artist if row[10] else None
 					)
 				),
-				following=None,
+				following = None,
 			)
 			for row in data
 		]
@@ -173,9 +178,11 @@ class Users(Repository) :
 			UPDATE kheina.public.users
 				SET mod = %s
 			WHERE users.user_id = %s
-			""",
-			(mod, user_id),
-			commit=True,
+			""", (
+				mod,
+				user_id,
+			),
+			commit = True,
 		)
 
 		user: Optional[InternalUser] = await user_task
@@ -185,7 +192,7 @@ class Users(Repository) :
 
 
 	@SimpleCache(60)
-	async def fetchBadges(self: Self) -> List[Badge] :
+	async def fetchBadges(self: Self) -> list[Badge] :
 		return await badge_map.all()
 
 
@@ -208,9 +215,11 @@ class Users(Repository) :
 			(user_id, badge_id)
 			VALUES
 			(%s, %s);
-			""",
-			(user.user_id, badge_id),
-			commit=True,
+			""", (
+				user.user_id,
+				badge_id,
+			),
+			commit = True,
 		)
 
 		iuser.badges.append(badge)
@@ -238,9 +247,11 @@ class Users(Repository) :
 			DELETE FROM kheina.public.user_badge
 				WHERE user_id = %s
 					AND badge_id = %s;
-			""",
-			(user.user_id, badge_id),
-			commit=True,
+			""", (
+				user.user_id,
+				badge_id,
+			),
+			commit = True,
 		)
 
 		UserKVS.put(str(user.user_id), iuser)
@@ -253,9 +264,11 @@ class Users(Repository) :
 			(emoji, label)
 			VALUES
 			(%s, %s);
-			""",
-			(badge.emoji, badge.label),
-			commit=True,
+			""", (
+				badge.emoji,
+				badge.label,
+			),
+			commit = True,
 		)
 
 
@@ -268,9 +281,10 @@ class Users(Repository) :
 			UPDATE kheina.public.users
 				set {'verified' if verified == Verified.artist else verified.name} = true
 			WHERE users.user_id = %s;
-			""",
-			(user_id,),
-			commit=True,
+			""", (
+				user_id,
+			),
+			commit = True,
 		)
 
 		user: Optional[InternalUser] = await user_task

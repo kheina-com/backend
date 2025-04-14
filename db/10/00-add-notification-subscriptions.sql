@@ -1,5 +1,16 @@
 begin;
 
+create or replace function generated_created() returns trigger as
+$$
+begin
+
+	new.created = now();
+	return new;
+
+end;
+$$
+language plpgsql;
+
 drop table if exists public.subscriptions;
 create table public.subscriptions (
 	sub_id uuid unique not null,
@@ -19,12 +30,20 @@ create table public.notifications (
 		on update cascade
 		on delete cascade,
 	type smallint not null,
-	created timestamptz not null generated always as ('now'::timestamptz) stored,
+	created timestamptz not null,
 	data bytea not null,
 	primary key (user_id, id)
 );
 
-drop function public.register_subscription;
+create index if not exists notifications_user_created_idx on public.notifications (user_id, created);
+
+create or replace trigger generated_created before insert on public.notifications
+	for each row execute procedure generated_created();
+
+create or replace trigger immutable_columns before update on public.notifications
+	for each row execute procedure public.immutable_columns('id', 'user_id', 'type', 'created', 'data');
+
+drop function if exists public.register_subscription;
 create or replace function public.register_subscription(sid uuid, uid bigint, sinfo bytea) returns void as
 $$
 begin

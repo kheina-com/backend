@@ -1,6 +1,6 @@
 begin;
 
-alter table public.configs drop column value;
+alter table public.configs drop column if exists value;
 
 drop table if exists public.user_configs;
 create table public.user_configs (

@@ -181,31 +181,31 @@ def KwargsCache(TTL_seconds:float=0, TTL_minutes:float=0, TTL_hours:float=0, TTL
 	return decorator
 
 
-def deepTypecheck(type_: type | tuple, instance: Any) -> bool :
+def deepTypecheck(type_: type | tuple[type, ...], instance: Any) -> bool :
 	"""
 	returns true if instance is an instance of type_
 	"""
+	match instance :
+		case list() | tuple() :
+			return all(map(partial(deepTypecheck, type_), instance))
 
-	if instance is None and type(None) in getattr(type_, '__args__', tuple()) :
+	if type(instance) is type_ :
 		return True
+
+	type_ = getattr(type_, '__args__', type_)
 
 	if isinstance(type_, tuple) :
 		if type(instance) not in type_ :
 			return False
 
 	else :
-		t = getattr(type_, '__origin__', type_)
-		if type(instance) is not t :
+		if type(instance) is not getattr(type_, '__origin__', type_) :
 			return False
 
 	if di := getattr(instance, '__dict__', None) :
 		if dt := getattr(type_, '__annotations__', None) :
 			if di.keys() != dt.keys() :
 				return False
-
-	match instance :
-		case list() | tuple() :
-			return all(map(partial(deepTypecheck, type_.__args__), instance))  # type: ignore
 
 	return True
 
