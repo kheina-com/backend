@@ -13,12 +13,22 @@ RUN apk update && \
 	libffi-dev \
 	postgresql-dev \
 	build-base \
-	bash linux-headers \
-	libuv libuv-dev \
-	openssl openssl-dev \
-	lua5.1 lua5.1-dev \
-	zlib zlib-dev \
+	bash \
+	linux-headers \
+	libuv \
+	libuv-dev \
+	openssl \
+	openssl-dev \
+	lua5.1 \
+	lua5.1-dev \
+	zlib \
+	zlib-dev \
 	python3-dev \
+	libpng-dev \
+	libjpeg-turbo-dev \
+	tiff-dev \
+	libwebp-dev \
+	imagemagick \
 	exiftool \
 	jq
 
@@ -48,6 +58,9 @@ WORKDIR /app
 COPY . /app
 RUN chmod +x docker-exec.sh
 
+ENV MAGICK_HOME=/usr
+RUN find /usr/lib -name "libMagickCore*" -maxdepth 1 -type f -exec ln -s {} /usr/lib/libMagickCore.so \;
+RUN find /usr/lib -name "libMagickWand*" -maxdepth 1 -type f -exec ln -s {} /usr/lib/libMagickWand.so \;
 RUN mkdir "images"
 
 RUN wget https://go.dev/dl/go1.22.5.linux-amd64.tar.gz && \

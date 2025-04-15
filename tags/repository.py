@@ -290,7 +290,7 @@ class Repository(SqlInterface) :
 				user_id,
 				64,
 			),
-			fetch_all=True,
+			fetch_all = True,
 		)
 
 		if not data :
@@ -306,5 +306,5 @@ class Repository(SqlInterface) :
 				description    = None, # in this case, we don't care about this field
 			)
 			for row in data
-			if row[0] and row[1] in TagGroup.__members__
+			if row[0] and row[1] in TagGroup.__members__ and row[1] != TagGroup.system.name
 		]

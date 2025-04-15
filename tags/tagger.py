@@ -453,5 +453,5 @@ class Tagger(Repository) :
 
 		return TagGroups(**{
 			group.name: list(map(lambda x : self.portable(x[0]), sorted(tag_ranks.items(), key=lambda x : x[1], reverse=True)))[:(25 if group == Misc else 10)]
-			for group, tag_ranks in groups.items() if group != TagGroup.system
+			for group, tag_ranks in groups.items()
 		})

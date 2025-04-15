@@ -397,14 +397,14 @@ class Repository(SqlInterface) :
 			for k, v in (await FollowKVS.get_many_async([f'{user_id}|{t}' for t in targets])).items()
 		}
 		found: dict[int, bool] = { }
-		misses: list[int] = []
+		misses: set[int] = set()
 
 		for k, v in cached.items() :
 			if isinstance(v, bool) :
 				found[k] = v
 				continue
 
-			misses.append(k)
+			misses.add(k)
 
 		if not misses :
 			return found
@@ -417,7 +417,7 @@ class Repository(SqlInterface) :
 			GROUP BY following.follows;
 			""", (
 				user_id,
-				misses,
+				list(misses),
 			),
 			fetch_all = True,
 		)
@@ -427,7 +427,12 @@ class Repository(SqlInterface) :
 		for target, following in data :
 			following = bool(following)
 			return_value[target] = following
+			misses.discard(target)
 			ensure_future(FollowKVS.put_async(f'{user_id}|{target}', following))
+
+		for target in misses :
+			return_value[target] = False
+			ensure_future(FollowKVS.put_async(f'{user_id}|{target}', False))
 
 		return return_value
 
