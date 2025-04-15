@@ -19,7 +19,8 @@ RUN apk update && \
 	lua5.1 lua5.1-dev \
 	zlib zlib-dev \
 	python3-dev \
-	exiftool
+	exiftool \
+	jq
 
 # ENV DEBIAN_FRONTEND=noninteractive
 
@@ -45,6 +46,8 @@ RUN rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY . /app
+RUN chmod +x docker-exec.sh
+
 RUN mkdir "images"
 RUN rm -rf .venv && \
 	rm -rf credentials
@@ -69,4 +72,4 @@ ENV PATH="/opt/.venv/bin:$PATH"
 
 ENV PORT=80
 ENV ENVIRONMENT=DEV
-CMD ["docker-exec.sh"]
+CMD ["./docker-exec.sh"]
