@@ -14,14 +14,12 @@ gcloud container clusters get-credentials fuzzly-backend \
 create a new secret
 https://kubernetes.io/docs/tasks/configmap-secret/managing-secret-using-kubectl/#create-a-secret
 ```sh
-kubectl create secret generic credentials \
-	--from-literal=value=$(cat credentials/creds.aes)
+python3 init.py upload-secret -s credentials/creds.aes -n credentials
 ```
 
 read a secret
 ```sh
-kubectl get secret kh-aes -o jsonpath='{.data.value}' | base64 -d
-kubectl get secret credentials -o jsonpath='{.data}' | jq -r '."creds.json"' | base64 -d | jq -r '.value' > credentials/creds.aes
+python3 init.py kube-secret -s credentials
 ```
 
 send deployment to gke
@@ -37,6 +35,7 @@ watch kubectl get pods
 ```
 
 in order to update secrets, you must create or edit the existing credential file(s) and then re-encrypt them using `python3 init.py encrypt` then edit the kube secrets using
+note: during edit, the contents of secrets must be `urlsafe_b64encode`d
 ```sh
 kubectl edit secrets kh-aes
 kubectl edit secrets kh-ed25519

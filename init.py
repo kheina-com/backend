@@ -1,3 +1,4 @@
+from base64 import urlsafe_b64encode
 import json
 import random
 import re
@@ -11,9 +12,6 @@ from typing import Any, BinaryIO, Optional
 
 import asyncclick as click
 import ujson
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fontTools.ttLib import TTFont
 from fontTools.ttLib.tables.sbixStrike import Strike
 
@@ -408,7 +406,7 @@ def readSecret(secret: Optional[str], filename: Optional[str]) -> None :
 @cli.command('kube-secret')
 @click.option('--secret', '-s', help='Read a secret.')
 @click.option('--format', '-f', help='format')
-def readSecret(secret: str, format: str = "") -> None :
+def readKubeSecret(secret: str, format: str = '') -> None :
 	"""
 	reads an encrypted kube secret
 	"""
@@ -434,6 +432,7 @@ def readSecret(secret: str, format: str = "") -> None :
 		return click.echo(f'{err}: {err.decode()}')
 
 	cred   = b64decode(json.loads(out).values().__iter__().__next__())
+	print("==> cred:", cred)
 	parsed = decryptCredentialFile(json.loads(cred)['value'].encode())
 
 	for p in path :
@@ -450,6 +449,24 @@ def readSecret(secret: str, format: str = "") -> None :
 		return click.echo(json.dumps(parsed))
 
 	click.echo(f'{".".join([secret] + path)}: ' + TerminalAgent('').pretty_struct(parsed))
+
+
+@cli.command('upload-secret')
+@click.option('--secret', '-s', help='secret file')
+@click.option('--name',   '-n', help='kube secret name, should be .json')
+def readKubeSecret(secret: str, name: str) -> None :
+	"""
+	reads an encrypted kube secret
+	"""
+
+	cred = ''.join(list(map(str.strip, open(secret, 'r').readlines())))
+	cred_json = f'{{"value":"{cred}"}}'
+	Popen(['kubectl', 'delete', 'secret', 'credentials'], stdout=PIPE, stderr=PIPE).communicate()
+	out, err = Popen(['kubectl', 'create', 'secret', 'generic', name, '--from-literal=creds.json=' + cred_json], stdout=PIPE, stderr=PIPE).communicate()
+	if err :
+		return click.echo(err.decode(), err=True)
+
+	click.echo(out)
 
 
 if __name__ == '__main__' :
