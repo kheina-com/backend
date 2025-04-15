@@ -1,4 +1,4 @@
-from functools import wraps
+from functools import partial, wraps
 from inspect import FullArgSpec, Parameter, getfullargspec, iscoroutinefunction, markcoroutinefunction, signature
 from logging import getLogger
 from sys import _getframe
@@ -37,11 +37,12 @@ class Time(float) :
 
 class Execution :
 
-	def __init__(self, name: str) -> None :
-		self.total:  Time                   = Time()
-		self.count:  int                    = 0
-		self.nested: dict[str, 'Execution'] = { }
-		self._name:  str                    = name
+	def __init__(self, name: str, tags: dict[str, str | int | float] = { }) -> None :
+		self.total:  Time                         = Time()
+		self.count:  int                          = 0
+		self.nested: dict[str, 'Execution']       = { }
+		self._name:  str                          = name
+		self._tags:  dict[str, str | int | float] = tags
 
 	def __repr__(self: Self) -> str :
 		return (
@@ -87,7 +88,7 @@ class Execution :
 		self.count += 1
 
 	def dict(self: Self) -> dict :
-		ret: dict[str, Any] = { 'total': self.total, 'count': self.count }
+		ret: dict[str, Any] = { **self._tags, 'total': self.total, 'count': self.count }
 		ret.update({ k: v.dict() for k, v in self.nested.items() })
 		return ret
 
@@ -109,7 +110,7 @@ def _get_parent(frame: Optional[FrameType]) -> Optional[Execution] :
 
 
 # it's required for timed and decorator to not be annotated otherwise it fucks up @wraps(func), don't ask me why.
-def timed(root, key = None) :
+def timed(root, key = None, tags = None) :
 	"""
 	times the decorated function.
 
@@ -148,23 +149,41 @@ def timed(root, key = None) :
 				return key.format(**{ **kw, **dict(zip(arg_spec, args)), **kwargs })
 
 		elif callable(key) :
-			def fkey(key: Callable[Any, Any, str], *args, **kwargs) -> Optional[str] :
+			def fkey(key: Callable[[Any, Any], str], *args, **kwargs) -> Optional[str] :
 				return key(*args, **kwargs)
 
 		else :
 			raise TypeError('Expected key argument to be a str, a callable, or None')
 
-		start:     Callable[[Optional[Execution], Optional[str]], float]
+		if tags is None :
+			def tkey(*a, **kw) -> dict[str, str | int | float] :
+				return { }
+
+		elif isinstance(tags, dict) :
+			def tkey(t: dict[str, str | int], *args, **kwargs) -> dict[str, str | int | float] :
+				return {
+					k: args[v] if isinstance(v, int) else kwargs[v]
+					for k, v in t.items()
+				}
+
+		elif callable(tags) :
+			def tkey(t: Callable[[Any, Any], dict[str, str | int | float]], *args, **kwargs) -> dict[str, str | int | float] :
+				return t(*args, **kwargs)
+
+		else :
+			raise TypeError('Expected tags argument to be a dict[str, str | int], a callable, or None')
+
+		start:     Callable[[Optional[Execution], Optional[str], dict[str, str | int | float]], float]
 		completed: Callable[[float], None]
 
 		name = f'{func.__module__}.{getattr(func, "__qualname__", func.__class__.__name__)}'
 
 		if root :
-			def s(_: Optional[Execution], k: Optional[str] = None) -> float :
+			def s(_: Optional[Execution], k: Optional[str] = None, tags: dict[str, str | int | float] = { }) -> float :
 				n = f'{name}[{k}]' if k else name
 				frame = _getframe().f_back
 				assert frame
-				frame.f_locals[EXEC] = Execution(n)
+				frame.f_locals[EXEC] = Execution(n, tags)
 
 				return time()
 
@@ -180,7 +199,7 @@ def timed(root, key = None) :
 			completed = c
 
 		else :
-			def s(parent: Optional[Execution], k: Optional[str] = None) -> float :
+			def s(parent: Optional[Execution], k: Optional[str] = None, tags: dict[str, str | int | float] = { }) -> float :
 				n = f'{name}[{k}]' if k else name
 				# print(f'==>    exec: {n}')
 				if not parent :
@@ -192,7 +211,7 @@ def timed(root, key = None) :
 					exec = parent.nested[n]
 
 				else :
-					exec = parent.nested[n] = Execution(n)
+					exec = parent.nested[n] = Execution(n, tags)
 
 				frame = _getframe().f_back
 				assert frame
@@ -212,7 +231,7 @@ def timed(root, key = None) :
 
 		if iscoroutinefunction(func) :
 			async def coro(parent: Optional[Execution], args: Any, kwargs: Any) -> Any :
-				s: float = start(parent, fkey(key, *args, **kwargs))  # type: ignore
+				s: float = start(parent, fkey(key, *args, **kwargs), tkey(tags, *args, **kwargs))  # type: ignore
 
 				try :
 					return await func(*args, **kwargs)
@@ -234,7 +253,7 @@ def timed(root, key = None) :
 		else :
 			@wraps(func)
 			def wrapper(*args: Any, **kwargs: Any) -> Any :
-				s: float = start(_get_parent(_getframe()), fkey(key, *args, **kwargs))  # type: ignore
+				s: float = start(_get_parent(_getframe()), fkey(key, *args, **kwargs), tkey(tags, *args, **kwargs))  # type: ignore
 
 				try :
 					return func(*args, **kwargs)
@@ -264,7 +283,7 @@ def timed(root, key = None) :
 		func, root = root, False
 		return decorator(func)
 
-	elif isinstance(root, bool) :		
+	elif isinstance(root, bool) :
 		return decorator
 
 	else :

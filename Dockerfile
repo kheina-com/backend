@@ -1,7 +1,5 @@
-# FROM python:3.13-slim
 FROM python:3.13-alpine
 
-# can't install aerospike==8.0.0 on alpine
 RUN apk update && \
 	apk upgrade && \
 	apk add --no-cache git && \
@@ -32,26 +30,6 @@ RUN apk update && \
 	exiftool \
 	jq
 
-# ENV DEBIAN_FRONTEND=noninteractive
-
-# RUN apt update && \
-# 	apt upgrade -y && \
-# 	apt install -y \
-# 	build-essential \
-# 	libssl-dev \
-# 	libffi-dev \
-# 	git \
-# 	jq \
-# 	libpq-dev \
-# 	python3-dev \
-# 	libpng-dev \
-# 	libjpeg-dev \
-# 	libtiff-dev \
-# 	libwebp-dev \
-# 	imagemagick \
-# 	libimage-exiftool-perl \
-# 	ffmpeg
-
 RUN rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -69,7 +47,7 @@ RUN wget https://go.dev/dl/go1.22.5.linux-amd64.tar.gz && \
 
 ENV GOROOT=/usr/local/go
 # redefine $HOME to the default so that it stops complaining
-ENV HOME="/root"
+ENV HOME=/root
 ENV GOPATH=$HOME/go
 ENV PATH=$GOPATH/bin:$GOROOT/bin:$PATH
 

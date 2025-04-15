@@ -35,7 +35,7 @@ from tags.repository import Repository as Tags
 from users.repository import Repository as Users
 from users.repository import UserKVS
 
-from .models import Coordinates, InternalPost, Media, MediaFlag, Post, PostId, PostSize, Privacy, Rating, Thumbnail
+from .models import Coordinates, InternalPost, InternalThumbnail, Media, MediaFlag, Post, PostId, PostSize, Privacy, Rating, Thumbnail
 from .repository import PostKVS
 from .repository import Repository as Posts
 from .repository import VoteKVS, media_type_map, privacy_map, rating_map
@@ -390,7 +390,7 @@ class Uploader(SqlInterface, B2Interface) :
 		return image_data.getvalue()
 
 
-	async def insert_thumbnail(self: Self, t: Transaction, post_id: PostId, crc: int, mime: MimeType, size: int, filename: str, length: int, width: int, height: int) -> Thumbnail :
+	async def insert_thumbnail(self: Self, t: Transaction, post_id: PostId, mime: MimeType, size: int, filename: str, length: int, width: int, height: int) -> InternalThumbnail :
 		media_type: int = await media_type_map.get_id(mime.value)
 		await t.query_async("""
 			insert into kheina.public.thumbnails
@@ -408,26 +408,23 @@ class Uploader(SqlInterface, B2Interface) :
 			),
 		)
 
-		return Thumbnail(
-			post_id  = post_id,
-			crc      = crc,
-			bounds   = size,
-			type     = await media_type_map.get(media_type),
+		return InternalThumbnail(
+			post_id  = post_id.int(),
+			size     = size,
+			type     = media_type,
 			filename = filename,
 			length   = length,
-			size = PostSize(
-				width  = width,
-				height = height,
-			),
+			width    = width,
+			height   = height,
 		)
 
 
 	@timed
-	async def upload_thumbnails(self: Self, run: str, t: Transaction, post_id: PostId, crc: int, image: Image, formats: list[tuple[int, str]]) -> list[Thumbnail] :
+	async def upload_thumbnails(self: Self, run: str, t: Transaction, post_id: PostId, crc: int, image: Image, formats: list[tuple[int, str]]) -> list[InternalThumbnail] :
 		"""
 		formats is a tuple of size and file extension, used to resize each thumbnail and upload it
 		"""
-		ths: list[Thumbnail] = []
+		ths: list[InternalThumbnail] = []
 		# query: list[str] = []
 		# params: list[Any] = []
 
@@ -437,7 +434,7 @@ class Uploader(SqlInterface, B2Interface) :
 			url:  str      = f'{post_id}/{crc}/thumbnails/{size}.{ext}'
 			data: bytes    = self.get_image_data(image.convert(mime.type()))
 			await self.upload_async(data, url, mime)
-			ths.append(await self.insert_thumbnail(t, post_id, crc, mime, size, f'{size}.{ext}', len(data), image.size[0], image.size[1]))
+			ths.append(await self.insert_thumbnail(t, post_id, mime, size, f'{size}.{ext}', len(data), image.size[0], image.size[1]))
 			self.logger.debug({
 				'run':     run,
 				'post':    post_id,
@@ -679,9 +676,9 @@ class Uploader(SqlInterface, B2Interface) :
 				})
 
 				# upload thumbnails
-				thumbnails: list[Thumbnail]
+				thumbnails: list[InternalThumbnail]
 				with Image(file=open(file_on_disk, 'rb')) as image :
-					thumbnails: list[Thumbnail] = await self.upload_thumbnails(
+					thumbnails = await self.upload_thumbnails(
 						run,
 						transaction,
 						post_id,
@@ -704,19 +701,33 @@ class Uploader(SqlInterface, B2Interface) :
 			post.size           = image_size
 			post.content_length = content_length
 			post.crc            = rev
+			post.thumbnails     = thumbnails
 			await PostKVS.put_async(post_id, post)
 
 			return Media(
-				post_id    = post_id,
-				updated    = updated,
-				filename   = filename,
-				type       = await media_type_map.get(media_type),
-				thumbhash  = thumbhash,
-				size       = image_size,
-				length     = content_length,
-				crc        = rev,
-				thumbnails = thumbnails,
-				flags      = flags,
+				post_id   = post_id,
+				updated   = updated,
+				filename  = filename,
+				type      = await media_type_map.get(media_type),
+				thumbhash = thumbhash,
+				size      = image_size,
+				length    = content_length,
+				crc       = rev,
+				flags     = flags,
+				thumbnails = [
+					Thumbnail(
+						post_id  = post_id,
+						crc      = rev,
+						bounds   = th.size,
+						type     = await media_type_map.get(th.type),
+						filename = th.filename,
+						length   = th.length,
+						size = PostSize(
+							width  = th.width,
+							height = th.height,
+						),
+					) for th in thumbnails
+				],
 			)
 
 		finally :
@@ -1329,9 +1340,9 @@ class Uploader(SqlInterface, B2Interface) :
 				})
 
 				# upload thumbnails
-				thumbnails: list[Thumbnail]
+				thumbnails: list[InternalThumbnail]
 				with Image(file=open(screenshot, 'rb')) as image :
-					thumbnails: list[Thumbnail] = await self.upload_thumbnails(
+					thumbnails = await self.upload_thumbnails(
 						run,
 						transaction,
 						post_id,
@@ -1351,19 +1362,33 @@ class Uploader(SqlInterface, B2Interface) :
 			post.size           = image_size
 			post.content_length = content_length
 			post.crc            = rev
+			post.thumbnails     = thumbnails
 			await PostKVS.put_async(post_id, post)
 
 			return Media(
-				post_id    = post_id,
-				updated    = updated,
-				filename   = filename,
-				type       = await media_type_map.get(media_type),
-				thumbhash  = thumbhash,  # type: ignore
-				size       = image_size,
-				length     = content_length,
-				crc        = rev,
-				thumbnails = thumbnails,
-				flags      = flags,
+				post_id   = post_id,
+				updated   = updated,
+				filename  = filename,
+				type      = await media_type_map.get(media_type),
+				thumbhash = thumbhash,
+				size      = image_size,
+				length    = content_length,
+				crc       = rev,
+				flags     = flags,
+				thumbnails = [
+					Thumbnail(
+						post_id  = post_id,
+						crc      = rev,
+						bounds   = th.size,
+						type     = await media_type_map.get(th.type),
+						filename = th.filename,
+						length   = th.length,
+						size = PostSize(
+							width  = th.width,
+							height = th.height,
+						),
+					) for th in thumbnails
+				],
 			)
 
 		finally :

@@ -72,6 +72,7 @@ app.add_middleware(
 		'set-cookie',
 		'user-agent',
 		'www-authenticate',
+		'kh-trace',
 		'x-frame-options',
 		'x-xss-protection',
 	],
@@ -89,6 +90,7 @@ app.add_middleware(
 		'cookie',
 		'set-cookie',
 		'www-authenticate',
+		'kh-trace',
 	] + list(HeadersToSet.keys()),
 	max_age = 86400,
 )

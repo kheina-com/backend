@@ -1,9 +1,9 @@
-from base64 import urlsafe_b64encode
 import json
 import random
 import re
 import shutil
 import time
+from base64 import urlsafe_b64encode
 from os import environ, listdir, remove
 from os.path import isdir, isfile, join
 from secrets import token_bytes

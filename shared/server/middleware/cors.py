@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Iterable
+from typing import Iterable, Self
 from urllib.parse import urlparse
 
 from fastapi.responses import Response
@@ -14,15 +14,15 @@ from ...exceptions.http_error import BadRequest
 class KhCorsMiddleware:
 
 	def __init__(
-		self,
-		app: ASGIApp,
-		allowed_origins: Iterable[str],
+		self:              Self,
+		app:               ASGIApp,
+		allowed_origins:   Iterable[str],
 		allowed_protocols: Iterable[str] = ['https'],
-		allowed_headers: Iterable[str] = [],
-		allowed_methods: Iterable[str] = [],
-		allow_credentials: bool = True,
-		exposed_headers: Iterable[str] = [],
-		max_age: int=86400,
+		allowed_headers:   Iterable[str] = [],
+		allowed_methods:   Iterable[str] = [],
+		allow_credentials: bool          = True,
+		exposed_headers:   Iterable[str] = [],
+		max_age:           int           = 86400,
 	) -> None :
 		self.app = app
 		self.allowed_origins = set(allowed_origins)
@@ -34,7 +34,7 @@ class KhCorsMiddleware:
 		self.max_age = str(max_age)
 
 
-	async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None :
+	async def __call__(self: Self, scope: Scope, receive: Receive, send: Send) -> None :
 		if scope['type'] != 'http' :
 			await self.app(scope, receive, send)
 			return
@@ -52,14 +52,14 @@ class KhCorsMiddleware:
 			if request.method == 'OPTIONS' and 'access-control-request-method' in request.headers :
 				await Response(
 					None,
-					status_code=204,
-					headers={
-						'access-control-allow-origin': origin.geturl(),
-						'access-control-allow-methods': self.allowed_methods,
-						'access-control-allow-headers': self.allowed_headers,
+					status_code = 204,
+					headers = {
+						'access-control-allow-origin':      origin.geturl(),
+						'access-control-allow-methods':     self.allowed_methods,
+						'access-control-allow-headers':     self.allowed_headers,
 						'access-control-allow-credentials': self.allow_credentials,
-						'access-control-max-age': self.max_age,
-						'access-control-expose-headers': self.exposed_headers,
+						'access-control-max-age':           self.max_age,
+						'access-control-expose-headers':    self.exposed_headers,
 					},
 				)(scope, receive, send)
 				return
@@ -69,7 +69,7 @@ class KhCorsMiddleware:
 		await self.app(scope, receive, send)
 
 
-	async def send(self, message: Message, send: Send, headers: Headers) -> None :
+	async def send(self: Self, message: Message, send: Send, headers: Headers) -> None :
 		if message['type'] != 'http.response.start':
 			await send(message)
 			return
@@ -79,12 +79,12 @@ class KhCorsMiddleware:
 		headers = MutableHeaders(scope=message)
 
 		headers.update({
-			'access-control-allow-origin': origin,
-			'access-control-allow-methods': self.allowed_methods,
-			'access-control-allow-headers': self.allowed_headers,
+			'access-control-allow-origin':      origin,
+			'access-control-allow-methods':     self.allowed_methods,
+			'access-control-allow-headers':     self.allowed_headers,
 			'access-control-allow-credentials': self.allow_credentials,
-			'access-control-max-age': self.max_age,
-			'access-control-expose-headers': self.exposed_headers,
+			'access-control-max-age':           self.max_age,
+			'access-control-expose-headers':    self.exposed_headers,
 		})
 
 		await send(message)

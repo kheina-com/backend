@@ -860,7 +860,7 @@ class Repository(SqlInterface) :
 					up    = iscore.up,
 					down  = iscore.down,
 					total = iscore.total,
-					vote  = user_votes[post_id] or 0,
+					vote  = user_votes.get(post_id, 0),
 				)
 
 		return scores
