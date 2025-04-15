@@ -1,4 +1,6 @@
 **/__pycache__
+.github
+.pytest_cache
 .venv
 credentials
 db

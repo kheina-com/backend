@@ -5,17 +5,18 @@ from typing import Optional, Self, Tuple, Union
 from psycopg.errors import UniqueViolation
 
 from posts.models import InternalPost, MediaType, Post, PostId, PostSize, Privacy, Rating
-from posts.repository import Posts, privacy_map
+from posts.repository import Repository as Posts
+from posts.repository import privacy_map
 from shared.auth import KhUser, Scope
-from shared.caching import AerospikeCache, ArgsCache
+from shared.caching import ArgsCache
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, Conflict, HttpErrorHandler, NotFound
 from shared.models.user import UserPrivacy
 from shared.timing import timed
-from users.repository import Users
+from users.repository import Repository as Users
 
 from .models import InternalSet, PostSet, Set, SetId, SetNeighbors, UpdateSetRequest
-from .repository import SetKVS, SetNotFound, Sets  # type: ignore
+from .repository import Repository, SetKVS, SetNotFound
 
 
 """
@@ -44,7 +45,7 @@ posts = Posts()
 users = Users()
 
 
-class Sets(Sets) :
+class Sets(Repository) :
 
 	@staticmethod
 	async def _verify_authorized(user: KhUser, iset: InternalSet) -> bool :

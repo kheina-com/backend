@@ -1,11 +1,14 @@
 import json
 import logging
+from dataclasses import is_dataclass
 from enum import Enum, unique
-from logging import ERROR, INFO, Logger, getLevelName
+from logging import DEBUG, ERROR, INFO, Logger, getLevelName
 from sys import stderr, stdout
 from traceback import format_tb
 from types import ModuleType
 from typing import Any, Callable, Optional, Self, TextIO
+
+from pydantic import BaseModel
 
 from .config.constants import environment
 from .config.repo import name as repo_name
@@ -227,23 +230,22 @@ class LogHandler(logging.Handler) :
 		if record.args and isinstance(record.msg, str) :
 			record.msg = record.msg % tuple(map(str, map(json_stream, record.args)))
 
-		if record.exc_info :
-			e: BaseException = record.exc_info[1] # type: ignore
-			refid = getattr(e, 'refid', None)
-			errorinfo: dict[str, Any] = {
-				'error': f'{getFullyQualifiedClassName(e)}: {e}',
-				'stacktrace': list(map(str.strip, format_tb(record.exc_info[2]))),
-				'refid': refid.hex if refid else None,
-				**json_stream(getattr(e, 'logdata', { })),
-			}
+		if is_dataclass(record.msg) or isinstance(record.msg, BaseModel) :
+			record.msg = record.msg.__dict__
+
+		if record.exc_info and record.exc_info[1] :
+			e: BaseException = record.exc_info[1]
+			msg: dict[str, Any]
 			if isinstance(record.msg, dict) :
-				errorinfo.update(json_stream(record.msg))
+				msg = json_stream(record.msg)
 
 			else :
-				errorinfo['message'] = record.msg
+				msg = { 'message': record.msg }
+
+			msg.update(json_stream(e))
 
 			try :
-				self.agent.log_struct(errorinfo, severity=record.levelno)
+				self.agent.log_struct(msg, severity=record.levelno)
 
 			except :  # noqa: E722
 				# we really, really do not want to fail-crash here.

@@ -30,5 +30,5 @@ class CreateActionRequest(BaseModel) :
 	action:      RemovePostAction | ForceUpdateAction | BanActionInput | None
 
 
-class ReportReponseRequest(BaseModel) :
+class CloseReponseRequest(BaseModel) :
 	response:  str

@@ -27,6 +27,11 @@
 			"key": "kw7vBGROerYZjIb7i05SrAIrYV18Xn43ijIahWrY",
 			"key_name": "localhost-minio-key"
 		},
+		"notifications": {
+			"aes": "XHn0bd38L5mQgISKBtP2FbIJQnYZd0yWfwXFn1FBtfQ.pD795CKO9aaq2T5MuIqxOwgTKli-d0gMOaSlhl5GR1Mv9GhOGLct-3jgsqGhHc6uQwJXki7Jj1pjbj2fliOyAQ",
+			"pub": "wtzY_IHxeR7ZMbar.TsLHfu8KxrkW99Ou8ySJNB_nxF6vK33SyldQ1HIWhTWcgT5LuYd4Ekra7an0i-jsQDxFNSnnnxCVWKv0.vmTisEaOEAQajFyWGr65unDlD9ZJXOSIQmmfh0lpxUSS-x4-GFICLcdITGSNtE7f6JbMPSGbp7GygGZ5NYdPCw",
+			"priv": "8ax1-3veA74sd5nt.2Bv8pW2CEobi6HWO9800C3aBZ5iAubhq1SxPZeN-aYkrJ3LMU4CRjOFL4mVEzQTL.cmGWjKew0VFJVw7gEu2n2PhQAkWulNUJQkwx2-0NOGP4E-NIi_tQjYAWE-F_cMtZd3nRHmjJYy37IPZc3x27Bg"
+		},
 		"db": {
 			"user": "kheina",
 			"password": "password",

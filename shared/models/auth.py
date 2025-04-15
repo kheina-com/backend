@@ -6,12 +6,30 @@ from uuid import UUID
 from pydantic import BaseModel
 
 
+@unique
+class AuthState(IntEnum) :
+	active   = 0
+	inactive = 1
+
+
+class TokenMetadata(BaseModel) :
+	state:       AuthState
+	key_id:      int
+	user_id:     int
+	version:     bytes
+	algorithm:   str
+	expires:     datetime
+	issued:      datetime
+	fingerprint: bytes
+
+
 class AuthToken(NamedTuple) :
 	user_id:      int
 	expires:      datetime
 	guid:         UUID
 	data:         dict[str, Any]
 	token_string: str
+	metadata:     TokenMetadata
 
 
 @unique
@@ -27,7 +45,7 @@ class Scope(IntEnum) :
 		return [v for v in Scope.__members__.values() if Scope.user.value <= v.value <= self.value] or [self]
 
 
-class KhUser(NamedTuple) :
+class _KhUser(NamedTuple) :
 	user_id: int                 = -1
 	token:   Optional[AuthToken] = None
 	scope:   set[Scope]          = set()
@@ -48,23 +66,6 @@ class PublicKeyResponse(BaseModel) :
 	signature: str
 	issued:    datetime
 	expires:   datetime
-
-
-@unique
-class AuthState(IntEnum) :
-	active   = 0
-	inactive = 1
-
-
-class TokenMetadata(BaseModel) :
-	state:       AuthState
-	key_id:      int
-	user_id:     int
-	version:     bytes
-	algorithm:   str
-	expires:     datetime
-	issued:      datetime
-	fingerprint: bytes
 
 
 @unique

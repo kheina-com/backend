@@ -4,7 +4,7 @@ from math import ceil
 from typing import Iterable, Optional, Self
 
 from sets.models import InternalSet, SetId
-from sets.repository import Sets
+from sets.repository import Repository as Sets
 from shared.auth import KhUser
 from shared.caching import AerospikeCache, ArgsCache
 from shared.datetime import datetime
@@ -13,13 +13,13 @@ from shared.sql.query import CTE, Field, Join, JoinType, Operator, Order, Query,
 from shared.timing import timed
 
 from .models import InternalPost, Post, PostId, PostSort, Privacy, Rating, Score, SearchResults
-from .repository import PostKVS, Posts, privacy_map, rating_map, users  # type: ignore
+from .repository import PostKVS, Repository, privacy_map, rating_map, users  # type: ignore
 
 
 sets = Sets()
 
 
-class Posts(Posts) :
+class Posts(Repository) :
 
 	@staticmethod
 	def _normalize_tag(tag: str) :
@@ -544,6 +544,8 @@ class Posts(Posts) :
 						order = [(Field('set_post', 'index'), order)],
 						alias = 'order',
 					),
+				).group(
+					Field('set_post', 'index'),
 				).order(
 					Field('set_post', 'index'),
 					order,
@@ -656,11 +658,6 @@ class Posts(Posts) :
 						Operator.equal,
 						Value(await privacy_map.get_id(Privacy.public)),
 					),
-					Where(
-						Field('posts', 'locked'),
-						Operator.equal,
-						Value(False),
-					),
 				).union(
 					Query(
 						Table('kheina.public.posts'),
@@ -678,11 +675,6 @@ class Posts(Posts) :
 							Field('posts', 'privacy'),
 							Operator.equal,
 							Value(await privacy_map.get_id(Privacy.public)),
-						),
-						Where(
-							Field('posts', 'locked'),
-							Operator.equal,
-							Value(False),
 						),
 					),
 				),

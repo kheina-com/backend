@@ -11,6 +11,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from account.router import app as account
 from configs.router import app as configs
 from emojis.router import app as emoji
+from notifications.router import app as notifications
 from posts.router import app as posts
 from probe.router import probes
 from reporting.router import app as reporting
@@ -165,3 +166,4 @@ app.include_router(tags)
 app.include_router(users)
 app.include_router(emoji)
 app.include_router(reporting)
+app.include_router(notifications)

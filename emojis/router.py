@@ -3,7 +3,7 @@ from datetime import datetime
 from fastapi import APIRouter
 
 from shared.models.auth import Scope
-from shared.server import Request
+from shared.models.server import Request
 from shared.timing import timed
 
 from .emoji import Emojis

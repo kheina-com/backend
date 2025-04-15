@@ -3,7 +3,7 @@ from fastapi import APIRouter
 from posts.models import PostId
 from shared.auth import Scope
 from shared.exceptions.http_error import Forbidden
-from shared.server import Request
+from shared.models.server import Request
 from shared.timing import timed
 
 from .models import InheritRequest, LookupRequest, RemoveInheritance, Tag, TagGroups, TagsRequest, UpdateRequest

@@ -1,6 +1,8 @@
 from asyncio import ensure_future
+from collections import defaultdict
+from curses.panel import bottom_panel
 from datetime import datetime
-from typing import Iterable, Optional, Self, Union
+from typing import Iterable, Mapping, Optional, Self, Union
 
 from cache import AsyncLRU
 
@@ -9,12 +11,13 @@ from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadRequest, NotFound
 from shared.maps import privacy_map
-from shared.models import Badge, InternalUser, Privacy, Undefined, User, UserPortable, UserPrivacy, Verified
+from shared.models import Badge, InternalUser, PostId, Privacy, User, UserPortable, UserPrivacy, Verified
 from shared.sql import SqlInterface
 from shared.timing import timed
 
 
 UserKVS:   KeyValueStore = KeyValueStore('kheina', 'users', local_TTL=60)
+handleKVS: KeyValueStore = KeyValueStore('kheina', 'user_handle_map', local_TTL=60)
 FollowKVS: KeyValueStore = KeyValueStore('kheina', 'following')
 
 
@@ -95,7 +98,7 @@ class BadgeMap(SqlInterface) :
 badge_map: BadgeMap = BadgeMap()
 
 
-class Users(SqlInterface) :
+class Repository(SqlInterface) :
 
 	def _clean_text(self: Self, text: str) -> Optional[str] :
 		text = text.strip()
@@ -199,20 +202,35 @@ class Users(SqlInterface) :
 		if not user_ids :
 			return { }
 
-		cached = await UserKVS.get_many_async(user_ids)
+		cached = await UserKVS.get_many_async(map(str, user_ids))
+		found: dict[int, InternalUser] = { }
 		misses: list[int] = []
 
-		for k, v in list(cached.items()) :
-			if v is not Undefined :
+		for k, v in cached.items() :
+			if isinstance(v, InternalUser) :
+				found[int(k)] = v
 				continue
 
-			misses.append(k)
-			del cached[k]
+			misses.append(int(k))
 
 		if not misses :
-			return cached
+			return found
 
-		data: list[tuple] = await self.query_async("""
+		data: list[tuple[
+			int,
+			str,
+			str,
+			int,
+			PostId | None,
+			str | None,
+			datetime,
+			str | None,
+			PostId | None,
+			bool,
+			bool,
+			bool,
+			list[int],
+		]] = await self.query_async("""
 			SELECT
 				users.user_id,
 				users.display_name,
@@ -236,13 +254,13 @@ class Users(SqlInterface) :
 			""", (
 				misses,
 			),
-			fetch_all=True,
+			fetch_all = True,
 		)
 
 		if not data :
-			raise NotFound('not all users could be found.', user_ids=user_ids, misses=misses, cached=cached, data=data)
+			raise NotFound('not all users could be found.', user_ids=user_ids, misses=misses, found=found, data=data)
 
-		users: dict[int, InternalUser] = cached
+		users: dict[int, InternalUser] = found
 		for datum in data :
 			verified: Optional[Verified] = None
 
@@ -276,7 +294,8 @@ class Users(SqlInterface) :
 		return users
 
 
-	@AerospikeCache('kheina', 'user_handle_map', '{handle}', local_TTL=60)
+	@timed
+	@AerospikeCache('kheina', 'user_handle_map', '{handle}', local_TTL=60, _kvs=handleKVS)
 	async def _handle_to_user_id(self: Self, handle: str) -> int :
 		data = await self.query_async("""
 			SELECT
@@ -286,13 +305,53 @@ class Users(SqlInterface) :
 			""", (
 				handle.lower(),
 			),
-			fetch_one=True,
+			fetch_one = True,
 		)
 
 		if not data :
 			raise NotFound('no data was found for the provided user.', handle=handle)
 
 		return data[0]
+
+
+	@timed
+	async def _handles_to_user_ids(self: Self, handles: Iterable[str]) -> dict[str, int] :
+		handles = list(handles)
+
+		if not handles :
+			return { }
+
+		cached = await handleKVS.get_many_async(handles)
+		found: dict[str, int] = { }
+		misses: list[str] = []
+
+		for k, v in cached.items() :
+			if isinstance(v, int) :
+				found[k] = v
+				continue
+
+			misses.append(k)
+
+		if not misses :
+			return found
+
+		data: list[tuple[str, int]] = await self.query_async("""
+			SELECT
+				users.handle,
+				users.user_id
+			FROM kheina.public.users
+			WHERE users.handle = any(%s);
+			""", (
+				misses,
+			),
+			fetch_all = True,
+		)
+
+		for datum in data :
+			found[datum[0]] = datum[1]
+			ensure_future(handleKVS.put_async(datum[0], datum[1]))
+
+		return found
 
 
 	async def _get_user_by_handle(self: Self, handle: str) -> InternalUser :
@@ -337,17 +396,18 @@ class Users(SqlInterface) :
 			int(k[k.rfind('|') + 1:]): v
 			for k, v in (await FollowKVS.get_many_async([f'{user_id}|{t}' for t in targets])).items()
 		}
+		found: dict[int, bool] = { }
 		misses: list[int] = []
 
-		for k, v in list(cached.items()) :
-			if v is not Undefined :
+		for k, v in cached.items() :
+			if isinstance(v, bool) :
+				found[k] = v
 				continue
 
 			misses.append(k)
-			cached[k] = None
 
 		if not misses :
-			return cached
+			return found
 
 		data: list[tuple[int, int]] = await self.query_async("""
 			SELECT following.follows, count(1)
@@ -359,10 +419,10 @@ class Users(SqlInterface) :
 				user_id,
 				misses,
 			),
-			fetch_all=True,
+			fetch_all = True,
 		)
 
-		return_value: dict[int, bool] = cached
+		return_value: dict[int, bool] = found
 
 		for target, following in data :
 			following = bool(following)
@@ -411,7 +471,18 @@ class Users(SqlInterface) :
 		returns a map of user id -> UserPortable
 		"""
 
-		following = await self.following_many(user.user_id, [iuser.user_id for iuser in iusers])
+		iusers = list(iusers)
+		if not iusers :
+			return { }
+
+		following: Mapping[int, Optional[bool]]
+
+		if await user.authenticated(False) :
+			following = await self.following_many(user.user_id, [iuser.user_id for iuser in iusers])
+
+		else :
+			following = defaultdict(lambda : None)
+
 		return {
 			iuser.user_id: UserPortable(
 				name      = iuser.name,

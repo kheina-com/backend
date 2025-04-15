@@ -1,37 +1,32 @@
-from asyncio import ensure_future
+from asyncio import Task, create_task
 from collections.abc import Iterable
 from datetime import datetime
+from enum import Enum
 from random import randrange
 from re import Match, Pattern
 from re import compile as re_compile
-from typing import Any, Optional, Self, Type
+from typing import Literal, Optional, Self
 
-from avrofastapi.schema import convert_schema
-from avrofastapi.serialization import AvroDeserializer, AvroSerializer, Schema, parse_avro_schema
-from cache import AsyncLRU
+import aerospike
 from patreon import API as PatreonApi
-from pydantic import BaseModel
 
-from avro_schema_repository.schema_repository import SchemaRepository
 from shared.auth import KhUser
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.constants import environment
 from shared.config.credentials import fetch
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
-from shared.models import Undefined
+from shared.models import PostId
 from shared.sql import SqlInterface
 from shared.timing import timed
+from users.repository import Repository as Users
 
-from .models import OTP, BannerStore, ConfigsResponse, ConfigType, CostsStore, CssProperty, Funding, OtpType, UserConfig, UserConfigKeyFormat, UserConfigRequest, UserConfigResponse
+from .models import OTP, BannerStore, BlockBehavior, Blocking, BlockingBehavior, ConfigsResponse, ConfigType, CostsStore, CssProperty, CssValue, Funding, OtpType, Store, Theme, UserConfigKeyFormat, UserConfigResponse, UserConfigType
 
-
-repo: SchemaRepository = SchemaRepository()
 
 PatreonClient: PatreonApi = PatreonApi(fetch('creator_access_token', str))
 KVS: KeyValueStore = KeyValueStore('kheina', 'configs', local_TTL=60)
-UserConfigSerializer: AvroSerializer = AvroSerializer(UserConfig)
-AvroMarker: bytes = b'\xC3\x01'
+users: Users = Users()
 ColorRegex: Pattern = re_compile(r'^(?:#(?P<hex>[a-f0-9]{8}|[a-f0-9]{6})|(?P<var>[a-z0-9-]+))$')
 PropValidators: dict[CssProperty, Pattern] = {
 	CssProperty.background_attachment: re_compile(r'^(?:scroll|fixed|local)(?:,\s*(?:scroll|fixed|local))*$'),
@@ -43,29 +38,13 @@ PropValidators: dict[CssProperty, Pattern] = {
 
 class Configs(SqlInterface) :
 
-	UserConfigFingerprint: bytes
-	Serializers: dict[ConfigType, tuple[AvroSerializer, bytes]]
-	SerializerTypeMap: dict[ConfigType, Type[BaseModel]] = {
-		ConfigType.banner: BannerStore,
-		ConfigType.costs: CostsStore,
+	SerializerTypeMap: dict[Enum, type[Store]] = {
+		ConfigType.banner:             BannerStore,
+		ConfigType.costs:              CostsStore,
+		UserConfigType.blocking:       Blocking,
+		UserConfigType.block_behavior: BlockBehavior,
+		UserConfigType.theme:          Theme,
 	}
-
-	async def startup(self) -> bool :
-		Configs.Serializers = {
-			ConfigType.banner: (AvroSerializer(BannerStore), await repo.addSchema(convert_schema(BannerStore))),
-			ConfigType.costs:  (AvroSerializer(CostsStore),  await repo.addSchema(convert_schema(CostsStore))),
-		}
-		self.UserConfigFingerprint = await repo.addSchema(convert_schema(UserConfig))
-		assert self.Serializers.keys() == set(ConfigType.__members__.values()), 'Did you forget to add serializers for a config?'
-		assert self.SerializerTypeMap.keys() == set(ConfigType.__members__.values()), 'Did you forget to add serializers for a config?'
-		return True
-
-	
-	@AsyncLRU(maxsize=32)
-	@staticmethod
-	async def getSchema(fingerprint: bytes) -> Schema :
-		return parse_avro_schema((await repo.getSchema(fingerprint)).decode())
-
 
 	@HttpErrorHandler('retrieving patreon campaign info')
 	@AerospikeCache('kheina', 'configs', 'patreon-campaign-funds', TTL_minutes=10, _kvs=KVS)
@@ -78,24 +57,25 @@ class Configs(SqlInterface) :
 
 
 	@HttpErrorHandler('retrieving config')
-	async def getConfigs(self, configs: Iterable[ConfigType]) -> dict[ConfigType, Any] :
+	async def getConfigs(self: Self, configs: Iterable[ConfigType]) -> dict[ConfigType, Store] :
 		keys = list(configs)
 
 		if not keys :
 			return { }
 
-		cached = await KVS.get_many_async(keys)
+		cached = await KVS.get_many_async(keys, Store)
+		found: dict[ConfigType, Store] = { }
 		misses: list[ConfigType] = []
 
-		for k, v in list(cached.items()) :
-			if v is not Undefined :
+		for k, v in cached.items() :
+			if isinstance(v, Store) :
+				found[k] = v
 				continue
 
 			misses.append(k)
-			del cached[k]
 
 		if not misses :
-			return cached
+			return found
 
 		data: Optional[list[tuple[str, bytes]]] = await self.query_async("""
 			SELECT key, bytes
@@ -111,63 +91,61 @@ class Configs(SqlInterface) :
 			raise NotFound('no data was found for the provided config.')
 
 		for k, v in data :
-			v: bytes = bytes(v)
-			assert v[:2] == AvroMarker
-
 			config: ConfigType = ConfigType(k)
-			deserializer: AvroDeserializer = AvroDeserializer(
-				read_model  = self.SerializerTypeMap[config],
-				write_model = await Configs.getSchema(v[2:10]),
-			)
-			value = cached[config] = deserializer(v[10:])
-			ensure_future(KVS.put_async(config, value))
+			value = found[config] = await self.SerializerTypeMap[config].deserialize(bytes(v))
+			create_task(KVS.put_async(config, value))
 
-		return cached
+		return found
 
 
 	async def allConfigs(self: Self) -> ConfigsResponse :
-		funds = ensure_future(self.getFunding())
-		configs = await self.getConfigs(self.SerializerTypeMap.keys())
+		funds = create_task(self.getFunding())
+		configs = await self.getConfigs([
+			ConfigType.banner,
+			ConfigType.costs,
+		])
+		banner = configs[ConfigType.banner]
+		assert isinstance(banner, BannerStore), f'banner is not the expected type of BannerStore, got: {type(banner)}'
+		costs  = configs[ConfigType.costs]
+		assert isinstance(costs, CostsStore), f'costs is not the expected type of CostsStore, got: {type(costs)}'
 		return ConfigsResponse(
-			banner  = configs[ConfigType.banner].banner,
+			banner  = banner.banner,
 			funding = Funding(
 				funds = await funds,
-				costs = configs[ConfigType.costs].costs,
+				costs = costs.costs,
 			),
 		)
 
 
 	@HttpErrorHandler('updating config')
-	async def updateConfig(self, user: KhUser, config: ConfigType, value: BaseModel) -> None :
-		serializer: tuple[AvroSerializer, bytes] = self.Serializers[config]
-		data: bytes = AvroMarker + serializer[1] + serializer[0](value)
+	async def updateConfig(self: Self, user: KhUser, config: Store) -> None :
 		await self.query_async("""
-			INSERT INTO kheina.public.configs
+			insert into kheina.public.configs
 			(key, bytes, updated_by)
-			VALUES
-			(%s, %s, %s)
-			ON CONFLICT ON CONSTRAINT configs_pkey DO 
-				UPDATE SET
-					updated = now(),
-					bytes = %s,
-					updated_by = %s;
-			""",
-			(
-				config, data, user.user_id,
-				data, user.user_id,
+			values
+			( %s,    %s,         %s)
+			on conflict on constraint configs_pkey do 
+				update set
+					updated    = now(),
+					bytes      = excluded.bytes,
+					updated_by = excluded.updated_by
+				where key = excluded.key;
+			""", (
+				config.key(),
+				await config.serialize(),
+				user.user_id,
 			),
-			commit=True,
+			commit = True,
 		)
-		print(config, value)
-		await KVS.put_async(config, value)
+		await KVS.put_async(config.key(), config)
 
 
 	@staticmethod
-	def _validateColors(css_properties: Optional[dict[CssProperty, str]]) -> Optional[dict[str, str | int]] :
+	def _validateColors(css_properties: Optional[dict[CssProperty, str]]) -> Optional[dict[str, CssValue | int | str]] :
 		if not css_properties :
 			return None
 
-		output: dict[str, str | int] = { }
+		output: dict[str, CssValue | int | str] = { }
 
 		# color input is very strict
 		for prop, value in css_properties.items() :
@@ -197,8 +175,8 @@ class Configs(SqlInterface) :
 
 			else :
 				c: str = match.group('var').replace('-', '_')
-				if c in CssProperty._member_map_ :
-					output[color.value] = c
+				if c in CssValue._member_map_ :
+					output[color.value] = CssValue(c)
 
 				else :
 					raise BadRequest(f'{value} is not a valid color. value must be in the form "#xxxxxx", "#xxxxxxxx", or the name of another color variable (without the preceding deshes)')
@@ -207,61 +185,128 @@ class Configs(SqlInterface) :
 
 
 	@HttpErrorHandler('saving user config')
-	async def setUserConfig(self, user: KhUser, value: UserConfigRequest) -> None :
-		user_config: UserConfig = UserConfig(
-			blocking_behavior=value.blocking_behavior,
-			blocked_tags=list(map(list, value.blocked_tags)) if value.blocked_tags else None,
-			# TODO: internal tokens need to be added so that we can convert handles to user ids
-			blocked_users=None,
-			wallpaper=value.wallpaper,
-			css_properties=Configs._validateColors(value.css_properties),
-		)
+	async def setUserConfig(
+		self:              Self,
+		user:              KhUser,
+		blocking_behavior: BlockingBehavior       | None                  = None,
+		blocked_tags:      list[set[str]]         | None                  = None,
+		blocked_users:     list[str]              | None                  = None,
+		wallpaper:         PostId                 | None | Literal[False] = False,
+		css_properties:    dict[CssProperty, str] | None | Literal[False] = False,
+	) -> None :
+		stores: list[Store] = []
 
-		data: bytes = AvroMarker + self.UserConfigFingerprint + UserConfigSerializer(user_config)
-		config_key: str = UserConfigKeyFormat.format(user_id=user.user_id)
-		await self.query_async("""
-			INSERT INTO kheina.public.configs
-			(key, bytes, updated_by)
-			VALUES
-			(%s, %s, %s)
-			ON CONFLICT ON CONSTRAINT configs_pkey DO 
-				UPDATE SET
-					updated = now(),
-					bytes = %s,
-					updated_by = %s;
-			""", (
-				config_key, data, user.user_id,
-				data, user.user_id,
-			),
-			commit=True,
-		)
+		if blocking_behavior :
+			stores.append(BlockBehavior(
+				behavior = blocking_behavior,
+			))
 
-		await KVS.put_async(config_key, user_config)
+		if blocked_tags is not None or blocked_users is not None :
+			blocking = await self._getUserConfig(user.user_id, Blocking)
 
+			if blocked_tags is not None :
+				blocking.tags = list(map(list, blocked_tags))
 
-	@AerospikeCache('kheina', 'configs', UserConfigKeyFormat, _kvs=KVS)
-	async def _getUserConfig(self, user_id: int) -> UserConfig :
-		data: list[bytes] = await self.query_async("""
-			SELECT bytes
-			FROM kheina.public.configs
-			WHERE key = %s;
+			if blocked_users is not None :
+				blocking.users = list((await users._handles_to_user_ids(blocked_users)).values())
+
+				if len(blocking.users) != len(blocked_users) :
+					raise BadRequest('could not find users for some or all of the provided handles')
+
+			stores.append(blocking)
+
+		if wallpaper is not False or css_properties is not False :
+			theme = await self._getUserConfig(user.user_id, Theme)
+
+			if wallpaper is not False :
+				theme.wallpaper = wallpaper
+
+			if css_properties is not False :
+				theme.css_properties = self._validateColors(css_properties)
+
+			stores.append(theme)
+
+		if not stores :
+			raise BadRequest('must submit at least one config to update')
+
+		query: list[str] = []
+		params: list[int | str | bytes] = []
+
+		for store in stores :
+			query.append('(%s, %s, %s, %s)')
+			params += [
+				user.user_id,
+				store.key(),
+				store.type_(),
+				await store.serialize(),
+			]
+
+		await self.query_async(f"""
+			insert into kheina.public.user_configs
+			(user_id, key, type, data)
+			values
+			{','.join(query)}
+			on conflict on constraint user_configs_pkey do 
+				update set
+					type = excluded.type,
+					data = excluded.data
+				where user_configs.user_id = excluded.user_id
+					and user_configs.key = excluded.key;
 			""",
-			(UserConfigKeyFormat.format(user_id=user_id),),
-			fetch_one=True,
+			tuple(params),
+			commit = True,
+		)
+
+		for store in stores :
+			create_task(KVS.put_async(
+				UserConfigKeyFormat.format(
+					user_id = user.user_id,
+					key     = store.key(),
+				),
+				store,
+			))
+
+
+	async def _getUserConfig[T: Store](self: Self, user_id: int, type_: type[T]) -> T :
+		try :
+			return await KVS.get_async(
+				UserConfigKeyFormat.format(
+					user_id = user_id,
+					key     = type_.key(),
+				),
+				type = type_,
+			)
+
+		except aerospike.exception.RecordNotFound :
+			pass
+
+		data: list[bytes] = await self.query_async("""
+			select data
+			from kheina.public.user_configs
+			where user_id = %s
+				and key = %s;
+			""", (
+				user_id,
+				type_.key(),
+			),
+			fetch_one = True,
 		)
 
 		if not data :
-			return UserConfig()
+			return type_()
 
-		value: bytes = bytes(data[0])
-		assert value[:2] == AvroMarker
-
-		deserializer: AvroDeserializer[UserConfig] = AvroDeserializer(read_model=UserConfig, write_model=await Configs.getSchema(value[2:10]))
-		return deserializer(value[10:])
+		await KVS.put_async(
+			UserConfigKeyFormat.format(
+				user_id = user_id,
+				key     = type_.key(),
+			),
+			res := await type_.deserialize(data[0]),
+		)
+		return res
 
 
 	@timed
-	async def _getUserOTP(self: Self, user_id: int) -> Optional[list[OTP]] :
+	async def _getUserOTP(self: Self, user_id: int) -> list[OTP] :
 		data: list[tuple[datetime, str]] = await self.query_async("""
 			select created, 'totp'
 			from kheina.auth.otp
@@ -273,7 +318,7 @@ class Configs(SqlInterface) :
 		)
 
 		if not data :
-			return None
+			return []
 
 		return [
 			OTP(
@@ -285,35 +330,55 @@ class Configs(SqlInterface) :
 
 
 	@HttpErrorHandler('retrieving user config')
-	async def getUserConfig(self, user: KhUser) -> UserConfigResponse :
-		user_config: UserConfig = await self._getUserConfig(user.user_id)
-
-		return UserConfigResponse(
-			blocking_behavior = user_config.blocking_behavior,
-			blocked_tags      = list(map(set, user_config.blocked_tags)) if user_config.blocked_tags else [],
-			# TODO: convert user ids to handles
-			blocked_users = None,
-			wallpaper     = user_config.wallpaper.decode() if user_config.wallpaper else None,
-			otp           = await self._getUserOTP(user.user_id),
+	@timed
+	async def getUserConfig(self: Self, user: KhUser) -> UserConfigResponse :
+		data: list[tuple[str, int, bytes]] = await self.query_async("""
+				select key, type, data
+				from kheina.public.user_configs
+				where user_configs.user_id = %s;
+			""", (
+				user.user_id,
+			),
+			fetch_all = True,
 		)
+
+		res = UserConfigResponse()
+		otp: Task[list[OTP]] = create_task(self._getUserOTP(user.user_id))
+		if data :
+			for key, type_, value in data :
+				t: type[Store] = Configs.SerializerTypeMap[UserConfigType(type_)]
+				match v := await t.deserialize(value) :
+					case BlockBehavior() :
+						res.blocking_behavior = v.behavior
+
+					case Blocking() :
+						res.blocked_tags = v.tags
+						res.blocked_users = [i.handle for i in (await users._get_users(v.users)).values()]
+
+					case Theme() :
+						if v.wallpaper or v.css_properties :
+							res.theme = v
+
+		res.otp = await otp
+		return res
 
 
 	@HttpErrorHandler('retrieving custom theme')
-	async def getUserTheme(self, user: KhUser) -> str :
-		user_config: UserConfig = await self._getUserConfig(user.user_id)
+	async def getUserTheme(self: Self, user: KhUser) -> str :
+		theme: Theme = await self._getUserConfig(user.user_id, Theme)
 
-		if not user_config.css_properties :
+		if not theme.css_properties :
 			return ''
 
 		css_properties: str = ''
 
-		for key, value in user_config.css_properties.items() :
+		for key, value in theme.css_properties.items() :
 			name = key.replace("_", "-")
 
 			if isinstance(value, int) :
 				css_properties += f'--{name}:#{value:08x} !important;'
 
-			elif isinstance(value, CssProperty) :
+			elif isinstance(value, CssValue) :
 				css_properties += f'--{name}:var(--{value.value.replace("_", "-")}) !important;'
 
 			else :

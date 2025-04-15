@@ -11,7 +11,7 @@ from shared.maps import privacy_map
 from shared.models import PostId
 from shared.models._shared import InternalUser, UserPortable
 from shared.sql import SqlInterface
-from users.repository import Users
+from users.repository import Repository as Users
 
 from .models import Emoji, InternalEmoji
 

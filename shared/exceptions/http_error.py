@@ -127,26 +127,26 @@ def HttpErrorHandler(message: str, exclusions: Iterable[str] = ['self'], handler
 
 				match e :
 					case NotImplementedError() :
-						raise NotImplemented(  # noqa: F901
+						raise NotImplemented(
 							f'{message} has not been implemented.',
-							refid = refid,
+							refid   = refid,
 							logdata = logdata,
-							err = e,
+							err     = e,
 						)
 
 					case ClientError() :
 						raise ServiceUnavailable(
 							f'{ServiceUnavailable.__name__}: received an invalid response from an upstream server while {message}.',
-							refid = refid,
+							refid   = refid,
 							logdata = logdata,
-							err = e,
+							err     = e,
 						)
 
 				raise InternalServerError(
 					f'an unexpected error occurred while {message}.',
-					refid = refid,
+					refid   = refid,
 					logdata = logdata,
-					err = e,
+					err     = e,
 				)
 
 		markcoroutinefunction(wrapper)

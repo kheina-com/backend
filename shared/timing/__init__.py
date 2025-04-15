@@ -54,6 +54,34 @@ class Execution :
 			')'
 		)
 
+	@staticmethod
+	def parse(json: dict[str, dict[str, int | float | dict]]) -> 'Execution' :
+		assert len(json) == 1
+		k, v = json.items().__iter__().__next__()
+		return Execution(
+			name = k,
+		)._parse(
+			v,
+		)
+
+	def _parse(self: Self, json: dict[str, int | float | dict]) -> 'Execution' :
+		for k, v in json.items() :
+			match v :
+				case float() :
+					self.total = Time(v)
+
+				case int() :
+					self.count = v
+
+				case _ :
+					self.nested[k] = Execution(
+						name = k,
+					)._parse(
+						v,
+					)
+
+		return self
+
 	def record(self: Self, time: float) :
 		self.total = Time(self.total + time)
 		self.count += 1

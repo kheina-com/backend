@@ -6,15 +6,15 @@ from shared.auth import Scope, deactivateAuthToken
 from shared.config.constants import environment
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest
-from shared.server import Request
+from shared.models.server import Request
 
 from .account import Account, auth
 from .models import ChangeHandle, CreateAccountRequest, FinalizeAccountRequest, OtpFinalizeRequest, OtpRemoveEmailRequest, OtpRemoveRequest, OtpRequest
 
 
 app = APIRouter(
-	prefix='/v1/account',
-	tags=['account'],
+	prefix = '/v1/account',
+	tags   = ['account'],
 )
 account = Account()
 
@@ -108,19 +108,7 @@ async def v1BotLogin(body: BotLoginRequest) -> LoginResponse :
 	return await auth.botLogin(body.token)
 
 
-@app.post('/bot/renew', response_model=BotCreateResponse)
-async def v1BotRenew(req: Request) -> BotCreateResponse :
-	await req.user.verify_scope(Scope.internal)
-	return await auth.createBot(req.user, BotType.internal)
-
-
 @app.get('/bot/create', response_model=BotCreateResponse)
 async def v1BotCreate(req: Request) -> BotCreateResponse :
 	await req.user.verify_scope(Scope.user)
 	return await auth.createBot(req.user, BotType.bot)
-
-
-@app.get('/bot/internal', response_model=BotCreateResponse)
-async def v1BotCreateInternal(req: Request) -> BotCreateResponse :
-	await req.user.verify_scope(Scope.admin)
-	return await auth.createBot(req.user, BotType.internal)

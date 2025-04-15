@@ -7,6 +7,7 @@ from time import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Self, Tuple
 from uuid import UUID, uuid4
 
+import aerospike
 import pyotp
 import ujson as json
 from argon2 import PasswordHasher as Argon2
@@ -26,7 +27,7 @@ from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, Conflict, FailedLogin, HttpError, InternalServerError, NotFound, UnprocessableEntity
 from shared.hashing import Hashable
 from shared.models import InternalUser
-from shared.models.auth import AuthState, AuthToken, KhUser, Scope, TokenMetadata
+from shared.models.auth import AuthState, AuthToken, Scope, TokenMetadata, _KhUser
 from shared.sql import SqlInterface
 from shared.timing import timed
 from shared.utilities.json import json_stream
@@ -89,7 +90,18 @@ Access method: heap
 
 BotLoginSerializer: AvroSerializer = AvroSerializer(BotLogin)
 BotLoginDeserializer: AvroDeserializer = AvroDeserializer(BotLogin)
+token_kvs: KeyValueStore = KeyValueStore('kheina', 'token')
 
+try :
+	KeyValueStore._client.index_integer_create(  # type: ignore
+		'kheina',
+		'token',
+		'user_id',
+		'kheina_token_user_id_idx',
+	)
+
+except aerospike.exception.IndexFoundError :
+	pass
 
 class BotTypeMap(SqlInterface):
 	@AsyncLRU(maxsize=0)
@@ -130,7 +142,6 @@ bot_type_map: BotTypeMap = BotTypeMap()
 class Authenticator(SqlInterface, Hashable) :
 
 	EmailRegex = re_compile(r'^(?P<user>[A-Z0-9._%+-]+)@(?P<domain>[A-Z0-9.-]+\.[A-Z]{2,})$', flags=IGNORECASE)
-	KVS: KeyValueStore
 
 	def __init__(self) :
 		Hashable.__init__(self)
@@ -150,9 +161,6 @@ class Authenticator(SqlInterface, Hashable) :
 			'end': 0,
 			'id': 0,
 		}
-
-		if not getattr(Authenticator, 'KVS', None) :
-			Authenticator.KVS = KeyValueStore('kheina', 'token')
 
 
 	def _validateEmail(self, email: str) -> Dict[str, str] :
@@ -201,18 +209,18 @@ class Authenticator(SqlInterface, Hashable) :
 			start = self._calc_timestamp(issued)
 			end = start + self._key_refresh_interval
 			self._active_private_key = {
-				'key': None,
+				'key':       None,
 				'algorithm': self._token_algorithm,
-				'issued': 0,
-				'start': start,
-				'end': end,
-				'id': 0,
+				'issued':    0,
+				'start':     start,
+				'end':       end,
+				'id':        0,
 			}
 
 			private_key = self._active_private_key['key'] = Ed25519PrivateKey.generate()
 			public_key = private_key.public_key().public_bytes(
-				encoding=serialization.Encoding.DER,
-				format=serialization.PublicFormat.SubjectPublicKeyInfo,
+				encoding = serialization.Encoding.DER,
+				format   = serialization.PublicFormat.SubjectPublicKeyInfo,
 			)
 			signature = private_key.sign(public_key)
 
@@ -237,10 +245,10 @@ class Authenticator(SqlInterface, Hashable) :
 
 			# put the new key into the public keyring
 			self._public_keyring[(self._token_algorithm, key_id)] = {
-				'key': b64encode(public_key).decode(),
+				'key':       b64encode(public_key).decode(),
 				'signature': b64encode(signature).decode(),
-				'issued': pk_issued,
-				'expires': pk_expires,
+				'issued':    pk_issued,
+				'expires':   pk_expires,
 			}
 
 		guid: UUID = uuid4()
@@ -255,16 +263,22 @@ class Authenticator(SqlInterface, Hashable) :
 		])
 
 		token_info: TokenMetadata = TokenMetadata(
-			version=self._token_version.encode(),
-			state=AuthState.active,
-			issued=datetime.fromtimestamp(issued),
-			expires=datetime.fromtimestamp(expires),
-			key_id=key_id,
-			user_id=user_id,
-			algorithm=self._token_algorithm,
-			fingerprint=token_data.get('fp', '').encode(),
+			version     = self._token_version.encode(),
+			state       = AuthState.active,
+			issued      = datetime.fromtimestamp(issued),
+			expires     = datetime.fromtimestamp(expires),
+			key_id      = key_id,
+			user_id     = user_id,
+			algorithm   = self._token_algorithm,
+			fingerprint = token_data.get('fp', '').encode(),
 		)
-		await Authenticator.KVS.put_async(guid.bytes, token_info, ttl or self._token_expires_interval)
+		await token_kvs.put_async(
+			guid.bytes,
+			token_info,
+			ttl or self._token_expires_interval,
+			# additional bins for querying active logins
+			{ 'user_id': user_id },
+		)
 
 		version = self._token_version.encode()
 		content = b64encode(version) + b'.' + b64encode(load)
@@ -272,12 +286,12 @@ class Authenticator(SqlInterface, Hashable) :
 		token = content + b'.' + b64encode(signature)
 
 		return TokenResponse(
-			version=self._token_version,
-			algorithm=self._token_algorithm, # type: ignore
-			key_id=key_id,
-			issued=issued, # type: ignore
-			expires=expires, # type: ignore
-			token=token.decode(),
+			version   = self._token_version,
+			algorithm = self._token_algorithm, # type: ignore
+			key_id    = key_id,
+			issued    = issued, # type: ignore
+			expires   = expires, # type: ignore
+			token     = token.decode(),
 		)
 
 
@@ -440,7 +454,7 @@ class Authenticator(SqlInterface, Hashable) :
 		)
 
 
-	async def createBot(self, user: KhUser, bot_type: BotType) -> BotCreateResponse :
+	async def createBot(self, user: _KhUser, bot_type: BotType) -> BotCreateResponse :
 		if type(bot_type) is not BotType :
 			# this should never run, thanks to pydantic/fastapi. just being extra careful.
 			raise BadRequest('bot_type must be a BotType value.')
@@ -709,11 +723,11 @@ class Authenticator(SqlInterface, Hashable) :
 			raise InternalServerError('an error occurred during user creation.', logdata={ 'refid': refid })
 
 
-	async def create_otp(self: Self, user: KhUser) -> str :
+	async def create_otp(self: Self, user: _KhUser) -> str :
 		return pyotp.random_base32()
 
 
-	async def add_otp(self: Self, user: KhUser, email: str, otp_secret: str, otp: str) -> OtpAddedResponse :
+	async def add_otp(self: Self, user: _KhUser, email: str, otp_secret: str, otp: str) -> OtpAddedResponse :
 		if not pyotp.TOTP(otp_secret).verify(otp) :
 			raise BadRequest('failed to add OTP', email=email, user=user)
 

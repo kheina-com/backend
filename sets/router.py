@@ -1,8 +1,7 @@
 from fastapi import APIRouter
-from pydantic import conint
 
 from shared.models._shared import PostId
-from shared.server import Request
+from shared.models.server import Request
 from shared.timing import timed
 
 from .models import AddPostToSetRequest, CreateSetRequest, PostSet, Set, SetId, UpdateSetRequest

@@ -12,7 +12,7 @@ from shared.models import InternalUser, Undefined
 from shared.sql import SqlInterface
 from shared.timing import timed
 from shared.utilities import flatten
-from users.repository import Users
+from users.repository import Repository as Users
 
 from .models import InternalTag, Tag, TagGroup, TagGroups, TagPortable
 
@@ -23,7 +23,7 @@ BlockingKVS: KeyValueStore = KeyValueStore('kheina', 'blocking', local_TTL=30)
 users = Users()
 
 
-class Tags(SqlInterface) :
+class Repository(SqlInterface) :
 
 	# TODO: figure out a way that we can increase this TTL (updating inheritance won't be reflected in cache)
 	@timed
@@ -138,11 +138,15 @@ class Tags(SqlInterface) :
 		"""
 
 		counts = await CountKVS.get_many_async(tags)
+		found: dict[str, int] = { }
 		for k, v in counts.items() :
-			if v is Undefined :
-				counts[k] = await self._populate_tag_cache(k)
+			if isinstance(v, int) :
+				found[k] = v
 
-		return counts
+			else :
+				found[k] = await self._populate_tag_cache(k)
+
+		return found
 
 
 	async def _get_tag_count(self, tag: str) -> int :

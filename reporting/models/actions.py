@@ -32,8 +32,7 @@ class ActionType(Enum) :
 
 
 # these two enums must contain the same values
-assert set(InternalActionType.__members__.keys()) == set(ActionType.__members__.keys())
-assert set(InternalActionType.__members__.keys()) == set(map(lambda x : x.value, ActionType.__members__.values()))
+assert set(InternalActionType.__members__.keys()) == set(ActionType.__members__.keys()) == set(map(lambda x : x.value, ActionType.__members__.values()))
 
 
 class InternalModAction(BaseModel) :

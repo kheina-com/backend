@@ -4,28 +4,27 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import copy
 from functools import partial
 from time import time
-from typing import Any, Iterable, Optional, Set, Tuple, Type, TypeVar, Union
+from typing import Any, Callable, Iterable, Optional, Self, Union
 
 import aerospike
 
 from ..config.constants import environment
 from ..config.credentials import fetch
-from ..models import Undefined
+from ..models._shared import Undefined
 from ..timing import timed
 from ..utilities import __clear_cache__, coerse
 
 
-T = TypeVar('T')
 KeyType = Union[str, bytes, int]
 
 class KeyValueStore :
 
 	_client = None
 
-	def __init__(self: 'KeyValueStore', namespace: str, set: str, local_TTL: float = 1) :
+	def __init__(self: Self, namespace: str, set: str, local_TTL: float = 1) :
 		if not KeyValueStore._client and not environment.is_test() :
 			config = {
-				'hosts': fetch('aerospike.hosts', list[Tuple[str, int]]),
+				'hosts': fetch('aerospike.hosts', list[tuple[str, int]]),
 				'policies': fetch('aerospike.policies', dict[str, Any]),
 			}
 			KeyValueStore._client = aerospike.client(config).connect()
@@ -39,14 +38,17 @@ class KeyValueStore :
 
 
 	@timed
-	def put(self: 'KeyValueStore', key: KeyType, data: Any, TTL: int = 0) :
-		KeyValueStore._client.put( # type: ignore
+	def put(self: Self, key: KeyType, data: Any, TTL: int = 0, bins: dict[str, Any] = { }) -> None :
+		KeyValueStore._client.put(  # type: ignore
 			(self._namespace, self._set, key),
-			{ 'data': data },
-			meta={
+			{
+				'data': data,
+				**bins,
+			},
+			meta = {
 				'ttl': TTL,
 			},
-			policy={
+			policy = {
 				'max_retries': 3,
 			},
 		)
@@ -54,16 +56,21 @@ class KeyValueStore :
 
 
 	@timed
-	async def put_async(self: 'KeyValueStore', key: KeyType, data: Any, TTL: int = 0) :
+	async def put_async(self: Self, key: KeyType, data: Any, TTL: int = 0, bins: dict[str, Any] = { }) -> None :
 		with ThreadPoolExecutor() as threadpool :
-			return await get_event_loop().run_in_executor(threadpool, partial(self.put, key, data, TTL))
+			return await get_event_loop().run_in_executor(threadpool, partial(self.put, key, data, TTL, bins))
 
 
-	def _get(self: 'KeyValueStore', key: KeyType, type: Optional[Type[T]] = None) -> T :
+	def _get[T](self: Self, key: KeyType, type: Optional[type[T]] = None) -> T :
 		if key in self._cache :
 			return copy(self._cache[key][1])
 
-		_, _, data = KeyValueStore._client.get((self._namespace, self._set, key)) # type: ignore
+		try :
+			_, _, data = KeyValueStore._client.get((self._namespace, self._set, key)) # type: ignore
+		
+		except aerospike.exception.RecordNotFound :
+			raise aerospike.exception.RecordNotFound(f'Record not found: {(self._namespace, self._set, key)}')
+
 		self._cache[key] = (time() + self._local_TTL, data['data'])
 
 		if type :
@@ -73,35 +80,33 @@ class KeyValueStore :
 
 
 	@timed
-	def get(self: 'KeyValueStore', key: KeyType, type: Optional[Type[T]] = None) -> T :
+	def get[T](self: Self, key: KeyType, type: Optional[type[T]] = None) -> T :
 		__clear_cache__(self._cache, time)
 		return self._get(key, type)
 
 
 	@timed
-	async def get_async(self: 'KeyValueStore', key: KeyType, type: Optional[Type[T]] = None) -> T :
+	async def get_async[T](self: Self, key: KeyType, type: Optional[type[T]] = None) -> T :
 		async with self._get_lock :
 			__clear_cache__(self._cache, time)
 
 		with ThreadPoolExecutor() as threadpool :
-			try :
-				return await get_event_loop().run_in_executor(threadpool, partial(self._get, key, type))
-
-			except aerospike.exception.RecordNotFound :
-				raise aerospike.exception.RecordNotFound(f'Record not found: {(self._namespace, self._set, key)}')
+			return await get_event_loop().run_in_executor(threadpool, partial(self._get, key, type))
 
 
-	def _get_many[T: KeyType](self: 'KeyValueStore', k: Iterable[T]) -> dict[T, Any] :
-		keys: dict[T, T] = { v: v for v in k }
-		remote_keys: Set[T] = keys.keys() - self._cache.keys()
+	def _get_many[T, K: KeyType](self: Self, k: Iterable[K], type: Optional[type[T]] = None) -> dict[K, T | type[Undefined]] :
+		# this weird ass dict is so that we can "convert" the returned aerospike keytype back to K
+		keys:        dict[K, K] = { v: v for v in k }
+		remote_keys: set[K]     = keys.keys() - self._cache.keys()
+		values:      dict[K, Any]
 
 		if remote_keys :
 			data: list[Tuple[Any, Any, Any]] = KeyValueStore._client.get_many(list(map(lambda k : (self._namespace, self._set, k), remote_keys))) # type: ignore
-			data_map: dict[T, Any] = { }
+			data_map: dict[K, Any] = { }
 
 			exp: float = time() + self._local_TTL
 			for datum in data :
-				key: T = keys[datum[0][2]]
+				key: K = keys[datum[0][2]]
 
 				# filter on the metadata, since it will always be populated
 				if datum[1] :
@@ -112,7 +117,7 @@ class KeyValueStore :
 				else :
 					data_map[key] = Undefined
 
-			return {
+			values = {
 				**data_map,
 				**{
 					key: copy(self._cache[key][1])
@@ -120,51 +125,64 @@ class KeyValueStore :
 				},
 			}
 
-		# only local cache is required
-		return {
-			key: self._cache[key][1]
-			for key in keys.keys()
-		}
+		else :
+			# only local cache is required
+			values = {
+				key: copy(self._cache[key][1])
+				for key in keys.keys()
+			}
+
+		if type :
+			return {
+				k: coerse(v, type) if v is not Undefined else v
+				for k, v in values.items()
+			}
+
+		return values
 
 
 	@timed
-	def get_many[T: KeyType](self: 'KeyValueStore', keys: Iterable[T]) -> dict[T, Any] :
+	def get_many[T, K: KeyType](self: Self, keys: Iterable[K], type: Optional[type[T]] = None) -> dict[K, T | type[Undefined]] :
 		__clear_cache__(self._cache, time)
-		return self._get_many(keys)
+		return self._get_many(keys, type)
 
 
 	@timed
-	async def get_many_async[T: KeyType](self: 'KeyValueStore', keys: Iterable[T]) -> dict[T, Any] :
+	async def get_many_async[T, K: KeyType](self: Self, keys: Iterable[K], type: Optional[type[T]] = None) -> dict[K, T | type[Undefined]] :
 		async with self._get_many_lock :
 			with ThreadPoolExecutor() as threadpool :
-				return await get_event_loop().run_in_executor(threadpool, partial(self.get_many, keys))
+				return await get_event_loop().run_in_executor(threadpool, partial(self.get_many, keys, type))
 
 
 	@timed
-	def remove(self: 'KeyValueStore', key: KeyType) -> None :
+	def remove(self: Self, key: KeyType) -> None :
+		try :
+			self._client.remove( # type: ignore
+				(self._namespace, self._set, key),
+				policy = {
+					'max_retries': 3,
+				},
+			)
+
+		except aerospike.exception.RecordNotFound :
+			pass
+
 		if key in self._cache :
 			del self._cache[key]
 
-		self._client.remove( # type: ignore
-			(self._namespace, self._set, key),
-			policy={
-				'max_retries': 3,
-			},
-		)
-
 
 	@timed
-	async def remove_async(self: 'KeyValueStore', key: KeyType) -> None :
+	async def remove_async(self: Self, key: KeyType) -> None :
 		with ThreadPoolExecutor() as threadpool :
 			return await get_event_loop().run_in_executor(threadpool, partial(self.remove, key))
 
 
 	@timed
-	def exists(self: 'KeyValueStore', key: KeyType) -> bool :
+	def exists(self: Self, key: KeyType) -> bool :
 		try :
-			_, meta = self._client.exists( # type: ignore
+			_, meta = self._client.exists(  # type: ignore
 				(self._namespace, self._set, key),
-				policy={
+				policy = {
 					'max_retries': 3,
 				},
 			)
@@ -176,10 +194,42 @@ class KeyValueStore :
 
 
 	@timed
-	async def exists_async(self: 'KeyValueStore', key: KeyType) -> bool :
+	async def exists_async(self: Self, key: KeyType) -> bool :
 		with ThreadPoolExecutor() as threadpool :
 			return await get_event_loop().run_in_executor(threadpool, partial(self.exists, key))
 
 
-	def truncate(self: 'KeyValueStore') -> None :
+	@timed
+	def where[T](self: Self, *predicates: aerospike.predicates, type: Optional[type[T]] = None) -> list[T] :
+		results: list[T] = []
+		func:    Callable[[Any], None]
+
+		if type :
+			def func(data: Any) -> None :
+				results.append(coerse(data[2]['data'], type))
+
+		else :
+			def func(data: Any) -> None :
+				results.append(copy(data[2]['data']))
+
+		KeyValueStore._client.query(  # type: ignore
+			self._namespace,
+			self._set,
+		).select(
+			'data',
+		).where(
+			*predicates,
+		).foreach(
+			func,
+		)
+		return results
+
+
+	@timed
+	async def where_async[T](self: Self, *predicates: aerospike.predicates, type: Optional[type[T]] = None) -> list[T] :
+		with ThreadPoolExecutor() as threadpool :
+			return await get_event_loop().run_in_executor(threadpool, partial(self.where, *predicates, type=type))
+
+
+	def truncate(self: Self) -> None :
 		self._client.truncate(self._namespace, self._set, 0) # type: ignore

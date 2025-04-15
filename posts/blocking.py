@@ -1,11 +1,12 @@
-from typing import Dict, Iterable, Self, Set, Tuple
+from typing import Iterable, Optional, Self
 
 from configs.configs import Configs
-from configs.models import UserConfig
+from configs.models import Blocking
 from shared.auth import KhUser
 from shared.caching import ArgsCache
-from shared.models import InternalUser
 from shared.timing import timed
+
+from .models import Rating
 
 
 configs = Configs()
@@ -29,23 +30,29 @@ class BlockTree :
 
 
 	def __init__(self: 'BlockTree') :
-		self.tags: Set[str] = set()
-		self.match: Dict[str, BlockTree] = { }
-		self.nomatch: Dict[str, BlockTree] = { }
+		self.tags: set[str | int] = set()
+		self.match: dict[str | int, BlockTree] = { }
+		self.nomatch: dict[str | int, BlockTree] = { }
 
 
-	def populate(self: Self, tags: Iterable[Iterable[str]]) :
+	def populate(self: Self, tags: Iterable[Iterable[str | int]]) :
 		for tag_set in tags :
 			tree: BlockTree = self
 
 			for tag in tag_set :
 				match = True
 
-				if tag.startswith('-') :
-					match = False
-					tag = tag[1:]
+				if isinstance(tag, str) :
+					if tag.startswith('-') :
+						match = False
+						tag = tag[1:]
 
-				branch: Dict[str, BlockTree]
+				elif isinstance(tag, int) :
+					if tag < 0 :
+						match = False
+						tag *= -1
+
+				branch: dict[str | int, BlockTree]
 
 				if match :
 					if not tree.match :
@@ -65,7 +72,7 @@ class BlockTree :
 				tree = branch[tag]
 
 
-	def blocked(self: Self, tags: Iterable[str]) -> bool :
+	def blocked(self: Self, tags: Iterable[str | int]) -> bool :
 		if not self.match and not self.nomatch :
 			return False
 
@@ -93,27 +100,27 @@ class BlockTree :
 
 
 @ArgsCache(30)
-async def fetch_block_tree(user: KhUser) -> Tuple[BlockTree, UserConfig] :
+async def fetch_block_tree(user: KhUser) -> tuple[BlockTree, Optional[set[int]]] :
 	tree: BlockTree = BlockTree()
 
 	if not user.token :
 		# TODO: create and return a default config
-		return tree, UserConfig()
+		return tree, None
 
-	# TODO: return underlying UserConfig here, once internal tokens are implemented
-	user_config: UserConfig = await configs._getUserConfig(user.user_id)
-	tree.populate(user_config.blocked_tags or [])
-	return tree, user_config
+	config: Blocking = await configs._getUserConfig(user.user_id, Blocking)
+	tree.populate(config.tags or [])
+	return tree, set(config.users) if config.users else None
 
 
 @timed
-async def is_post_blocked(user: KhUser, uploader: InternalUser, tags: Iterable[str]) -> bool :
-	block_tree, user_config = await fetch_block_tree(user)
+async def is_post_blocked(user: KhUser, uploader: int, rating: Rating, tags: Iterable[str]) -> bool :
+	block_tree, blocked_users = await fetch_block_tree(user)
 
-	if user_config.blocked_users and uploader.user_id in user_config.blocked_users :
+	if blocked_users and uploader in blocked_users :
 		return True
 
-	tags: Set[str] = set(tags)
-	tags.add('@' + uploader.handle)  # TODO: user ids need to be added here instead of just handle, once changeable handles are added
+	tags: set[str | int] = set(tags)  # TODO: convert handles to user_ids (int)
+	tags.add(uploader)
+	tags.add(f'rating:{rating.name}')
 
 	return block_tree.blocked(tags)

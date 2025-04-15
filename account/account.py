@@ -13,7 +13,7 @@ from shared.email import Button, sendEmail
 from shared.exceptions.http_error import BadRequest, Conflict, HttpError, HttpErrorHandler, Unauthorized
 from shared.hashing import Hashable
 from shared.models.auth import AuthToken, Scope
-from shared.server import Request
+from shared.models.server import Request
 from shared.sql import SqlInterface
 
 

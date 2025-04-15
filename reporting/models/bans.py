@@ -57,7 +57,7 @@ class InternalIpBan(BaseModel) :
 class Ban(BaseModel) :
 	ban_id:    int
 	ban_type:  BanType
-	user:      Optional[UserPortable]
+	user:      UserPortable
 	created:   datetime
 	completed: datetime
 	reason:    str

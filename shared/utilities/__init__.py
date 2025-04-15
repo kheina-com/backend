@@ -1,9 +1,14 @@
+from asyncio import Task, create_task
 from collections import OrderedDict
+from contextvars import Context
 from math import ceil
 from time import time
-from typing import Any, Callable, Generator, Hashable, Iterable, Optional, Tuple, Type, TypeVar
+from types import CoroutineType
+from typing import Any, Callable, Generator, Hashable, Iterable, Optional, Tuple, Type
+from uuid import UUID
 
 from pydantic import parse_obj_as
+from uuid_extensions import uuid7 as _uuid7
 
 
 def __clear_cache__(cache: OrderedDict[Hashable, Tuple[float, Any]], t: Callable[[], float] = time) -> None :
@@ -73,3 +78,25 @@ def coerse[T](obj: Any, type: Type[T]) -> T :
 	:raises: pydantic.ValidationError on failure
 	"""
 	return parse_obj_as(type, obj)
+
+
+def uuid7() -> UUID :
+	guid = _uuid7()
+	assert isinstance(guid, UUID)
+	return guid
+
+
+background_tasks: set[Task] = set()
+def ensure_future[T](fut: CoroutineType[Any, Any, T], name: str | None = None, context: Context | None = None) -> Task[T] :
+	"""
+	`utilities.ensure_future` differs from `asyncio.ensure_future` in that this utility function stores a strong
+	reference to the created task so that it will not get garbage collected before completion.
+
+	`utilities.ensure_future` should be used whenever a task needs to be completed, but not within the context of
+	a request. Otherwise, `asyncio.create_task` should be used.
+	"""
+	# from https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
+	
+	background_tasks.add(task := create_task(fut, name=name, context=context))
+	task.add_done_callback(background_tasks.discard)
+	return task

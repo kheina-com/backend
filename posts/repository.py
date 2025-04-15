@@ -1,7 +1,6 @@
-from asyncio import Task, ensure_future
+from asyncio import Task, create_task
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import Callable, Mapping, Optional, Self, Tuple, Union
+from typing import Callable, Iterable, Mapping, Optional, Self
 
 from cache import AsyncLRU
 
@@ -11,13 +10,15 @@ from shared.caching.key_value_store import KeyValueStore
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, NotFound
 from shared.maps import privacy_map
-from shared.models import InternalUser, Undefined, UserPortable
+from shared.models import InternalUser, UserPortable
 from shared.sql import SqlInterface
 from shared.sql.query import CTE, Field, Join, JoinType, Operator, Order, Query, Table, Value, Where
 from shared.timing import timed
+from shared.utilities import ensure_future
 from tags.models import InternalTag, Tag, TagGroup
-from tags.repository import TagKVS, Tags
-from users.repository import Users
+from tags.repository import Repository as Tags
+from tags.repository import TagKVS
+from users.repository import Repository as Users
 
 from .blocking import is_post_blocked
 from .models import InternalPost, InternalScore, Media, MediaFlag, MediaType, Post, PostId, PostSize, Privacy, Rating, Score, Thumbnail
@@ -36,7 +37,7 @@ class RatingMap(SqlInterface) :
 	@timed
 	@AsyncLRU(maxsize=0)
 	async def get(self, key: int) -> Rating :
-		data: Tuple[str] = await self.query_async("""
+		data: tuple[str] = await self.query_async("""
 			SELECT rating
 			FROM kheina.public.ratings
 			WHERE ratings.rating_id = %s
@@ -53,7 +54,7 @@ class RatingMap(SqlInterface) :
 	@timed
 	@AsyncLRU(maxsize=0)
 	async def get_id(self, key: str | Rating) -> int :
-		data: Tuple[int] = await self.query_async("""
+		data: tuple[int] = await self.query_async("""
 			SELECT rating_id
 			FROM kheina.public.ratings
 			WHERE ratings.rating = %s
@@ -76,7 +77,7 @@ class MediaTypeMap(SqlInterface) :
 	@timed
 	@AsyncLRU(maxsize=0)
 	async def get(self, key: int) -> MediaType :
-		data: Tuple[str, str] = await self.query_async("""
+		data: tuple[str, str] = await self.query_async("""
 			SELECT file_type, mime_type
 			FROM kheina.public.media_type
 			WHERE media_type.media_type_id = %s
@@ -94,7 +95,7 @@ class MediaTypeMap(SqlInterface) :
 	@timed
 	@AsyncLRU(maxsize=0)
 	async def get_id(self, mime: str) -> int :
-		data: Tuple[int] = await self.query_async("""
+		data: tuple[int] = await self.query_async("""
 			SELECT media_type_id
 			FROM kheina.public.media_type
 			WHERE media_type.mime_type = %s
@@ -110,18 +111,12 @@ class MediaTypeMap(SqlInterface) :
 media_type_map: MediaTypeMap = MediaTypeMap()
 
 
-@dataclass
-class UserCombined:
-	portable: UserPortable
-	internal: InternalUser
-
-
-class Posts(SqlInterface) :
+class Repository(SqlInterface) :
 
 	def parse_response(
 		self: Self,
 		data: list[
-			Tuple[
+			tuple[
 				int,                                                 #  0 post_id
 				str,                                                 #  1 title
 				str,                                                 #  2 description
@@ -148,20 +143,6 @@ class Posts(SqlInterface) :
 			posts: list[InternalPost] = []
 
 			for row in data :
-				# media: Optional[InternalMedia] = None
-				# if row[7] and row[8] and row[16] :
-				# 	media = InternalMedia(
-				# 		post_id  = row[0],
-				# 		filename = row[7],
-				# 		type     = row[8],
-				# 		crc      = row[15],
-				# 		updated  = row[16],
-				# 		size = PostSize(
-				# 			width  = row[9],
-				# 			height = row[10],
-				# 		) if row[9] and row[10] else None,
-				# 	)
-
 				post = InternalPost(
 					post_id     = row[0],
 					title       = row[1],
@@ -176,15 +157,14 @@ class Posts(SqlInterface) :
 						width  = row[9],
 						height = row[10],
 					) if row[9] and row[10] else None,
-					user_id        = row[11],
-					privacy        = row[12],
-					thumbhash      = row[13],
-					locked         = row[14],
-					crc            = row[15],
-					media_updated  = row[16],
-					content_length = row[17],
-					thumbnails     = row[18],  # type: ignore
-
+					user_id            = row[11],
+					privacy            = row[12],
+					thumbhash          = row[13],
+					locked             = row[14],
+					crc                = row[15],
+					media_updated      = row[16],
+					content_length     = row[17],
+					thumbnails         = row[18],  # type: ignore
 					include_in_results = row[19],
 				)
 				posts.append(post)
@@ -195,7 +175,7 @@ class Posts(SqlInterface) :
 
 	def internal_select(self: Self, query: Query) -> Callable[[
 		list[
-			Tuple[
+			tuple[
 				int,                                                 #  0 post_id
 				str,                                                 #  1 title
 				str,                                                 #  2 description
@@ -311,10 +291,45 @@ class Posts(SqlInterface) :
 
 
 	@timed
-	async def parents(self: Self, user: KhUser, ipost: InternalPost) -> Optional[Post] :
-		if not ipost.parent :
-			return None
+	async def _get_posts(self: Self, post_ids: Iterable[PostId]) -> dict[PostId, InternalPost] :
+		if not post_ids :
+			return { }
 
+		cached = await PostKVS.get_many_async(post_ids)
+		found: dict[PostId, InternalPost] = { }
+		misses: list[PostId] = []
+
+		for k, v in cached.items() :
+			if v is None or isinstance(v, InternalPost) :
+				found[k] = v
+				continue
+
+			misses.append(k)
+
+		if not misses :
+			return found
+
+		posts: dict[PostId, InternalPost] = found
+		data: list[InternalPost] = await self.where(
+			InternalPost,
+			Where(
+				Field('internal_posts', 'post_id'),
+				Operator.equal,
+				Value(misses, functions = ['any']),
+			),
+		)
+
+		for post in data :
+			post_id = PostId(post.post_id)
+			ensure_future(PostKVS.put_async(post_id, post))
+			posts[post_id] = post
+
+		return posts
+
+
+	@timed
+	@AerospikeCache('kheina', 'posts', 'parents={parent}', _kvs=PostKVS)
+	async def _parents(self: Self, parent: int) -> list[InternalPost] :
 		cte = Query(
 			Table('post_ids', cte=True),
 		).cte(
@@ -330,7 +345,7 @@ class Posts(SqlInterface) :
 					Where(
 						Field('posts', 'post_id'),
 						Operator.equal,
-						Value(ipost.parent),
+						Value(parent),
 					),
 				).union(
 					Query(
@@ -387,9 +402,16 @@ class Posts(SqlInterface) :
 				),
 			),
 		)
-
 		parser = self.internal_select(query := self.CteQuery(cte))
-		iposts = parser(await self.query_async(query, fetch_all=True))
+		return parser(await self.query_async(query, fetch_all=True))
+
+
+	@timed
+	async def parents(self: Self, user: KhUser, ipost: InternalPost) -> Optional[Post] :
+		if not ipost.parent :
+			return None
+
+		iposts = await self._parents(ipost.parent)
 		posts  = await self.posts(user, iposts)
 		assert len(posts) == 1
 		return posts[0]
@@ -398,18 +420,45 @@ class Posts(SqlInterface) :
 	@timed
 	async def post(self: Self, user: KhUser, ipost: InternalPost) -> Post :
 		post_id:   PostId                  = PostId(ipost.post_id)
-		parent:    Task[Optional[Post]]    = ensure_future(self.parents(user, ipost))
-		upl:       Task[InternalUser]      = ensure_future(users._get_user(ipost.user_id))
-		tags_task: Task[list[InternalTag]] = ensure_future(tagger._fetch_tags_by_post(post_id))
-		score:     Task[Optional[Score]]   = ensure_future(self.getScore(user, post_id))
+		parent:    Task[Optional[Post]]    = create_task(self.parents(user, ipost))
+		upl:       Task[InternalUser]      = create_task(users._get_user(ipost.user_id))
+		tags_task: Task[list[InternalTag]] = create_task(tagger._fetch_tags_by_post(post_id))
+		score:     Task[Optional[Score]]   = create_task(self.getScore(user, post_id))
 
 		uploader:     InternalUser       = await upl
-		upl_portable: Task[UserPortable] = ensure_future(users.portable(user, uploader))
+		upl_portable: Task[UserPortable] = create_task(users.portable(user, uploader))
 		itags:        list[InternalTag]  = await tags_task
-		tags:         Task[list[Tag]]    = ensure_future(tagger.tags(user, itags))
-		blocked:      Task[bool]         = ensure_future(is_post_blocked(user, uploader, [t.name for t in itags]))
+		tags:         Task[list[Tag]]    = create_task(tagger.tags(user, itags))
+		blocked:      Task[bool]         = create_task(is_post_blocked(user, ipost.user_id, await rating_map.get(ipost.rating), (t.name for t in itags)))
 
-		media: Optional[Media] = None
+		post = Post(
+			post_id     = post_id,
+			title       = None,
+			description = None,
+			user        = None,
+			score       = await score,
+			rating      = await rating_map.get(ipost.rating),
+			parent      = await parent,
+			parent_id   = PostId(ipost.parent) if ipost.parent else None,
+			privacy     = await privacy_map.get(ipost.privacy),
+			created     = ipost.created,
+			updated     = ipost.updated,
+			media       = None,
+			tags        = tagger.groups(await tags),
+			blocked     = await blocked,
+			replies     = None,
+		)
+
+		if ipost.locked :
+			post.locked = True
+
+			if not await user.verify_scope(Scope.mod, False) and ipost.user_id != user.user_id :
+				return post  # we don't want any other fields populated
+
+		post.title       = ipost.title
+		post.description = ipost.description
+		post.user        = await upl_portable
+
 		if ipost.filename and ipost.media_type and ipost.size and ipost.content_length and ipost.thumbnails :
 			flags: list[MediaFlag] = []
 
@@ -417,7 +466,7 @@ class Posts(SqlInterface) :
 				if itag.group == TagGroup.system :
 					flags.append(MediaFlag[itag.name])
 
-			media = Media(
+			post.media = Media(
 				post_id    = PostId(ipost.post_id),
 				crc        = ipost.crc,
 				filename   = ipost.filename,
@@ -443,23 +492,7 @@ class Posts(SqlInterface) :
 				],
 			)
 
-		return Post(
-			post_id     = post_id,
-			title       = ipost.title,
-			description = ipost.description,
-			user        = await upl_portable,
-			score       = await score,
-			rating      = await rating_map.get(ipost.rating),
-			parent      = await parent,
-			parent_id   = PostId(ipost.parent) if ipost.parent else None,
-			privacy     = await privacy_map.get(ipost.privacy),
-			created     = ipost.created,
-			updated     = ipost.updated,
-			media       = media,
-			tags        = tagger.groups(await tags),
-			blocked     = await blocked,
-			replies     = None,
-		)
+		return post
 
 
 	@timed
@@ -493,20 +526,22 @@ class Posts(SqlInterface) :
 			return { }
 
 		cached = await ScoreKVS.get_many_async(post_ids)
+		found: dict[PostId, Optional[InternalScore]] = { }
 		misses: list[PostId] = []
 
-		for k, v in list(cached.items()) :
-			if v is not Undefined :
+		for k, v in cached.items() :
+			if v is None or isinstance(v, InternalScore) :
+				found[k] = v
 				continue
 
 			misses.append(k)
-			cached[k] = None
+			found[k] = None
 
 		if not misses :
-			return cached
+			return found
 
-		scores: dict[PostId, Optional[InternalScore]] = cached
-		data: list[Tuple[int, int, int]] = await self.query_async("""
+		scores: dict[PostId, Optional[InternalScore]] = found
+		data: list[tuple[int, int, int]] = await self.query_async("""
 			SELECT
 				post_scores.post_id,
 				post_scores.upvotes,
@@ -519,9 +554,6 @@ class Posts(SqlInterface) :
 			fetch_all = True,
 		)
 
-		if not data :
-			return scores
-
 		for post_id, up, down in data :
 			post_id = PostId(post_id)
 			score: InternalScore = InternalScore(
@@ -530,7 +562,9 @@ class Posts(SqlInterface) :
 				total = up + down,
 			)
 			scores[post_id] = score
-			ensure_future(ScoreKVS.put_async(post_id, score))
+
+		for k, v in scores.items() :
+			ensure_future(ScoreKVS.put_async(k, v))
 
 		return scores
 
@@ -538,7 +572,7 @@ class Posts(SqlInterface) :
 	@timed
 	@AerospikeCache('kheina', 'votes', '{user_id}|{post_id}', _kvs=VoteKVS)
 	async def _get_vote(self: Self, user_id: int, post_id: PostId) -> int :
-		data: Optional[Tuple[bool]] = await self.query_async("""
+		data: Optional[tuple[bool]] = await self.query_async("""
 			SELECT
 				upvote
 			FROM kheina.public.post_votes
@@ -566,20 +600,21 @@ class Posts(SqlInterface) :
 			PostId(k[k.rfind('|') + 1:]): v
 			for k, v in (await VoteKVS.get_many_async([f'{user_id}|{post_id}' for post_id in post_ids])).items()
 		}
+		found: dict[PostId, int] = { }
 		misses: list[PostId] = []
 
-		for k, v in list(cached.items()) :
-			if v is not Undefined :
+		for k, v in cached.items() :
+			if isinstance(v, int) :
+				found[k] = v
 				continue
 
 			misses.append(k)
-			cached[k] = None
 
 		if not misses :
-			return cached
+			return found
 
-		votes: dict[PostId, int] = cached
-		data: list[Tuple[int, int]] = await self.query_async("""
+		votes: dict[PostId, int] = found
+		data: list[tuple[int, int]] = await self.query_async("""
 			SELECT
 				post_votes.post_id,
 				post_votes.upvote
@@ -593,13 +628,12 @@ class Posts(SqlInterface) :
 			fetch_all = True,
 		)
 
-		if not data :
-			return votes
-
 		for post_id, upvote in data :
 			post_id = PostId(post_id)
 			vote: int = 1 if upvote else -1
 			votes[post_id] = vote
+
+		for post_id, vote in votes.items() :
 			ensure_future(VoteKVS.put_async(f'{user_id}|{post_id}', vote))
 
 		return votes
@@ -607,8 +641,8 @@ class Posts(SqlInterface) :
 
 	@timed
 	async def getScore(self: Self, user: KhUser, post_id: PostId) -> Optional[Score] :
-		score_task: Task[Optional[InternalScore]] = ensure_future(self._get_score(post_id))
-		vote: Task[int] = ensure_future(self._get_vote(user.user_id, post_id))
+		score_task: Task[Optional[InternalScore]] = create_task(self._get_score(post_id))
+		vote: Task[int] = create_task(self._get_vote(user.user_id, post_id))
 
 		score = await score_task
 
@@ -668,6 +702,11 @@ class Posts(SqlInterface) :
 
 	@timed
 	async def _vote(self: Self, user: KhUser, post_id: PostId, upvote: Optional[bool]) -> Score :
+		ipost: InternalPost = await self._get_post(post_id)
+
+		if ipost.locked :
+			raise BadRequest('cannot vote on a post that has been locked', post=ipost)
+
 		self._validateVote(upvote)
 		async with self.transaction() as transaction :
 			await transaction.query_async("""
@@ -686,7 +725,7 @@ class Posts(SqlInterface) :
 				),
 			)
 
-			data: Tuple[int, int, datetime] = await transaction.query_async("""
+			data: tuple[int, int, datetime] = await transaction.query_async("""
 				SELECT COUNT(post_votes.upvote), SUM(post_votes.upvote::int), posts.created
 				FROM kheina.public.posts
 					LEFT JOIN kheina.public.post_votes
@@ -751,14 +790,14 @@ class Posts(SqlInterface) :
 
 
 	@timed
-	async def _uploaders(self: Self, user: KhUser, iposts: list[InternalPost]) -> dict[int, UserCombined] :
+	async def _uploaders(self: Self, user: KhUser, iposts: list[InternalPost]) -> dict[int, UserPortable] :
 		"""
 		returns populated user objects for every uploader id provided
 
 		:return: dict in the form user id -> populated User object
 		"""
 		uploader_ids: list[int] = list(set(map(lambda x : x.user_id, iposts)))
-		users_task: Task[dict[int, InternalUser]] = ensure_future(users._get_users(uploader_ids))
+		users_task: Task[dict[int, InternalUser]] = create_task(users._get_users(uploader_ids))
 		following: Mapping[int, Optional[bool]]
 
 		if await user.authenticated(False) :
@@ -770,16 +809,14 @@ class Posts(SqlInterface) :
 		iusers: dict[int, InternalUser] = await users_task
 
 		return {
-			user_id: UserCombined(
-				internal = iuser,
-				portable = UserPortable(
-					name      = iuser.name,
-					handle    = iuser.handle,
-					privacy   = users._validate_privacy(await privacy_map.get(iuser.privacy)),
-					icon      = iuser.icon,
-					verified  = iuser.verified,
-					following = following[user_id],
-				),
+			user_id: 
+				UserPortable(
+				name      = iuser.name,
+				handle    = iuser.handle,
+				privacy   = users._validate_privacy(await privacy_map.get(iuser.privacy)),
+				icon      = iuser.icon,
+				verified  = iuser.verified,
+				following = following[user_id],
 			)
 			for user_id, iuser in iusers.items()
 		}
@@ -805,7 +842,7 @@ class Posts(SqlInterface) :
 			# but put all of them in the dict
 			scores[post_id] = None
 
-		iscores_task: Task[dict[PostId, Optional[InternalScore]]] = ensure_future(self.scores_many(post_ids))
+		iscores_task: Task[dict[PostId, Optional[InternalScore]]] = create_task(self.scores_many(post_ids))
 		user_votes: dict[PostId, int]
 
 		if await user.authenticated(False) :
@@ -836,21 +873,22 @@ class Posts(SqlInterface) :
 
 		cached = {
 			PostId(k[k.rfind('.') + 1:]): v
-			for k, v in (await VoteKVS.get_many_async([f'post.{post_id}' for post_id in post_ids])).items()
+			for k, v in (await TagKVS.get_many_async([f'post.{post_id}' for post_id in post_ids])).items()
 		}
+		found: dict[PostId, list[InternalTag]] = { }
 		misses: list[PostId] = []
 
-		for k, v in list(cached.items()) :
-			if v is not Undefined :
+		for k, v in cached.items() :
+			if isinstance(v, list) and all(map(lambda x : isinstance(x, InternalTag), v)) :
+				found[k] = v
 				continue
 
 			misses.append(k)
-			del cached[k]
 
 		if not misses :
-			return cached
+			return found
 
-		tags: dict[PostId, list[InternalTag]] = defaultdict(list, cached)
+		tags: dict[PostId, list[InternalTag]] = defaultdict(list, found)
 		data: list[tuple[int, str, str, bool, Optional[int]]] = await self.query_async("""
 			SELECT
 				tag_post.post_id,
@@ -881,8 +919,8 @@ class Posts(SqlInterface) :
 				description    = None, # in this case, we don't care about this field
 			))
 
-		for post_id, t in tags.items() :
-			ensure_future(TagKVS.put_async(f'post.{post_id}', t))
+		for post_id in post_ids :
+			ensure_future(TagKVS.put_async(f'post.{post_id}', tags[post_id]))
 
 		return tags
 
@@ -894,14 +932,17 @@ class Posts(SqlInterface) :
 		assign_parents = True will assign any posts found with a matching parent id to the `parent` field of the resulting Post object
 		assign_parents = False will instead assign these posts to the `replies` field of the resulting Post object
 		"""
-		uploaders_task: Task[dict[int, UserCombined]]       = ensure_future(self._uploaders(user, iposts))
-		scores_task:    Task[dict[PostId, Optional[Score]]] = ensure_future(self._scores(user, iposts))
+
+		# TODO: at some point, we should make this even faster by joining the uploaders and tag owners tasks
+
+		uploaders_task: Task[dict[int, UserPortable]]       = create_task(self._uploaders(user, iposts))
+		scores_task:    Task[dict[PostId, Optional[Score]]] = create_task(self._scores(user, iposts))
 
 		tags:      dict[PostId, list[InternalTag]] = await self._tags_many(list(map(lambda x : PostId(x.post_id), iposts)))
-		at_task:   Task[list[Tag]]                 = ensure_future(tagger.tags(user, [t for l in tags.values() for t in l]))
-		uploaders: dict[int, UserCombined]         = await uploaders_task
+		at_task:   Task[list[Tag]]                 = create_task(tagger.tags(user, [t for l in tags.values() for t in l]))
+		uploaders: dict[int, UserPortable]         = await uploaders_task
 		scores:    dict[PostId, Optional[Score]]   = await scores_task
-		all_tags:  dict[str, Tag]                  = {
+		all_tags: dict[str, Tag] = {
 			tag.tag: tag
 			for tag in await at_task
 		}
@@ -928,9 +969,43 @@ class Posts(SqlInterface) :
 				if itag.name in MediaFlag.__members__ :
 					flags.append(MediaFlag[itag.name])
 
-			media: Optional[Media] = None
+			post = all_posts[post_id] = Post(
+				post_id     = post_id,
+				title       = None,
+				description = None,
+				user        = None,
+				score       = scores[post_id],
+				rating      = await rating_map.get(ipost.rating),
+				privacy     = await privacy_map.get(ipost.privacy),
+				media       = None,
+				created     = ipost.created,
+				updated     = ipost.updated,
+				parent_id   = parent_id,
+
+				# only the first call retrieves blocked info, all the rest should be cached and not actually await
+				blocked = await is_post_blocked(user, ipost.user_id, await rating_map.get(ipost.rating), tag_names),
+				tags    = tagger.groups(post_tags)
+			)
+
+			if not assign_parents :
+				# this way, when assign_parents = true, post.replies can be omitted by being unassigned
+				post.replies = []
+
+			if ipost.include_in_results :
+				posts.append(post)
+
+			if ipost.locked :
+				post.locked = True
+
+				if not await user.verify_scope(Scope.mod, False) and ipost.user_id != user.user_id :
+					continue  # we don't want any other fields populated
+
+			post.title       = ipost.title
+			post.description = ipost.description
+			post.user        = uploaders[ipost.user_id]
+
 			if ipost.filename and ipost.media_type and ipost.size and ipost.content_length and ipost.thumbnails :
-				media = Media(
+				post.media = Media(
 					post_id    = post_id,
 					crc        = ipost.crc,
 					filename   = ipost.filename,
@@ -955,31 +1030,6 @@ class Posts(SqlInterface) :
 						) for th in ipost.thumbnails
 					],
 				)
-
-			post = all_posts[post_id] = Post(
-				post_id     = post_id,
-				title       = ipost.title,
-				description = ipost.description,
-				user        = uploaders[ipost.user_id].portable,
-				score       = scores[post_id],
-				rating      = await rating_map.get(ipost.rating),
-				privacy     = await privacy_map.get(ipost.privacy),
-				media       = media,
-				created     = ipost.created,
-				updated     = ipost.updated,
-				parent_id   = parent_id,
-
-				# only the first call retrieves blocked info, all the rest should be cached and not actually await
-				blocked = await is_post_blocked(user, uploaders[ipost.user_id].internal, tag_names),
-				tags    = tagger.groups(post_tags)
-			)
-
-			if not assign_parents :
-				# this way, when assign_parents = true, post.replies can be omitted by being unassigned
-				post.replies = []
-
-			if ipost.include_in_results :
-				posts.append(post)
 
 		if assign_parents :
 			for post_id, parent in parents.items() :
