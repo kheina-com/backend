@@ -7,6 +7,7 @@ from time import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Self, Tuple
 from uuid import UUID, uuid4
 
+import aerospike
 import pyotp
 import ujson as json
 from argon2 import PasswordHasher as Argon2
@@ -90,13 +91,17 @@ Access method: heap
 BotLoginSerializer: AvroSerializer = AvroSerializer(BotLogin)
 BotLoginDeserializer: AvroDeserializer = AvroDeserializer(BotLogin)
 token_kvs: KeyValueStore = KeyValueStore('kheina', 'token')
-KeyValueStore._client.index_integer_create(  # type: ignore
-	'kheina',
-	'token',
-	'user_id',
-	'kheina_token_user_id_idx',
-)
 
+try :
+	KeyValueStore._client.index_integer_create(  # type: ignore
+		'kheina',
+		'token',
+		'user_id',
+		'kheina_token_user_id_idx',
+	)
+
+except aerospike.exception.IndexFoundError :
+	pass
 
 class BotTypeMap(SqlInterface):
 	@AsyncLRU(maxsize=0)

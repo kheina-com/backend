@@ -2,10 +2,11 @@ from typing import Iterable, Optional, Self
 
 from configs.configs import Configs
 from configs.models import Blocking
-from .models import Rating
 from shared.auth import KhUser
 from shared.caching import ArgsCache
 from shared.timing import timed
+
+from .models import Rating
 
 
 configs = Configs()

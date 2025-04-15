@@ -49,8 +49,6 @@ COPY . /app
 RUN chmod +x docker-exec.sh
 
 RUN mkdir "images"
-RUN rm -rf .venv && \
-	rm -rf credentials
 
 RUN wget https://go.dev/dl/go1.22.5.linux-amd64.tar.gz && \
 	tar -xvf go1.22.5.linux-amd64.tar.gz -C /usr/local && \
