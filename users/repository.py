@@ -1,8 +1,6 @@
-from asyncio import ensure_future
 from collections import defaultdict
-from curses.panel import bottom_panel
 from datetime import datetime
-from typing import Iterable, Mapping, Optional, Self, Union
+from typing import Iterable, Mapping, Optional, Self
 
 from cache import AsyncLRU
 
@@ -14,6 +12,7 @@ from shared.maps import privacy_map
 from shared.models import Badge, InternalUser, PostId, Privacy, User, UserPortable, UserPrivacy, Verified
 from shared.sql import SqlInterface
 from shared.timing import timed
+from ..shared.utilities import ensure_future
 
 
 UserKVS:   KeyValueStore = KeyValueStore('kheina', 'users', local_TTL=60)
@@ -397,14 +396,15 @@ class Repository(SqlInterface) :
 			for k, v in (await FollowKVS.get_many_async([f'{user_id}|{t}' for t in targets])).items()
 		}
 		found: dict[int, bool] = { }
-		misses: set[int] = set()
+		misses: list[int] = []
 
 		for k, v in cached.items() :
 			if isinstance(v, bool) :
 				found[k] = v
 				continue
 
-			misses.add(k)
+			found[k] = False
+			misses.append(k)
 
 		if not misses :
 			return found
@@ -427,12 +427,7 @@ class Repository(SqlInterface) :
 		for target, following in data :
 			following = bool(following)
 			return_value[target] = following
-			misses.discard(target)
 			ensure_future(FollowKVS.put_async(f'{user_id}|{target}', following))
-
-		for target in misses :
-			return_value[target] = False
-			ensure_future(FollowKVS.put_async(f'{user_id}|{target}', False))
 
 		return return_value
 

@@ -47,6 +47,7 @@ class Configs(SqlInterface) :
 	}
 
 	@HttpErrorHandler('retrieving patreon campaign info')
+	@timed
 	@AerospikeCache('kheina', 'configs', 'patreon-campaign-funds', TTL_minutes=10, _kvs=KVS)
 	async def getFunding(self) -> int :
 		if environment.is_local() :
@@ -57,6 +58,7 @@ class Configs(SqlInterface) :
 
 
 	@HttpErrorHandler('retrieving config')
+	@timed
 	async def getConfigs(self: Self, configs: Iterable[ConfigType]) -> dict[ConfigType, Store] :
 		keys = list(configs)
 
@@ -98,6 +100,7 @@ class Configs(SqlInterface) :
 		return found
 
 
+	@timed
 	async def allConfigs(self: Self) -> ConfigsResponse :
 		funds = create_task(self.getFunding())
 		configs = await self.getConfigs([
@@ -118,6 +121,7 @@ class Configs(SqlInterface) :
 
 
 	@HttpErrorHandler('updating config')
+	@timed
 	async def updateConfig(self: Self, user: KhUser, config: Store) -> None :
 		await self.query_async("""
 			insert into kheina.public.configs
@@ -140,6 +144,7 @@ class Configs(SqlInterface) :
 		await KVS.put_async(config.key(), config)
 
 
+	@timed
 	@staticmethod
 	def _validateColors(css_properties: Optional[dict[CssProperty, str]]) -> Optional[dict[str, CssValue | int | str]] :
 		if not css_properties :
@@ -185,6 +190,7 @@ class Configs(SqlInterface) :
 
 
 	@HttpErrorHandler('saving user config')
+	@timed
 	async def setUserConfig(
 		self:              Self,
 		user:              KhUser,
@@ -267,6 +273,7 @@ class Configs(SqlInterface) :
 			))
 
 
+	@timed
 	async def _getUserConfig[T: Store](self: Self, user_id: int, type_: type[T]) -> T :
 		try :
 			return await KVS.get_async(
@@ -293,14 +300,17 @@ class Configs(SqlInterface) :
 		)
 
 		if not data :
-			return type_()
+			res = type_()
+
+		else :
+			res = await type_.deserialize(data[0])
 
 		await KVS.put_async(
 			UserConfigKeyFormat.format(
 				user_id = user_id,
 				key     = type_.key(),
 			),
-			res := await type_.deserialize(data[0]),
+			res,
 		)
 		return res
 
@@ -364,6 +374,7 @@ class Configs(SqlInterface) :
 
 
 	@HttpErrorHandler('retrieving custom theme')
+	@timed
 	async def getUserTheme(self: Self, user: KhUser) -> str :
 		theme: Theme = await self._getUserConfig(user.user_id, Theme)
 

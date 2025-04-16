@@ -420,7 +420,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 
 	@timed
-	async def upload_thumbnails(self: Self, run: str, t: Transaction, post_id: PostId, crc: int, image: Image, formats: list[tuple[int, str]]) -> list[InternalThumbnail] :
+	async def upload_thumbnails(self: Self, trace: str, t: Transaction, post_id: PostId, crc: int, image: Image, formats: list[tuple[int, str]]) -> list[InternalThumbnail] :
 		"""
 		formats is a tuple of size and file extension, used to resize each thumbnail and upload it
 		"""
@@ -436,7 +436,7 @@ class Uploader(SqlInterface, B2Interface) :
 			await self.upload_async(data, url, mime)
 			ths.append(await self.insert_thumbnail(t, post_id, mime, size, f'{size}.{ext}', len(data), image.size[0], image.size[1]))
 			self.logger.debug({
-				'run':     run,
+				'trace':   trace,
 				'post':    post_id,
 				'message': f'uploaded thumbnail {mime.name}({size}) image to cdn',
 			})
@@ -447,7 +447,7 @@ class Uploader(SqlInterface, B2Interface) :
 	@timed
 	async def purgeSystemTags(
 		self:    Self,
-		run:     str,
+		trace:   str,
 		t:       Transaction,
 		post_id: PostId,
 	) -> None :
@@ -462,7 +462,7 @@ class Uploader(SqlInterface, B2Interface) :
 			),
 		)
 		self.logger.debug({
-			'run':     run,
+			'trace':   trace,
 			'post':    post_id,
 			'message': 'purged system tags',
 		})
@@ -475,11 +475,11 @@ class Uploader(SqlInterface, B2Interface) :
 		file_on_disk: str,
 		filename:     str,
 		post_id:      PostId,
+		trace:        str,
 		emoji_name:   Optional[str] = None,
 		web_resize:   Optional[int] = None,
 	) -> Media :
 		start: datetime = datetime.now()
-		run:   str      = uuid4().hex
 
 		# validate it's an actual photo
 		try :
@@ -490,7 +490,7 @@ class Uploader(SqlInterface, B2Interface) :
 			raise BadRequest('Uploaded file is not an image.', err=e)
 
 		self.logger.debug({
-			'run':          run,
+			'trace':        trace,
 			'post':         post_id,
 			'elapsed':      datetime.now() - start,
 			'file_on_disk': file_on_disk,
@@ -523,7 +523,7 @@ class Uploader(SqlInterface, B2Interface) :
 		try :
 			post: InternalPost = await posts._get_post(post_id)
 			self.logger.debug({
-				'run':          run,
+				'trace':        trace,
 				'post':         post_id,
 				'elapsed':      datetime.now() - start,
 				'file_on_disk': file_on_disk,
@@ -538,7 +538,7 @@ class Uploader(SqlInterface, B2Interface) :
 				del image
 
 			self.logger.debug({
-				'run':       run,
+				'trace':     trace,
 				'post':      post_id,
 				'elapsed':   datetime.now() - start,
 				'thumbhash': b64encode(thumbhash).decode(),
@@ -568,7 +568,7 @@ class Uploader(SqlInterface, B2Interface) :
 				image_size:   PostSize
 				del data
 
-				await self.purgeSystemTags(run, transaction, post_id)
+				await self.purgeSystemTags(trace, transaction, post_id)
 				await transaction.query_async("""
 					delete from kheina.public.thumbnails
 					where thumbnails.post_id = %s;
@@ -588,7 +588,7 @@ class Uploader(SqlInterface, B2Interface) :
 							f.write(self.get_image_data(image, compress = False))
 
 						self.logger.debug({
-							'run':     run,
+							'trace':   trace,
 							'post':    post_id,
 							'elapsed': datetime.now() - start,
 							'message': 'resized for web',
@@ -658,7 +658,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 					await self.delete_file_async(old_url)
 					self.logger.debug({
-						'run':     run,
+						'trace':   trace,
 						'post':    post_id,
 						'elapsed': datetime.now() - start,
 						'message': 'deleted old file from cdn',
@@ -669,7 +669,7 @@ class Uploader(SqlInterface, B2Interface) :
 				# upload fullsize
 				await self.upload_async(open(file_on_disk, 'rb').read(), url, content_type = mime_type)
 				self.logger.debug({
-					'run':     run,
+					'trace':   trace,
 					'post':    post_id,
 					'elapsed': datetime.now() - start,
 					'message': 'uploaded fullsize image to cdn',
@@ -679,7 +679,7 @@ class Uploader(SqlInterface, B2Interface) :
 				thumbnails: list[InternalThumbnail]
 				with Image(file=open(file_on_disk, 'rb')) as image :
 					thumbnails = await self.upload_thumbnails(
-						run,
+						trace,
 						transaction,
 						post_id,
 						rev,
@@ -1137,9 +1137,9 @@ class Uploader(SqlInterface, B2Interface) :
 		file_on_disk: str,
 		filename:     str,
 		post_id:      PostId,
+		trace:        str,
 	) -> Media :
 		start: datetime = datetime.now()
-		run: str        = uuid4().hex
 
 		# validate it's an actual video
 		try :
@@ -1150,7 +1150,7 @@ class Uploader(SqlInterface, B2Interface) :
 			raise BadRequest('Uploaded file is not a video.', err=e)
 
 		self.logger.debug({
-			'run':          run,
+			'trace':        trace,
 			'post':         post_id,
 			'elapsed':      datetime.now() - start,
 			'file_on_disk': file_on_disk,
@@ -1180,7 +1180,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 			post: InternalPost = await posts._get_post(post_id)
 			self.logger.debug({
-				'run':          run,
+				'trace':        trace,
 				'post':         post_id,
 				'elapsed':      datetime.now() - start,
 				'file_on_disk': file_on_disk,
@@ -1194,7 +1194,7 @@ class Uploader(SqlInterface, B2Interface) :
 				del image
 
 			self.logger.debug({
-				'run':       run,
+				'trace':     trace,
 				'post':      post_id,
 				'elapsed':   datetime.now() - start,
 				'thumbhash': b64encode(thumbhash).decode(),
@@ -1224,7 +1224,7 @@ class Uploader(SqlInterface, B2Interface) :
 				image_size:   PostSize
 				del data
 
-				await self.purgeSystemTags(run, transaction, post_id)
+				await self.purgeSystemTags(trace, transaction, post_id)
 				await transaction.query_async("""
 					delete from kheina.public.thumbnails
 					where thumbnails.post_id = %s;
@@ -1321,7 +1321,7 @@ class Uploader(SqlInterface, B2Interface) :
 					old_url: str = f'{post_id}/{old_crc}/{old_filename}' if old_crc else f'{post_id}/{old_filename}'
 					await self.delete_file_async(old_url)
 					self.logger.debug({
-						'run':     run,
+						'trace':   trace,
 						'post':    post_id,
 						'elapsed': datetime.now() - start,
 						'url':     old_url,
@@ -1332,7 +1332,7 @@ class Uploader(SqlInterface, B2Interface) :
 				url: str = f'{post_id}/{rev}/{filename}'
 				await self.upload_async(open(file_on_disk, 'rb').read(), url, content_type = mime_type)
 				self.logger.debug({
-					'run':     run,
+					'trace':   trace,
 					'post':    post_id,
 					'elapsed': datetime.now() - start,
 					'url':     url,
@@ -1343,7 +1343,7 @@ class Uploader(SqlInterface, B2Interface) :
 				thumbnails: list[InternalThumbnail]
 				with Image(file=open(screenshot, 'rb')) as image :
 					thumbnails = await self.upload_thumbnails(
-						run,
+						trace,
 						transaction,
 						post_id,
 						rev,

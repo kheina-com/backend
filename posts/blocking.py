@@ -99,6 +99,7 @@ class BlockTree :
 		return False
 
 
+@timed
 @ArgsCache(30)
 async def fetch_block_tree(user: KhUser) -> tuple[BlockTree, Optional[set[int]]] :
 	tree: BlockTree = BlockTree()

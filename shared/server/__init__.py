@@ -1,15 +1,12 @@
-from typing import Optional
-
 from fastapi import Request
 
 from ..timing import timed
 
 
-def _trace_tags(*args, **kwargs) -> dict[str, str] :
-	print('==> args:', args, 'kwargs:', kwargs)
-	for arg in list(args) + list(kwargs.values()) :
+def _trace_tags(*_, **kwargs) -> dict[str, str] :
+	for arg in kwargs.values() :
 		if isinstance(arg, Request) and (trace := arg.headers.get('kh-trace')) :
-			return { 'trace': trace }
+			return { 'trace': trace[:32] }
 
 	return { }
 

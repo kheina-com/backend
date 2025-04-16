@@ -5,8 +5,9 @@ from math import ceil
 from time import time
 from types import CoroutineType
 from typing import Any, Callable, Generator, Hashable, Iterable, Optional, Tuple, Type
-from uuid import UUID
+from uuid import UUID, uuid4
 
+from fastapi import Request
 from pydantic import parse_obj_as
 from uuid_extensions import uuid7 as _uuid7
 
@@ -100,3 +101,7 @@ def ensure_future[T](fut: CoroutineType[Any, Any, T], name: str | None = None, c
 	background_tasks.add(task := create_task(fut, name=name, context=context))
 	task.add_done_callback(background_tasks.discard)
 	return task
+
+
+def trace(req: Request) -> str :
+	return (req.headers.get('kh-trace') or uuid4().hex)[:32]

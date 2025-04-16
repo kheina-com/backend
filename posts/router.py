@@ -12,7 +12,8 @@ from shared.exceptions.http_error import UnprocessableDetail, UnprocessableEntit
 from shared.models import Privacy, convert_path_post_id
 from shared.models.auth import Scope
 from shared.models.server import Request
-from shared.timing import timed
+from shared.server import timed
+from shared.utilities import trace
 from shared.utilities.units import Byte
 from users.users import Users
 
@@ -46,50 +47,27 @@ match environment :
 		origin = 'http://localhost:3000'
 
 postExclude = {
-	'thumbnails': {
+	'thumbnails': (th := {
 		'__all__': {
 			'post_id': True,
 			'crc':     True,
 		},
-	},
-	'media': {
+	}),
+	'media': (m := {
 		'post_id':    True,
-		'thumbnails': {
-			'__all__': {
-				'post_id': True,
-				'crc':     True,
-			},
-		},
-	},
-	'__all__': {
-		'media': {
-			'post_id':    True,
-			'thumbnails': {
-				'__all__': {
-					'post_id': True,
-					'crc':     True,
-				},
-			},
-		},
-	},
+		'thumbnails': th,
+	}),
+	'__all__': (a := {
+		'media': m,
+	}),
 	'posts': {
-		'__all__': {
-			'media': {
-				'post_id':    True,
-				'thumbnails': {
-					'__all__': {
-						'post_id': True,
-						'crc':     True,
-					},
-				},
-			},
-		},
+		'__all__': a,
 	},
 }
 
 
 @postRouter.put('', response_model=Post, response_model_exclude=postExclude)
-@timed.root
+@timed.request
 async def v1CreatePost(req: Request, body: UpdateRequest) -> Post :
 	"""
 	only auth required
@@ -156,7 +134,7 @@ async def handleFile(file: UploadFile, post_id: PostId) -> str :
 
 
 @postRouter.post('/image', response_model_exclude=postExclude)
-@timed.root
+@timed.request
 async def v1UploadImage(
 	req:        Request,
 	file:       UploadFile    = File(None),
@@ -180,11 +158,12 @@ async def v1UploadImage(
 		filename     = file.filename,
 		post_id      = PostId(post_id),
 		web_resize   = web_resize,
+		trace        = trace(req),
 	)
 
 
 @postRouter.post('/video', response_model_exclude=postExclude)
-@timed.root
+@timed.request
 async def v1UploadVideo(
 	req:        Request,
 	file:       UploadFile = File(None),
@@ -205,11 +184,12 @@ async def v1UploadVideo(
 		file_on_disk = file_on_disk,
 		filename     = file.filename,
 		post_id      = PostId(post_id),
+		trace        = trace(req),
 	)
 
 
 @postRouter.post('/vote', response_model=Score)
-@timed.root
+@timed.request
 async def v1Vote(req: Request, body: VoteRequest) -> Score :
 	await req.user.verify_scope(Scope.user)
 	vote = True if body.vote > 0 else False if body.vote < 0 else None
@@ -218,7 +198,7 @@ async def v1Vote(req: Request, body: VoteRequest) -> Score :
 
 # TODO: these should go in users tbh
 @postRouter.patch('/icon', status_code=204)
-@timed.root
+@timed.request
 async def v1SetIcon(req: Request, body: IconRequest) -> None :
 	await req.user.authenticated()
 	await uploader.setIcon(req.user, body.post_id, body.coordinates)
@@ -226,53 +206,53 @@ async def v1SetIcon(req: Request, body: IconRequest) -> None :
 
 # TODO: these should go in users tbh
 @postRouter.patch('/banner', status_code=204)
-@timed.root
+@timed.request
 async def v1SetBanner(req: Request, body: IconRequest) -> None :
 	await req.user.authenticated()
 	await uploader.setBanner(req.user, body.post_id, body.coordinates)
 
 
 @postsRouter.post('', response_model=SearchResults, response_model_exclude=postExclude)
-@timed.root
+@timed.request
 async def v1Posts(req: Request, body: FetchPostsRequest) -> SearchResults :
 	return await posts.fetchPosts(req.user, body.sort, body.tags, body.count, body.page)
 
 
 @postRouter.post('/comments', response_model=list[Post], response_model_exclude=postExclude)
-@timed.root
+@timed.request
 async def v1Comments(req: Request, body: FetchCommentsRequest) -> list[Post] :
 	return await posts.fetchComments(req.user, body.post_id, body.sort, body.count, body.page)
 
 
 @postsRouter.post('/user', response_model=SearchResults, response_model_exclude=postExclude)
-@timed.root
+@timed.request
 async def v1UserPosts(req: Request, body: GetUserPostsRequest) -> SearchResults :
 	return await posts.fetchUserPosts(req.user, body.handle, body.count, body.page)
 
 
 @postsRouter.post('/mine', response_model=list[Post], response_model_exclude=postExclude)
-@timed.root
+@timed.request
 async def v1MyPosts(req: Request, body: BaseFetchRequest) -> list[Post] :
 	await req.user.authenticated()
 	return await posts.fetchOwnPosts(req.user, body.sort, body.count, body.page)
 
 
 @postsRouter.get('/drafts', response_model=list[Post], response_model_exclude=postExclude)
-@timed.root
+@timed.request
 async def v1Drafts(req: Request) -> list[Post] :
 	await req.user.authenticated()
 	return await posts.fetchDrafts(req.user)
 
 
 @postsRouter.post('/timeline', response_model=list[Post], response_model_exclude=postExclude)
-@timed.root
+@timed.request
 async def v1TimelinePosts(req: Request, body: TimelineRequest) -> list[Post] :
 	await req.user.authenticated()
 	return await posts.timelinePosts(req.user, body.count, body.page)
 
 
 @postsRouter.get('/feed.rss', response_model=str)
-@timed.root
+@timed.request
 async def v1Rss(req: Request) -> Response :
 	await req.user.verify_scope(Scope.user)
 
@@ -309,7 +289,7 @@ async def v1Rss(req: Request) -> Response :
 
 
 @postRouter.get('/auth/{post_id}', response_model=Privacy)
-@timed.root
+@timed.request
 async def v1Auth(req: Request, post_id: PostId) -> Privacy :
 	"""
 	returns a post's privacy if the token used is able to view a post, otherwise raises not found.
@@ -323,13 +303,13 @@ async def v1Auth(req: Request, post_id: PostId) -> Privacy :
 
 
 @postRouter.get('/{post_id}', response_model=Post, response_model_exclude=postExclude)
-@timed.root
+@timed.request
 async def v1Post(req: Request, post_id: PostId, sort: PostSort = PostSort.hot) -> Post :
 	return await posts.getPost(req.user, convert_path_post_id(post_id), sort)
 
 
 @postRouter.patch('/{post_id}', status_code=204)
-@timed.root
+@timed.request
 async def v1UpdatePost(req: Request, post_id: PostId, body: UpdateRequest) -> None :
 	await req.user.authenticated()
 	await uploader.updatePostMetadata(
@@ -340,7 +320,7 @@ async def v1UpdatePost(req: Request, post_id: PostId, body: UpdateRequest) -> No
 
 
 @postRouter.delete('/{post_id}', status_code=204)
-@timed.root
+@timed.request
 async def v1DeletePost(req: Request, post_id: PostId) -> None :
 	await req.user.authenticated()
 	await uploader.deletePost(req.user, convert_path_post_id(post_id))

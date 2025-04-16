@@ -85,7 +85,7 @@ class MediaTypeMap(SqlInterface) :
 			""", (
 				key,
 			),
-			fetch_one=True,
+			fetch_one = True,
 		)
 		return MediaType(
 			file_type = data[0],
@@ -103,7 +103,7 @@ class MediaTypeMap(SqlInterface) :
 			""", (
 				mime,
 			),
-			fetch_one=True,
+			fetch_one = True,
 		)
 		return data[0]
 
@@ -608,6 +608,7 @@ class Repository(SqlInterface) :
 				found[k] = v
 				continue
 
+			found[k] = 0
 			misses.append(k)
 
 		if not misses :
@@ -883,6 +884,7 @@ class Repository(SqlInterface) :
 				found[k] = v
 				continue
 
+			found[k] = []
 			misses.append(k)
 
 		if not misses :
