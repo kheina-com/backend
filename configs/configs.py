@@ -144,8 +144,8 @@ class Configs(SqlInterface) :
 		await KVS.put_async(config.key(), config)
 
 
-	@timed
 	@staticmethod
+	@timed
 	def _validateColors(css_properties: Optional[dict[CssProperty, str]]) -> Optional[dict[str, CssValue | int | str]] :
 		if not css_properties :
 			return None

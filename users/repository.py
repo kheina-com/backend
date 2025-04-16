@@ -12,7 +12,7 @@ from shared.maps import privacy_map
 from shared.models import Badge, InternalUser, PostId, Privacy, User, UserPortable, UserPrivacy, Verified
 from shared.sql import SqlInterface
 from shared.timing import timed
-from ..shared.utilities import ensure_future
+from shared.utilities import ensure_future
 
 
 UserKVS:   KeyValueStore = KeyValueStore('kheina', 'users', local_TTL=60)
