@@ -8,6 +8,8 @@ from psycopg._encodings import conn_encoding
 from psycopg.abc import AdaptContext
 from psycopg.sql import Composable, Composed
 
+from ..timing import timed
+
 
 _col_regex = compile(r'^\w+$')
 @lru_cache(maxsize=None)
@@ -158,7 +160,7 @@ class Where :
 
 class Table :
 
-	def __init__(self, string: str, alias: Optional[str] = None, cte: bool = False) :
+	def __init__(self: Self, string: str, alias: Optional[str] = None, cte: bool = False) :
 		if not cte :
 			assert string.startswith('kheina.')
 			assert string.count('.') == 2
@@ -210,7 +212,7 @@ class Join :
 
 class Insert :
 
-	def __init__(self, *columns: str) :
+	def __init__(self: Self, *columns: str) :
 		self.columns: tuple[str, ...] = tuple(map(__sanitize__, columns))
 		self._values: list[tuple[Union[Field, Value, 'Query'], ...]] = []
 
@@ -236,7 +238,7 @@ class Insert :
 
 class Update :
 
-	def __init__(self, column: str, value: Value) -> None :
+	def __init__(self: Self, column: str, value: Value) -> None :
 		self.column: str   = __sanitize__(column)
 		self.value:  Value = value
 
@@ -249,7 +251,7 @@ class Update :
 
 class CTE :
 
-	def __init__(self, name: str, query: 'Query', recursive: bool = False) -> None :
+	def __init__(self: Self, name: str, query: 'Query', recursive: bool = False) -> None :
 		self.query:     Query = query
 		self.name:      str   = name
 		self.recursive: bool  = recursive
@@ -268,7 +270,7 @@ class CTE :
 
 class Query(Composable) :
 
-	def __init__(self, *table: Table) -> None :
+	def __init__(self: Self, *table: Table) -> None :
 		for t in table :
 			assert type(t) == Table
 
@@ -289,20 +291,21 @@ class Query(Composable) :
 		self._insert:    Optional[Insert]                     = None
 		self._returning: Optional[tuple[str, ...]]            = None
 
-	def as_string(self, _: Optional[AdaptContext] = None) -> str :
+	def as_string(self: Self, context: Optional[AdaptContext] = None) -> str :
 		return self.__build_query__() + ';'
 
-	def as_bytes(self, context: Optional[AdaptContext] = None) -> bytes :
+	def as_bytes(self: Self, context: Optional[AdaptContext] = None) -> bytes :
 		conn = context.connection if context else None
 		enc  = conn_encoding(conn)
 		return self.as_string().encode(enc)
 
-	def __add__(self, _: Composable) -> Composed :
+	def __add__(self: Self, _: Composable) -> Composed :
 		raise NotImplementedError('don\'t want this')
 
-	def __mul__(self, _: int) -> Composed :
+	def __mul__(self: Self, _: int) -> Composed :
 		raise NotImplementedError('don\'t want this')
 
+	@timed
 	def __build_query__(self: Self) -> str :
 		if self._insert :
 			assert not self._select
@@ -396,9 +399,11 @@ class Query(Composable) :
 			return f'{self._function}(' + self.__build_query__() + ')'
 		return '(' + self.__build_query__() + ')'
 
+	@timed
 	def build(self: Self) -> tuple[str, tuple[Any, ...]] :
 		return self.__build_query__() + ';', tuple(self.params())
 
+	@timed
 	def params(self: Self) -> list[Any] :
 		if self._insert :
 			assert not self._select

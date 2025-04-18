@@ -30,8 +30,9 @@ from shared.timing import timed
 from shared.utilities import ensure_future, flatten, int_from_bytes
 from shared.utilities.units import Byte
 from tags.models import InternalTag
-from tags.repository import CountKVS, TagKVS
+from tags.repository import CountKVS
 from tags.repository import Repository as Tags
+from tags.repository import TagKVS
 from users.repository import Repository as Users
 from users.repository import UserKVS
 
@@ -228,10 +229,9 @@ class Uploader(SqlInterface, B2Interface) :
 	@timed
 	async def createPost(self: Self, user: KhUser) -> Post :
 		async with self.transaction() as t :
-			post_id: PostId
+			post_id: PostId = PostId.generate()
 
 			for _ in range(100) :
-				post_id = PostId.generate()
 				data = await t.query_async("""
 					SELECT count(1) FROM kheina.public.posts WHERE post_id = %s;
 					""", (
@@ -242,6 +242,8 @@ class Uploader(SqlInterface, B2Interface) :
 
 				if not data[0] :
 					break
+
+				post_id = PostId.generate()
 
 			# TODO: double check the final select is necessary here on conflict
 			data: list[str] = await t.query_async("""
@@ -315,8 +317,8 @@ class Uploader(SqlInterface, B2Interface) :
 		if rating :
 			post.rating = await rating_map.get_id(rating)
 
-		internal_post_id: int
 		post_id:          PostId
+		internal_post_id: int  = 0
 		notify:           bool = False
 
 		async with self.transaction() as transaction :

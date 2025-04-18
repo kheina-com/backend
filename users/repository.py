@@ -15,8 +15,8 @@ from shared.timing import timed
 from shared.utilities import ensure_future
 
 
-UserKVS:   KeyValueStore = KeyValueStore('kheina', 'users', local_TTL=60)
-handleKVS: KeyValueStore = KeyValueStore('kheina', 'user_handle_map', local_TTL=60)
+UserKVS:   KeyValueStore = KeyValueStore('kheina', 'users',           local_TTL = 60)
+handleKVS: KeyValueStore = KeyValueStore('kheina', 'user_handle_map', local_TTL = 60)
 FollowKVS: KeyValueStore = KeyValueStore('kheina', 'following')
 
 

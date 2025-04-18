@@ -84,7 +84,7 @@ async def v1CreatePost(req: Request, body: UpdateRequest) -> Post :
 
 
 @timed
-async def handleFile(file: UploadFile, post_id: PostId) -> str :
+async def handleFile(file: Optional[UploadFile], post_id: PostId) -> str :
 	# since it doesn't do this for us, send the proper error back
 	detail: list[UnprocessableDetail] = []
 
@@ -98,7 +98,7 @@ async def handleFile(file: UploadFile, post_id: PostId) -> str :
 			type = 'value_error.missing',
 		))
 
-	if not file.filename :
+	elif not file.filename :
 		detail.append(UnprocessableDetail(
 			loc = [
 				'body',
@@ -122,7 +122,7 @@ async def handleFile(file: UploadFile, post_id: PostId) -> str :
 	if detail :
 		raise UnprocessableEntity(detail=detail)
 
-	assert file.filename
+	assert file and file.filename
 	file_on_disk: str = f'images/{uuid4().hex}_{file.filename}'
 
 	async with aiofiles.open(file_on_disk, 'wb') as f :
@@ -215,7 +215,14 @@ async def v1SetBanner(req: Request, body: IconRequest) -> None :
 @postsRouter.post('', response_model=SearchResults, response_model_exclude=postExclude)
 @timed.request
 async def v1Posts(req: Request, body: FetchPostsRequest) -> SearchResults :
-	return await posts.fetchPosts(req.user, body.sort, body.tags, body.count, body.page)
+	return await posts.fetchPosts(
+		user  = req.user,
+		sort  = body.sort,
+		tags  = body.tags,
+		count = body.count,
+		page  = body.page,
+		trace = trace(req),
+	)
 
 
 @postRouter.post('/comments', response_model=list[Post], response_model_exclude=postExclude)
@@ -227,7 +234,13 @@ async def v1Comments(req: Request, body: FetchCommentsRequest) -> list[Post] :
 @postsRouter.post('/user', response_model=SearchResults, response_model_exclude=postExclude)
 @timed.request
 async def v1UserPosts(req: Request, body: GetUserPostsRequest) -> SearchResults :
-	return await posts.fetchUserPosts(req.user, body.handle, body.count, body.page)
+	return await posts.fetchUserPosts(
+		user   = req.user,
+		handle = body.handle,
+		count  = body.count,
+		page   = body.page,
+		trace  = trace(req),
+	)
 
 
 @postsRouter.post('/mine', response_model=list[Post], response_model_exclude=postExclude)

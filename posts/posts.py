@@ -1,4 +1,5 @@
-from asyncio import Task, ensure_future
+from asyncio import Task, create_task
+from dataclasses import dataclass, field
 from datetime import timedelta
 from math import ceil
 from typing import Iterable, Optional, Self
@@ -19,6 +20,21 @@ from .repository import PostKVS, Repository, privacy_map, rating_map, users  # t
 
 
 sets = Sets()
+
+
+@dataclass
+class ParsedTags :
+	include_tags: list[str] = field(default_factory=list)
+	exclude_tags: list[str] = field(default_factory=list)
+
+	include_users: list[str] = field(default_factory=list)
+	exclude_users: list[str] = field(default_factory=list)
+
+	include_rating: list[Rating] = field(default_factory=list)
+	exclude_rating: list[Rating] = field(default_factory=list)
+
+	include_sets: list[SetId] = field(default_factory=list)
+	exclude_sets: list[SetId] = field(default_factory=list)
 
 
 class Posts(Repository) :
@@ -169,23 +185,13 @@ class Posts(Repository) :
 
 
 	@timed
-	@AerospikeCache('kheina', 'posts', 'results.{sort}.{tags}.{count}.{page}', TTL_minutes=1, local_TTL=60, _kvs=PostKVS)
-	async def _fetch_posts(self: Self, sort: PostSort, tags: Optional[tuple[str, ...]], count: int, page: int) -> list[InternalPost] :
-		idk = { }
+	@alru_cache(maxsize=128)
+	@timed.link
+	async def _parse_tags(self: Self, tags: Optional[tuple[str, ...]]) -> tuple[Query, Optional[PostSort], ParsedTags] :
+		parsed: ParsedTags = ParsedTags()
+		sort: Optional[PostSort] = None
 		cte: Query
-
 		if tags :
-			include_tags = []
-			exclude_tags = []
-
-			include_users = []
-			exclude_users = []
-
-			include_rating = []
-			exclude_rating = []
-
-			include_sets = []
-			exclude_sets = []
 
 			for tag in tags :
 				if exclude := tag.startswith('-') :
@@ -193,15 +199,15 @@ class Posts(Repository) :
 
 				if tag.startswith('@') :
 					tag = tag[1:]
-					(exclude_users if exclude else include_users).append(tag)
+					(parsed.exclude_users if exclude else parsed.include_users).append(tag)
 					continue
 
 				if tag in Rating.__members__.keys() :
-					(exclude_rating if exclude else include_rating).append(Rating[tag])
+					(parsed.exclude_rating if exclude else parsed.include_rating).append(Rating[tag])
 					continue
 
 				if tag.startswith('set:') :
-					(exclude_sets if exclude else include_sets).append(SetId(tag[4:]))
+					(parsed.exclude_sets if exclude else parsed.include_sets).append(SetId(tag[4:]))
 					continue
 
 				if tag.startswith('sort:') :
@@ -213,15 +219,15 @@ class Posts(Repository) :
 
 					continue
 
-				(exclude_tags if exclude else include_tags).append(tag)
+				(parsed.exclude_tags if exclude else parsed.include_tags).append(tag)
 
-			if len(include_users) > 1 :
+			if len(parsed.include_users) > 1 :
 				raise BadRequest('can only search for posts from, at most, one user at a time.')
 
-			if len(include_rating) > 1 :
+			if len(parsed.include_rating) > 1 :
 				raise BadRequest('can only search for posts from, at most, one rating at a time.')
 
-			if include_tags or exclude_tags :
+			if parsed.include_tags or parsed.exclude_tags :
 				cte = Query(
 					Table('kheina.public.tags'),
 				).join(
@@ -259,7 +265,7 @@ class Posts(Repository) :
 					Field('posts', 'post_id'),
 				)
 
-			elif include_users :
+			elif parsed.include_users :
 				# TODO: add relations to user_post and query from there
 				cte = Query(
 					Table('kheina.public.users'),
@@ -307,7 +313,7 @@ class Posts(Repository) :
 					Field('posts', 'post_id'),
 				)
 
-			if include_tags :
+			if parsed.include_tags :
 				cte.where(
 					Where(
 						Field('tags', 'deprecated'),
@@ -317,17 +323,17 @@ class Posts(Repository) :
 					Where(
 						Field('tags', 'tag'),
 						Operator.equal,
-						Value(include_tags, ['any']),
+						Value(parsed.include_tags, ['any']),
 					),
 				).having(
 					Where(
 						Value(1, ['count']),
 						Operator.equal,
-						Value(len(include_tags)),
+						Value(len(parsed.include_tags)),
 					),
 				)
 
-			if exclude_tags :
+			if parsed.exclude_tags :
 				cte.where(
 					Where(
 						Field('posts', 'post_id'),
@@ -351,13 +357,13 @@ class Posts(Repository) :
 							Where(
 								Field('tags', 'tag'),
 								Operator.equal,
-								Value(exclude_tags, ['any']),
+								Value(parsed.exclude_tags, ['any']),
 							),
 						),
 					),
 				)
 
-			if include_users :
+			if parsed.include_users :
 				# TODO: this should be rewritten to use posts and query by user_id directly
 				if cte._table != 'kheina.public.users' :
 					cte.join(
@@ -373,7 +379,7 @@ class Posts(Repository) :
 							Where(
 								Field('lower(users', 'handle)'),
 								Operator.equal,
-								Value(include_users[0], ['lower']),
+								Value(parsed.include_users[0], ['lower']),
 							),
 						),
 					).group(
@@ -385,11 +391,11 @@ class Posts(Repository) :
 						Where(
 							Field('users', 'handle', 'lower'),
 							Operator.equal,
-							Value(include_users[0], ['lower']),
+							Value(parsed.include_users[0], ['lower']),
 						),
 					)
 
-			if exclude_users :
+			if parsed.exclude_users :
 				# TODO: this should be rewritten to use posts and query by user_id directly
 				if cte._table != 'kheina.public.users' :
 					cte.join(
@@ -405,7 +411,7 @@ class Posts(Repository) :
 							Where(
 								Field('users', 'handle', 'lower'),
 								Operator.not_equal,
-								Value(tuple(map(str.lower, exclude_users)), ['lower', 'any']),
+								Value(tuple(map(str.lower, parsed.exclude_users)), ['lower', 'any']),
 							),
 						),
 					).group(
@@ -417,29 +423,29 @@ class Posts(Repository) :
 						Where(
 							Field('lower(users', 'handle)'),
 							Operator.not_equal,
-							Value(tuple(map(str.lower, exclude_users)), ['lower', 'any']),
+							Value(tuple(map(str.lower, parsed.exclude_users)), ['lower', 'any']),
 						),
 					)
 
-			if include_rating :
+			if parsed.include_rating :
 				cte.where(
 					Where(
 						Field('posts', 'rating'),
 						Operator.equal,
-						Value(await rating_map.get_id(include_rating[0])),
+						Value(await rating_map.get_id(parsed.include_rating[0])),
 					),
 				)
 
-			if exclude_rating :
+			if parsed.exclude_rating :
 				cte.where(
 					Where(
 						Field('posts', 'rating'),
 						Operator.not_equal,
-						Value([await rating_map.get_id(x) for x in exclude_rating], ['all']),
+						Value([await rating_map.get_id(x) for x in parsed.exclude_rating], ['all']),
 					),
 				)
 
-			if include_sets or exclude_sets :
+			if parsed.include_sets or parsed.exclude_sets :
 				join_sets: Join = Join(
 					JoinType.inner,
 					Table('kheina.public.set_post'),
@@ -451,37 +457,25 @@ class Posts(Repository) :
 					),
 				)
 
-				if include_sets :
+				if parsed.include_sets :
 					join_sets.where(
 						Where(
 							Field('set_post', 'set_id'),
 							Operator.equal,
-							Value(list(map(int, include_sets)), ['all']),
+							Value(list(map(int, parsed.include_sets)), ['all']),
 						),
 					)
 
-				if exclude_sets :
+				if parsed.exclude_sets :
 					join_sets.where(
 						Where(
 							Field('set_post', 'set_id'),
 							Operator.not_equal,
-							Value(list(map(int, exclude_sets)), ['any']),
+							Value(list(map(int, parsed.exclude_sets)), ['any']),
 						),
 					)
 
 				cte.join(join_sets).group(Field('set_post', 'post_id'))
-
-			idk = {
-				'tags':           tags,
-				'include_tags':   include_tags,
-				'exclude_tags':   exclude_tags,
-				'include_users':  include_users,
-				'exclude_users':  exclude_users,
-				'include_rating': include_rating,
-				'exclude_rating': exclude_rating,
-				'include_sets':   include_sets,
-				'exclude_sets':   exclude_sets,
-			}
 
 		else :
 			cte = Query(
@@ -500,6 +494,16 @@ class Posts(Repository) :
 			).group(
 				Field('posts', 'post_id'),
 			)
+
+		return cte, sort, parsed
+
+
+	@timed
+	@AerospikeCache('kheina', 'posts', 'results.{sort}.{tags}.{count}.{page}', TTL_minutes=1, local_TTL=60, _kvs=PostKVS)
+	async def _fetch_posts(self: Self, sort: PostSort, tags: Optional[tuple[str, ...]], count: int, page: int, trace: str) -> list[InternalPost] :
+		cte: Query; _sort: Optional[PostSort]; parsed: ParsedTags
+		cte, _sort, parsed = await self._parse_tags(tags)
+		sort = _sort or sort
 
 		cte.join(
 			Join(
@@ -537,7 +541,7 @@ class Posts(Repository) :
 		if sort in { PostSort.new, PostSort.old } :
 			order = Order.descending_nulls_first if sort == PostSort.new else Order.ascending_nulls_last
 
-			if tags and len(tags) == 1 and len(include_sets) == 1 :
+			if tags and len(tags) == 1 and len(parsed.include_sets) == 1 :
 				# this is a very special case, we want to hijack the new/old sorts to instead sort by set index.
 				# there's really no reason anyone would want to sort by post age for a single set
 				cte.select(
@@ -584,12 +588,13 @@ class Posts(Repository) :
 			)
 
 		parser = self.internal_select(query := self.CteQuery(cte))
-
 		sql, params = query.build()
 		self.logger.info({
+			'trace':  trace,
 			'query':  sql,
 			'params': params,
-			**idk,
+			'tags':   tags,
+			**parsed.__dict__,
 		})
 
 		return parser(await self.query_async(query, fetch_all=True))
@@ -597,7 +602,7 @@ class Posts(Repository) :
 
 	@HttpErrorHandler('fetching posts')
 	@timed
-	async def fetchPosts(self: Self, user: KhUser, sort: PostSort, tags: Optional[list[str]], count: int = 64, page: int = 1) -> SearchResults :
+	async def fetchPosts(self: Self, user: KhUser, sort: PostSort, tags: Optional[list[str]], count: int = 64, page: int = 1, trace: str = '') -> SearchResults :
 		self._validatePageNumber(page)
 		self._validateCount(count)
 
@@ -607,12 +612,12 @@ class Posts(Repository) :
 
 		if tags :
 			t = tuple(sorted(map(Posts._normalize_tag, filter(None, map(str.strip, filter(None, tags))))))
-			total = ensure_future(self.total_results(t))
+			total = create_task(self.total_results(t))
 
 		else :
-			total = ensure_future(self.post_count('_'))
+			total = create_task(self.post_count('_'))
 
-		iposts: list[InternalPost] = await self._fetch_posts(sort, t, count, page)
+		iposts: list[InternalPost] = await self._fetch_posts(sort, t, count, page, trace)
 		posts:  list[Post]         = await self.posts(user, iposts)
 
 		return SearchResults(
@@ -631,7 +636,7 @@ class Posts(Repository) :
 		if not await self.authorized(user, ipost) :
 			raise NotFound(f'no data was found for the provided post id: {post_id}.')
 
-		replies      = ensure_future(self.fetchComments(user, post_id, sort))
+		replies      = create_task(self.fetchComments(user, post_id, sort))
 		post         = await self.post(user, ipost)
 		post.replies = await replies
 		return post
@@ -903,14 +908,14 @@ class Posts(Repository) :
 
 
 	@HttpErrorHandler('retrieving user posts')
-	async def fetchUserPosts(self: Self, user: KhUser, handle: str, count: int, page: int) -> SearchResults :
+	async def fetchUserPosts(self: Self, user: KhUser, handle: str, count: int, page: int, trace: str) -> SearchResults :
 		handle = handle.lower()
 		self._validatePageNumber(page)
 		self._validateCount(count)
 
 		tags:   tuple[str]         = (f'@{handle}',)
-		total:  Task[int]          = ensure_future(self.total_results(tags))
-		iposts: list[InternalPost] = await self._fetch_posts(PostSort.new, tags, count, page)
+		total:  Task[int]          = create_task(self.total_results(tags))
+		iposts: list[InternalPost] = await self._fetch_posts(PostSort.new, tags, count, page, trace)
 		posts:  list[Post]         = await self.posts(user, iposts)
 
 		return SearchResults(

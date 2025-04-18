@@ -103,6 +103,7 @@ class BlockTree :
 
 @timed
 @alru_cache(ttl=30)
+@timed.link
 async def fetch_block_tree(user: KhUser) -> tuple[BlockTree, Optional[set[int]]] :
 	tree: BlockTree = BlockTree()
 
@@ -110,7 +111,7 @@ async def fetch_block_tree(user: KhUser) -> tuple[BlockTree, Optional[set[int]]]
 		# TODO: create and return a default config
 		return tree, None
 
-	config: Blocking = await configs._getUserConfig(user.user_id, Blocking)
+	config: Blocking = await configs._get_user_config(user.user_id, Blocking)
 	tree.populate(config.tags or [])
 	return tree, set(config.users) if config.users else None
 

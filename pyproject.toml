@@ -3,7 +3,7 @@ line_length = 999
 lines_after_imports = 2
 
 [tool.ruff.format]
-exclude = ["*"] #
+exclude = ["*"]
 indent-style = "tab"
 line-ending = "lf"
 
@@ -13,3 +13,14 @@ fixable = []
 [tool.ruff.lint.isort]
 force-single-line = true
 lines-after-imports = 2
+
+[tool.pyright]
+reportPrivateImportUsage = false
+reportRedeclaration = false
+reportInvalidTypeForm = false
+reportFunctionMemberAccess = false
+reportPossiblyUnboundVariable = false
+reportIncompatibleMethodOverride = false
+
+# this one is just wrong, it says that when you override a type with a stricter type (therefore still meeting the basemodel's type) it's incompatible. just wrong.
+reportIncompatibleVariableOverride = false

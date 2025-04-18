@@ -1,5 +1,3 @@
-from asyncio import Task, ensure_future
-
 from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse
 
@@ -7,7 +5,7 @@ from shared.auth import Scope
 from shared.models.server import Request
 
 from .configs import Configs
-from .models import ConfigsResponse, UpdateConfigRequest, UserConfigRequest, UserConfigResponse
+from .models import ConfigsResponse, UserConfigRequest, UserConfigResponse
 
 
 app = APIRouter(
@@ -46,9 +44,9 @@ async def v1UserConfig(req: Request) -> UserConfigResponse :
 async def v1UserTheme(req: Request) -> PlainTextResponse :
 	await req.user.authenticated()
 	return PlainTextResponse(
-		content=await configs.getUserTheme(req.user),
-		media_type='text/css',
-		headers={
+		content    = await configs.getUserTheme(req.user),
+		media_type = 'text/css',
+		headers = {
 			'cache-control': 'no-cache',
 		},
 	)

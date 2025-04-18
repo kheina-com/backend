@@ -11,6 +11,7 @@ class PrivacyMap(SqlInterface) :
 
 	@timed
 	@alru_cache(None)
+	@timed.link
 	async def get(self: Self, key: int) -> Privacy :
 		data: Tuple[str] = await self.query_async(
 			"""
@@ -29,6 +30,7 @@ class PrivacyMap(SqlInterface) :
 
 	@timed
 	@alru_cache(None)
+	@timed.link
 	async def get_id(self: Self, key: Privacy) -> int :
 		data: Tuple[int] = await self.query_async(
 			"""

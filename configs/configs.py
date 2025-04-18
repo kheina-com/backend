@@ -20,6 +20,7 @@ from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
 from shared.models import PostId
 from shared.sql import SqlInterface
 from shared.timing import timed
+from shared.utilities import ensure_future
 from users.repository import Repository as Users
 
 from .models import OTP, BannerStore, BlockBehavior, Blocking, BlockingBehavior, ConfigsResponse, ConfigType, CostsStore, CssProperty, CssValue, Funding, OtpType, Store, Theme, UserConfigKeyFormat, UserConfigResponse, UserConfigType
@@ -31,9 +32,9 @@ users: Users = Users()
 ColorRegex: Pattern = re_compile(r'^(?:#(?P<hex>[a-f0-9]{8}|[a-f0-9]{6})|(?P<var>[a-z0-9-]+))$')
 PropValidators: dict[CssProperty, Pattern] = {
 	CssProperty.background_attachment: re_compile(r'^(?:scroll|fixed|local)(?:,\s*(?:scroll|fixed|local))*$'),
-	CssProperty.background_position: re_compile(r'^(?:top|bottom|left|right|center)(?:\s+(?:top|bottom|left|right|center))*$'),
-	CssProperty.background_repeat: re_compile(r'^(?:repeat-x|repeat-y|repeat|space|round|no-repeat)(?:\s+(?:repeat-x|repeat-y|repeat|space|round|no-repeat))*$'),
-	CssProperty.background_size: re_compile(r'^(?:cover|contain)$'),
+	CssProperty.background_position:   re_compile(r'^(?:top|bottom|left|right|center)(?:\s+(?:top|bottom|left|right|center))*$'),
+	CssProperty.background_repeat:     re_compile(r'^(?:repeat-x|repeat-y|repeat|space|round|no-repeat)(?:\s+(?:repeat-x|repeat-y|repeat|space|round|no-repeat))*$'),
+	CssProperty.background_size:       re_compile(r'^(?:cover|contain)$'),
 }
 
 
@@ -66,7 +67,7 @@ class Configs(SqlInterface) :
 		) as r:
 			campaign = await r.json()
 
-		return campaign[0].attribute('campaign_pledge_sum')
+		return campaign['data'][0]['attributes']['campaign_pledge_sum']
 
 
 	@HttpErrorHandler('retrieving config')
@@ -220,7 +221,7 @@ class Configs(SqlInterface) :
 			))
 
 		if blocked_tags is not None or blocked_users is not None :
-			blocking = await self._getUserConfig(user.user_id, Blocking)
+			blocking = await self._get_user_config(user.user_id, Blocking)
 
 			if blocked_tags is not None :
 				blocking.tags = list(map(list, blocked_tags))
@@ -234,7 +235,7 @@ class Configs(SqlInterface) :
 			stores.append(blocking)
 
 		if wallpaper is not False or css_properties is not False :
-			theme = await self._getUserConfig(user.user_id, Theme)
+			theme = await self._get_user_config(user.user_id, Theme)
 
 			if wallpaper is not False :
 				theme.wallpaper = wallpaper
@@ -275,8 +276,9 @@ class Configs(SqlInterface) :
 			commit = True,
 		)
 
+		ensure_future(KVS.remove_async(f'user={user.user_id}'))
 		for store in stores :
-			create_task(KVS.put_async(
+			ensure_future(KVS.put_async(
 				UserConfigKeyFormat.format(
 					user_id = user.user_id,
 					key     = store.key(),
@@ -286,7 +288,7 @@ class Configs(SqlInterface) :
 
 
 	@timed
-	async def _getUserConfig[T: Store](self: Self, user_id: int, type_: type[T]) -> T :
+	async def _get_user_config[T: Store](self: Self, user_id: int, type_: type[T]) -> T :
 		try :
 			return await KVS.get_async(
 				UserConfigKeyFormat.format(
@@ -328,7 +330,7 @@ class Configs(SqlInterface) :
 
 
 	@timed
-	async def _getUserOTP(self: Self, user_id: int) -> list[OTP] :
+	async def _get_user_otp(self: Self, user_id: int) -> list[OTP] :
 		data: list[tuple[datetime, str]] = await self.query_async("""
 			select created, 'totp'
 			from kheina.auth.otp
@@ -351,21 +353,21 @@ class Configs(SqlInterface) :
 		]
 
 
-	@HttpErrorHandler('retrieving user config')
 	@timed
-	async def getUserConfig(self: Self, user: KhUser) -> UserConfigResponse :
+	@AerospikeCache('kheina', 'configs', 'user={user_id}', _kvs=KVS)
+	async def _get_user_configs(self: Self, user_id: int) -> UserConfigResponse :
 		data: list[tuple[str, int, bytes]] = await self.query_async("""
 				select key, type, data
 				from kheina.public.user_configs
 				where user_configs.user_id = %s;
 			""", (
-				user.user_id,
+				user_id,
 			),
 			fetch_all = True,
 		)
 
 		res = UserConfigResponse()
-		otp: Task[list[OTP]] = create_task(self._getUserOTP(user.user_id))
+		otp: Task[list[OTP]] = create_task(self._get_user_otp(user_id))
 		if data :
 			for key, type_, value in data :
 				t: type[Store] = Configs.SerializerTypeMap[UserConfigType(type_)]
@@ -385,10 +387,16 @@ class Configs(SqlInterface) :
 		return res
 
 
+	@HttpErrorHandler('retrieving user config')
+	@timed
+	async def getUserConfig(self: Self, user: KhUser) -> UserConfigResponse :
+		return await self._get_user_configs(user.user_id)
+
+
 	@HttpErrorHandler('retrieving custom theme')
 	@timed
 	async def getUserTheme(self: Self, user: KhUser) -> str :
-		theme: Theme = await self._getUserConfig(user.user_id, Theme)
+		theme: Theme = await self._get_user_config(user.user_id, Theme)
 
 		if not theme.css_properties :
 			return ''

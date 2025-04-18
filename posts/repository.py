@@ -36,6 +36,7 @@ class RatingMap(SqlInterface) :
 
 	@timed
 	@alru_cache(None)
+	@timed.link
 	async def get(self, key: int) -> Rating :
 		data: tuple[str] = await self.query_async("""
 			SELECT rating
@@ -53,6 +54,7 @@ class RatingMap(SqlInterface) :
 
 	@timed
 	@alru_cache(None)
+	@timed.link
 	async def get_id(self, key: str | Rating) -> int :
 		data: tuple[int] = await self.query_async("""
 			SELECT rating_id
@@ -76,6 +78,7 @@ class MediaTypeMap(SqlInterface) :
 
 	@timed
 	@alru_cache(None)
+	@timed.link
 	async def get(self, key: int) -> MediaType :
 		data: tuple[str, str] = await self.query_async("""
 			SELECT file_type, mime_type
@@ -94,6 +97,7 @@ class MediaTypeMap(SqlInterface) :
 
 	@timed
 	@alru_cache(None)
+	@timed.link
 	async def get_id(self, mime: str) -> int :
 		data: tuple[int] = await self.query_async("""
 			SELECT media_type_id
@@ -113,6 +117,7 @@ media_type_map: MediaTypeMap = MediaTypeMap()
 
 class Repository(SqlInterface) :
 
+	@timed
 	def parse_response(
 		self: Self,
 		data: list[
