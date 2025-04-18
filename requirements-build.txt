@@ -1,6 +1,6 @@
-isort>=5.8.0
-pytest>=8.2.2
-fonttools>=4.53.1
-asyncclick>=8.1.7.2
-pillow>=10.4.0
+asyncclick>=8.1.8.0
+fonttools>=4.55.0
+isort>=5.13.2
+pillow>=11.0.0
 pip_tools>=7.4.1
+pytest>=8.3.3
