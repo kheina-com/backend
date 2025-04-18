@@ -66,7 +66,7 @@ class Configs(SqlInterface) :
 		) as r:
 			campaign = await r.json()
 
-		return campaign.data()[0].attribute('campaign_pledge_sum') # type: ignore
+		return campaign[0].attribute('campaign_pledge_sum')
 
 
 	@HttpErrorHandler('retrieving config')
