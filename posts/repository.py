@@ -2,7 +2,7 @@ from asyncio import Task, create_task
 from collections import defaultdict
 from typing import Callable, Iterable, Mapping, Optional, Self
 
-from cache import AsyncLRU
+from async_lru import alru_cache
 
 from shared.auth import KhUser, Scope
 from shared.caching import AerospikeCache
@@ -35,7 +35,7 @@ tagger = Tags()
 class RatingMap(SqlInterface) :
 
 	@timed
-	@AsyncLRU(maxsize=0)
+	@alru_cache(None)
 	async def get(self, key: int) -> Rating :
 		data: tuple[str] = await self.query_async("""
 			SELECT rating
@@ -52,7 +52,7 @@ class RatingMap(SqlInterface) :
 		return Rating(value=data[0])
 
 	@timed
-	@AsyncLRU(maxsize=0)
+	@alru_cache(None)
 	async def get_id(self, key: str | Rating) -> int :
 		data: tuple[int] = await self.query_async("""
 			SELECT rating_id
@@ -75,7 +75,7 @@ rating_map: RatingMap = RatingMap()
 class MediaTypeMap(SqlInterface) :
 
 	@timed
-	@AsyncLRU(maxsize=0)
+	@alru_cache(None)
 	async def get(self, key: int) -> MediaType :
 		data: tuple[str, str] = await self.query_async("""
 			SELECT file_type, mime_type
@@ -93,7 +93,7 @@ class MediaTypeMap(SqlInterface) :
 		)
 
 	@timed
-	@AsyncLRU(maxsize=0)
+	@alru_cache(None)
 	async def get_id(self, mime: str) -> int :
 		data: tuple[int] = await self.query_async("""
 			SELECT media_type_id

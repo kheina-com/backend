@@ -2,9 +2,9 @@ from datetime import datetime
 from enum import Enum, IntEnum, unique
 from typing import Any, Literal, Optional, Self
 
-from avrofastapi.schema import AvroInt
 from pydantic import BaseModel, Field
 
+from shared.avro.schema import AvroInt
 from shared.models import PostId
 from shared.models.config import Store
 from shared.sql.query import Table

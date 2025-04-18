@@ -2,7 +2,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Iterable, Mapping, Optional, Self
 
-from cache import AsyncLRU
+from async_lru import alru_cache
 
 from shared.auth import KhUser
 from shared.caching import AerospikeCache
@@ -47,7 +47,7 @@ class BadgeMap(SqlInterface) :
 		return list(BadgeMap._all.values())
 
 
-	@AsyncLRU(maxsize=0)
+	@alru_cache(None)
 	async def get(self: Self, key: int) -> Badge :
 		data: tuple[str, str] = await self.query_async("""
 			SELECT emoji, label
@@ -70,7 +70,7 @@ class BadgeMap(SqlInterface) :
 
 		return badge
 
-	@AsyncLRU(maxsize=0)
+	@alru_cache(None)
 	async def get_id(self: Self, key: Badge) -> int :
 		data: tuple[int] = await self.query_async("""
 			SELECT badge_id

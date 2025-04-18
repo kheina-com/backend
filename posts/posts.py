@@ -3,10 +3,12 @@ from datetime import timedelta
 from math import ceil
 from typing import Iterable, Optional, Self
 
+from async_lru import alru_cache
+
 from sets.models import InternalSet, SetId
 from sets.repository import Repository as Sets
 from shared.auth import KhUser
-from shared.caching import AerospikeCache, ArgsCache
+from shared.caching import AerospikeCache
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, HttpErrorHandler, NotFound
 from shared.sql.query import CTE, Field, Join, JoinType, Operator, Order, Query, Table, Value, Where, WindowFunction
@@ -765,7 +767,9 @@ class Posts(Repository) :
 		return await self.posts(user, iposts, assign_parents=False)
 
 
-	@ArgsCache(10)
+	@timed
+	@alru_cache(ttl=10)
+	@timed.link
 	@HttpErrorHandler('retrieving timeline posts')
 	async def timelinePosts(self: Self, user: KhUser, count: int, page: int) -> list[Post] :
 		self._validatePageNumber(page)
@@ -831,7 +835,9 @@ class Posts(Repository) :
 		return await self.posts(user, posts)
 
 
-	@ArgsCache(10)
+	@timed
+	@alru_cache(ttl=10)
+	@timed.link
 	@HttpErrorHandler('generating RSS feed')
 	async def RssFeedPosts(self: Self, user: KhUser) -> tuple[datetime, list[Post]]:
 		now = datetime.now()
@@ -1004,8 +1010,10 @@ class Posts(Repository) :
 		return await self.posts(user, posts)
 
 
+	@timed
+	@alru_cache(ttl=5)
+	@timed.link
 	@HttpErrorHandler("retrieving user's drafts")
-	@ArgsCache(5)
 	async def fetchDrafts(self: Self, user: KhUser) -> list[Post] :
 		cte = Query(
 			Table('kheina.public.posts'),

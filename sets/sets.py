@@ -2,13 +2,13 @@ from asyncio import Task, ensure_future, wait
 from collections import defaultdict
 from typing import Optional, Self, Tuple, Union
 
+from async_lru import alru_cache
 from psycopg.errors import UniqueViolation
 
 from posts.models import InternalPost, MediaType, Post, PostId, PostSize, Privacy, Rating
 from posts.repository import Repository as Posts
 from posts.repository import privacy_map
 from shared.auth import KhUser, Scope
-from shared.caching import ArgsCache
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, Conflict, HttpErrorHandler, NotFound
 from shared.models.user import UserPrivacy
@@ -71,7 +71,7 @@ class Sets(Repository) :
 		return await privacy_map.get_id(p)
 
 
-	@ArgsCache(float('inf'))
+	@alru_cache(None)
 	async def _id_to_privacy(self: Self, privacy_id: int) -> Privacy :
 		data: Tuple[str] = await self.query_async("""
 			SELECT
@@ -86,7 +86,7 @@ class Sets(Repository) :
 		return Privacy(data[0])
 
 
-	@ArgsCache(float('inf'))
+	@alru_cache(None)
 	async def _id_to_rating(self: Self, rating_id: int) -> Rating :
 		data: Tuple[str] = await self.query_async("""
 			SELECT
@@ -101,7 +101,7 @@ class Sets(Repository) :
 		return Rating(data[0])
 
 
-	@ArgsCache(float('inf'))
+	@alru_cache(None)
 	async def _id_to_media_type(self: Self, media_type_id: int) -> Optional[MediaType] :
 		if media_type_id is None :
 			return None
@@ -123,7 +123,7 @@ class Sets(Repository) :
 		)
 
 
-	@ArgsCache(float('inf'))
+	@alru_cache(None)
 	async def _id_to_set_privacy(self: Self, privacy_id: int) -> UserPrivacy :
 		data: Tuple[str] = await self.query_async("""
 			SELECT

@@ -12,14 +12,14 @@ import pyotp
 import ujson as json
 from argon2 import PasswordHasher as Argon2
 from argon2.exceptions import VerifyMismatchError
-from avrofastapi.serialization import AvroDeserializer, AvroSerializer
-from cache import AsyncLRU
+from async_lru import alru_cache
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from psycopg.errors import UniqueViolation
 
 from shared import logging
+from shared.avro.serialization import AvroDeserializer, AvroSerializer
 from shared.base64 import b64decode, b64encode
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import fetch
@@ -104,7 +104,7 @@ except aerospike.exception.IndexFoundError :
 	pass
 
 class BotTypeMap(SqlInterface):
-	@AsyncLRU(maxsize=0)
+	@alru_cache(None)
 	async def get(self: Self, key: int) -> BotType :
 		data: Tuple[str] = await self.query_async(
 			"""
@@ -120,7 +120,7 @@ class BotTypeMap(SqlInterface):
 		# key is the id, return privacy
 		return BotType(value=data[0])
 
-	@AsyncLRU(maxsize=0)
+	@alru_cache(None)
 	async def get_id(self: Self, key: BotType) -> int :
 		data: Tuple[int] = await self.query_async(
 			"""

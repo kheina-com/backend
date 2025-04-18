@@ -3,3 +3,4 @@ pytest>=8.2.2
 fonttools>=4.53.1
 asyncclick>=8.1.7.2
 pillow>=10.4.0
+pip_tools>=7.4.1

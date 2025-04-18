@@ -1,9 +1,11 @@
 from typing import Iterable, Optional, Self
 
+import async_lru
+from async_lru import alru_cache
+
 from configs.configs import Configs
 from configs.models import Blocking
 from shared.auth import KhUser
-from shared.caching import ArgsCache
 from shared.timing import timed
 
 from .models import Rating
@@ -100,7 +102,7 @@ class BlockTree :
 
 
 @timed
-@ArgsCache(30)
+@alru_cache(ttl=30)
 async def fetch_block_tree(user: KhUser) -> tuple[BlockTree, Optional[set[int]]] :
 	tree: BlockTree = BlockTree()
 

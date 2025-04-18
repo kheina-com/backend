@@ -1,12 +1,13 @@
 from functools import wraps
-from inspect import FullArgSpec, getfullargspec, iscoroutinefunction, markcoroutinefunction
-from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple, Type
+from inspect import FullArgSpec, markcoroutinefunction
+from typing import Any, Callable, Iterable, Optional
 from uuid import uuid4
 
 from aiohttp import ClientError
 from pydantic import BaseModel
 
 from ..exceptions.base_error import BaseError
+from ..utilities import get_arg_spec, is_async_callable
 
 
 class HttpError(BaseError) :
@@ -85,7 +86,7 @@ class ServiceUnavailable(HttpError) :
 	status: int = 503
 
 
-def HttpErrorHandler(message: str, exclusions: Iterable[str] = ['self'], handlers: Dict[Type[Exception], Tuple[Type[Exception], str]] = { }) -> Callable :
+def HttpErrorHandler(message: str, exclusions: Iterable[str] = ['self'], handlers: dict[type[Exception], tuple[type[Exception], str]] = { }) -> Callable :
 	"""
 	raises internal server error from any unexpected errors
 	f'an unexpected error occurred while {message}.'
@@ -93,14 +94,14 @@ def HttpErrorHandler(message: str, exclusions: Iterable[str] = ['self'], handler
 	from ..logging import Logger, getLogger
 
 	logger: Logger = getLogger()
-	exclusions: Set[str] = set(exclusions)
+	exclusions: set[str] = set(exclusions)
 
 	def decorator(func: Callable) -> Callable :
 
-		if not iscoroutinefunction(func) :
-			raise NotImplementedError('all http handlers should be defined as async')
+		if not is_async_callable(func) :
+			raise NotImplementedError(f'http handler {func} is not defined as async')
 
-		arg_spec: FullArgSpec = getfullargspec(func)
+		arg_spec: FullArgSpec = get_arg_spec(func)
 
 		@wraps(func)
 		async def wrapper(*args: Any, **kwargs: Any) -> Any :

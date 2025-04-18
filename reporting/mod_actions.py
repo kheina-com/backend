@@ -4,14 +4,14 @@ from hashlib import sha1
 from typing import Any, Callable, Optional, Self
 
 import aerospike
-from avrofastapi.schema import convert_schema
-from avrofastapi.serialization import AvroDeserializer, AvroSerializer, Schema, parse_avro_schema
-from cache import AsyncLRU
+from async_lru import alru_cache
 from pydantic import BaseModel
 
 from avro_schema_repository.schema_repository import SchemaRepository
 from posts.repository import Repository as Posts
 from shared.auth import KhUser, Scope
+from shared.avro.schema import convert_schema
+from shared.avro.serialization import AvroDeserializer, AvroSerializer, Schema, parse_avro_schema
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import fetch
@@ -51,13 +51,13 @@ class ModActions(SqlInterface) :
 		super().__init__(*args, conversions={ IntEnum: lambda x: x.value }, **kwargs)
 
 
-	@AsyncLRU(maxsize=32)
 	@staticmethod
+	@alru_cache(maxsize=32)
 	async def _get_schema(fingerprint: bytes) -> Schema:
 		return parse_avro_schema((await repo.getSchema(fingerprint)).decode())
 
 
-	@AsyncLRU(maxsize=0)
+	@alru_cache(None)
 	async def _get_serializer(self: Self, action_type: InternalActionType) -> Callable[[BaseModel], bytes] :
 		model = ModActions._action_type_map[action_type]		
 		fp, s = AvroMarker + await repo.addSchema(convert_schema(model)), AvroSerializer(model)

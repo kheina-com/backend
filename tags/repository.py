@@ -8,7 +8,7 @@ from posts.models import PostId
 from shared.auth import KhUser
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
-from shared.models import InternalUser, Undefined
+from shared.models import InternalUser
 from shared.sql import SqlInterface
 from shared.timing import timed
 from shared.utilities import flatten
@@ -45,7 +45,7 @@ class Repository(SqlInterface) :
 			""", (
 				post_id.int(),
 			),
-			fetch_all=True,
+			fetch_all = True,
 		)
 
 		if not data :

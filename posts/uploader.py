@@ -1,5 +1,5 @@
 import json
-from asyncio import Task, create_subprocess_exec, ensure_future
+from asyncio import Task, create_subprocess_exec, create_task
 from enum import Enum
 from hashlib import sha1
 from io import BytesIO
@@ -7,7 +7,7 @@ from os import path, remove
 from secrets import token_bytes
 from subprocess import PIPE
 from time import time
-from typing import Literal, Optional, Self, Set, Tuple
+from typing import Literal, Optional, Self
 from uuid import uuid4
 
 import aerospike
@@ -27,10 +27,10 @@ from shared.exceptions.http_error import BadGateway, BadRequest, Forbidden, Http
 from shared.models import InternalUser
 from shared.sql import SqlInterface, Transaction
 from shared.timing import timed
-from shared.utilities import flatten, int_from_bytes
+from shared.utilities import ensure_future, flatten, int_from_bytes
 from shared.utilities.units import Byte
 from tags.models import InternalTag
-from tags.repository import CountKVS
+from tags.repository import CountKVS, TagKVS
 from tags.repository import Repository as Tags
 from users.repository import Repository as Users
 from users.repository import UserKVS
@@ -47,7 +47,7 @@ from .scoring import hot as calc_hot
 resource.limits.set_resource_limit('memory', Byte.megabyte.value * 512)
 resource.limits.set_resource_limit('map',    Byte.gigabyte.value)
 resource.limits.set_resource_limit('disk',   Byte.gigabyte.value * 100)
-UnpublishedPrivacies: Set[Privacy] = { Privacy.unpublished, Privacy.draft }
+UnpublishedPrivacies: set[Privacy] = { Privacy.unpublished, Privacy.draft }
 
 posts:    Posts    = Posts()
 users:    Users    = Users()
@@ -322,7 +322,7 @@ class Uploader(SqlInterface, B2Interface) :
 		async with self.transaction() as transaction :
 			for _ in range(100) :
 				internal_post_id = int_from_bytes(token_bytes(6))
-				d: Tuple[int] = await transaction.query_async("""
+				d: tuple[int] = await transaction.query_async("""
 					SELECT count(1)
 					FROM kheina.public.posts
 					WHERE post_id = %s;
@@ -617,7 +617,7 @@ class Uploader(SqlInterface, B2Interface) :
 				media_type:     int = await media_type_map.get_id(mime_type.value)
 
 				# TODO: optimize
-				upd: Tuple[datetime] = await transaction.query_async("""
+				upd: tuple[datetime] = await transaction.query_async("""
 					insert into kheina.public.media
 					(post_id, type, filename, length, thumbhash, width, height, crc)
 					values
@@ -850,7 +850,7 @@ class Uploader(SqlInterface, B2Interface) :
 			if privacy == Privacy.draft and old_privacy != Privacy.unpublished :
 				raise BadRequest('only unpublished posts can be marked as drafts.')
 
-			tags_task: Task[list[InternalTag]] = ensure_future(tagger._fetch_tags_by_post(post_id))
+			tags_task: Task[list[InternalTag]] = create_task(tagger._fetch_tags_by_post(post_id))
 			vote_task: Optional[Task] = None
 
 			if old_privacy in UnpublishedPrivacies and privacy not in UnpublishedPrivacies :
@@ -899,7 +899,7 @@ class Uploader(SqlInterface, B2Interface) :
 					),
 				)
 
-				vote_task = ensure_future(VoteKVS.put_async(f'{user.user_id}|{post_id}', 1))
+				vote_task = create_task(VoteKVS.put_async(f'{user.user_id}|{post_id}', 1))
 
 			else :
 				await t.query_async("""
@@ -974,8 +974,8 @@ class Uploader(SqlInterface, B2Interface) :
 		if coordinates.width != coordinates.height :
 			raise BadRequest(f'icons must be square. width({coordinates.width}) != height({coordinates.height})')
 
-		ipost_task: Task[InternalPost] = ensure_future(posts._get_post(post_id))
-		iuser_task: Task[InternalUser] = ensure_future(users._get_user(user.user_id))
+		ipost_task: Task[InternalPost] = create_task(posts._get_post(post_id))
+		iuser_task: Task[InternalUser] = create_task(users._get_user(user.user_id))
 		image:      Image              = await self.getImage(await ipost_task, coordinates)
 
 		self.convert_image(image, self.icon_size)
@@ -1014,8 +1014,8 @@ class Uploader(SqlInterface, B2Interface) :
 		if round(coordinates.width / 3) != coordinates.height :
 			raise BadRequest(f'banners must be a 3x:1 rectangle. round(width / 3)({round(coordinates.width / 3)}) != height({coordinates.height})')
 
-		ipost_task: Task[InternalPost] = ensure_future(posts._get_post(post_id))
-		iuser_task: Task[InternalUser] = ensure_future(users._get_user(user.user_id))
+		ipost_task: Task[InternalPost] = create_task(posts._get_post(post_id))
+		iuser_task: Task[InternalUser] = create_task(users._get_user(user.user_id))
 		image:      Image              = await self.getImage(await ipost_task, coordinates)
 
 		if image.size[0] > self.banner_size * 3 or image.size[1] > self.banner_size :
@@ -1287,7 +1287,7 @@ class Uploader(SqlInterface, B2Interface) :
 				media_type:     int = await media_type_map.get_id(mime_type.value)
 
 				# TODO: optimize
-				upd: Tuple[datetime] = await transaction.query_async("""
+				upd: tuple[datetime] = await transaction.query_async("""
 					insert into kheina.public.media
 					(post_id, type, filename, length, thumbhash, width, height, crc)
 					values
@@ -1353,6 +1353,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 					del image
 
+				ensure_future(TagKVS.remove_async(f'post.{post_id}'))
 				await transaction.commit()
 
 			post.media_updated  = updated

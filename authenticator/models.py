@@ -1,12 +1,12 @@
 from datetime import datetime
 from enum import Enum, unique
-from typing import Any, Dict, Optional, Union
+from typing import Any, Optional
 from uuid import UUID
 
-from avrofastapi.models import RefId
-from avrofastapi.schema import AvroInt
 from pydantic import BaseModel, validator
 
+from shared.avro.models import RefId
+from shared.avro.schema import AvroInt
 from shared.base64 import b64decode
 
 
@@ -17,7 +17,7 @@ class AuthAlgorithm(Enum) :
 
 class TokenRequest(BaseModel) :
 	user_id: int = 0
-	token_data: Dict[str, Any]
+	token_data: dict[str, Any]
 
 
 class PublicKeyRequest(BaseModel) :
@@ -83,7 +83,7 @@ class CreateUserRequest(BaseModel) :
 	handle: str
 	email: str
 	password: str
-	token_data: Optional[Dict[str, Any]] = { }
+	token_data: Optional[dict[str, Any]] = { }
 
 
 class ChangePasswordRequest(BaseModel) :

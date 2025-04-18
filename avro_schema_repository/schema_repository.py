@@ -1,8 +1,8 @@
 from hashlib import sha1
 
 import ujson
-from avrofastapi.schema import AvroSchema
 
+from shared.avro.schema import AvroSchema
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import HttpErrorHandler, NotFound

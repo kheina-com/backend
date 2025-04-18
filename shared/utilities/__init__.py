@@ -1,10 +1,12 @@
 from asyncio import Task, create_task
 from collections import OrderedDict
 from contextvars import Context
+from functools import partial
+from inspect import getfullargspec, iscoroutinefunction
 from math import ceil
 from time import time
 from types import CoroutineType
-from typing import Any, Callable, Generator, Hashable, Iterable, Optional, Tuple, Type
+from typing import Any, Awaitable, Callable, Generator, Hashable, Iterable, Optional, Tuple, Type, TypeGuard, TypeVar, overload
 from uuid import UUID, uuid4
 
 from fastapi import Request
@@ -105,3 +107,40 @@ def ensure_future[T](fut: CoroutineType[Any, Any, T], name: str | None = None, c
 
 def trace(req: Request) -> str :
 	return (req.headers.get('kh-trace') or uuid4().hex)[:32]
+
+
+# from starlette https://github.com/encode/starlette/blob/a766a58d14007f07c0b5782fa78cdc370b892796/starlette/_utils.py#L23-L39
+T = TypeVar('T')
+AwaitableCallable = Callable[..., Awaitable[T]]
+
+
+@overload
+def is_async_callable(obj: AwaitableCallable[T]) -> TypeGuard[AwaitableCallable[T]]: ...
+
+
+@overload
+def is_async_callable(obj: Any) -> TypeGuard[AwaitableCallable[Any]]: ...
+
+
+def is_async_callable(obj: Any) -> Any:
+	while isinstance(obj, partial):
+		obj = obj.func
+
+	return iscoroutinefunction(obj) or (callable(obj) and iscoroutinefunction(obj.__call__))
+
+
+def get_arg_spec(obj: Any) -> Any:
+	while isinstance(obj, partial):
+		obj = obj.func
+
+	e: Exception
+	try :
+		return getfullargspec(obj)
+
+	except TypeError as _e :
+		e = _e
+
+	if callable(obj) :
+		return getfullargspec(obj.__call__)
+
+	raise TypeError('unsupported callable') from e

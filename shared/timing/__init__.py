@@ -1,11 +1,12 @@
-from functools import partial, wraps
-from inspect import FullArgSpec, Parameter, getfullargspec, iscoroutinefunction, markcoroutinefunction, signature
+from functools import wraps
+from inspect import FullArgSpec, Parameter, iscoroutinefunction, markcoroutinefunction, signature
 from logging import getLogger
 from sys import _getframe
 from time import time
 from types import FrameType
 from typing import Any, Callable, Coroutine, Hashable, Literal, Optional, Self
 
+from ..utilities import get_arg_spec
 from ..utilities.units import Time as TimeUnit
 
 
@@ -99,7 +100,6 @@ def _get_parent(frame: Optional[FrameType]) -> Optional[Execution] :
 	while frame :
 		if EXEC in frame.f_locals :
 			parent: Optional[Execution] = frame.f_locals[EXEC]
-			del frame
 
 			if not parent :
 				break
@@ -123,6 +123,7 @@ def timed(root, key = None, tags = None) :
 
 	`@timed.root` may be used as a shorthand for `@timed(True)`
 	`@timed.key('key')` may be used as a shorthand for `@timed(False, 'key')`
+	`@timed.tagged({ 'tag': 'key' })` may be used as a shorthand for `@timed(False, tags={ 'tag': 'key' })`
 
 	a custom logging function can be set by overriding `timed.logger(name: str, exec: timing.Execution)`
 	- default: `lambda n, x : logging.getLogger('stats').info({ n: x.dict() })`
@@ -135,55 +136,65 @@ def timed(root, key = None, tags = None) :
 		timed.logger = lambda n, x : logger.info({ n: x.dict() })
 
 	def decorator(func) :
-		argspec: FullArgSpec = getfullargspec(func)
-		kw: dict[str, Hashable] = dict(zip(argspec.args[-len(argspec.defaults):], argspec.defaults)) if argspec.defaults else { }
-		arg_spec: tuple[str, ...] = tuple(argspec.args)
-		del argspec
+		fkey: Optional[
+			Callable[[str, tuple[Any, ...], dict[str, Any]], str] |
+			Callable[[Callable[[Any, Any], str], tuple[Any, ...], dict[str, Any]], str]
+		] = None
+		tkey: Optional[
+			Callable[[dict[str, str | int], tuple[Any, ...], dict[str, Any]], dict[str, str | int | float]] |
+			Callable[[Callable[[Any, Any], dict[str, str | int | float]], tuple[Any, ...], dict[str, Any]], dict[str, str | int | float]]
+		] = None
 
-		if key is None :
-			def fkey(*a, **kw) -> Optional[str] :
-				return None
-
-		elif isinstance(key, str) :
-			def fkey(key: str, *args, **kwargs) -> Optional[str] :
+		if isinstance(key, str) :
+			argspec: FullArgSpec = get_arg_spec(func)
+			kw: dict[str, Hashable] = dict(zip(argspec.args[-len(argspec.defaults):], argspec.defaults)) if argspec.defaults else { }
+			arg_spec: tuple[str, ...] = tuple(argspec.args)
+			del argspec
+			def _fkey(key: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> str :
 				return key.format(**{ **kw, **dict(zip(arg_spec, args)), **kwargs })
+			fkey = _fkey
 
 		elif callable(key) :
-			def fkey(key: Callable[[Any, Any], str], *args, **kwargs) -> Optional[str] :
+			def _fkey(key: Callable[[Any, Any], str], args: tuple[Any, ...], kwargs: dict[str, Any]) -> str :
 				return key(*args, **kwargs)
+			fkey = _fkey
 
-		else :
+		elif key is not None :
 			raise TypeError('Expected key argument to be a str, a callable, or None')
 
-		if tags is None :
-			def tkey(*a, **kw) -> dict[str, str | int | float] :
-				return { }
-
-		elif isinstance(tags, dict) :
-			def tkey(t: dict[str, str | int], *args, **kwargs) -> dict[str, str | int | float] :
+		if isinstance(tags, dict) :
+			argspec: FullArgSpec = get_arg_spec(func)
+			kw: dict[str, Hashable] = dict(zip(argspec.args[-len(argspec.defaults):], argspec.defaults)) if argspec.defaults else { }
+			arg_spec: tuple[str, ...] = tuple(argspec.args)
+			del argspec
+			def _tkey(t: dict[str, str | int], args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, str | int | float] :
+				_kw = { **kw, **dict(zip(arg_spec, args)), **kwargs }
 				return {
-					k: args[v] if isinstance(v, int) else kwargs[v]
+					k: args[v] if isinstance(v, int) else _kw[v]
 					for k, v in t.items()
 				}
+			tkey = _tkey
 
 		elif callable(tags) :
-			def tkey(t: Callable[[Any, Any], dict[str, str | int | float]], *args, **kwargs) -> dict[str, str | int | float] :
+			def _tkey(t: Callable[[Any, Any], dict[str, str | int | float]], args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, str | int | float] :
 				return t(*args, **kwargs)
+			tkey = _tkey
 
-		else :
+		elif tags is not None :
 			raise TypeError('Expected tags argument to be a dict[str, str | int], a callable, or None')
 
-		start:     Callable[[Optional[Execution], Optional[str], dict[str, str | int | float]], float]
+		start:     Callable[[Optional[Execution], tuple[Any, ...], dict[str, Any]], float]
 		completed: Callable[[float], None]
 
 		name = f'{func.__module__}.{getattr(func, "__qualname__", func.__class__.__name__)}'
 
 		if root :
-			def s(_: Optional[Execution], k: Optional[str] = None, tags: dict[str, str | int | float] = { }) -> float :
-				n = f'{name}[{k}]' if k else name
+			def s(_: Optional[Execution], args: tuple[Any, ...], kwargs: dict[str, Any]) -> float :
+				n = f'{name}[{fkey(key, args, kwargs)}]' if fkey else name  # type: ignore
+				t = tkey(tags, args, kwargs) if tkey else { }               # type: ignore
 				frame = _getframe().f_back
 				assert frame
-				frame.f_locals[EXEC] = Execution(n, tags)
+				frame.f_locals[EXEC] = Execution(n, t)
 
 				return time()
 
@@ -199,19 +210,20 @@ def timed(root, key = None, tags = None) :
 			completed = c
 
 		else :
-			def s(parent: Optional[Execution], k: Optional[str] = None, tags: dict[str, str | int | float] = { }) -> float :
-				n = f'{name}[{k}]' if k else name
-				# print(f'==>    exec: {n}')
+			def s(parent: Optional[Execution], args: tuple[Any, ...], kwargs: dict[str, Any]) -> float :
 				if not parent :
 					return time()
 
+				n = f'{name}[{fkey(key, args, kwargs)}]' if fkey else name  # type: ignore
+				# print(f'==>    exec: {n}')
 				# print(f'===> got parent: {n} -> {parent._name}')
 
 				if n in parent.nested :
 					exec = parent.nested[n]
 
 				else :
-					exec = parent.nested[n] = Execution(n, tags)
+					t = tkey(tags, args, kwargs) if tkey else { }  # type: ignore
+					exec = parent.nested[n] = Execution(n, t)
 
 				frame = _getframe().f_back
 				assert frame
@@ -228,10 +240,11 @@ def timed(root, key = None, tags = None) :
 
 			start     = s
 			completed = c
+			del s, c
 
 		if iscoroutinefunction(func) :
-			async def coro(parent: Optional[Execution], args: Any, kwargs: Any) -> Any :
-				s: float = start(parent, fkey(key, *args, **kwargs), tkey(tags, *args, **kwargs))  # type: ignore
+			async def coro(parent: Optional[Execution], args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any :
+				s: float = start(parent, args, kwargs)
 
 				try :
 					return await func(*args, **kwargs)
@@ -253,7 +266,7 @@ def timed(root, key = None, tags = None) :
 		else :
 			@wraps(func)
 			def wrapper(*args: Any, **kwargs: Any) -> Any :
-				s: float = start(_get_parent(_getframe()), fkey(key, *args, **kwargs), tkey(tags, *args, **kwargs))  # type: ignore
+				s: float = start(_get_parent(_getframe()), args, kwargs)
 
 				try :
 					return func(*args, **kwargs)
@@ -292,23 +305,24 @@ def timed(root, key = None, tags = None) :
 timed.root = timed(True)
 timed.logger: Callable[[str, Execution], None] = None
 timed.key = lambda x : timed(False, x)
+timed.tagged = lambda x : timed(False, tags=x)
 
 
 def link(func: Callable) -> Callable :
 	# assert iscoroutinefunction(func)
 
+	async def coro(parent: Optional[Execution], args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any :
+		if parent :
+			frame = _getframe().f_back
+			assert frame
+			frame.f_locals[EXEC] = parent
+
+		return await func(*args, **kwargs)
+
 	@wraps(func)
 	def wrapper(*args: Any, **kwargs: Any) -> Coroutine[Any, Any, Any] :
 		parent = _get_parent(_getframe())
-
-		async def coro() -> Any :
-			if parent :
-				locals()[EXEC] = parent
-				# print(f'===> set parent: {func.__module__}.{func.__qualname__} -> {parent._name}')
-
-			return await func(*args, **kwargs)
-
-		return coro()
+		return coro(parent, args, kwargs)
 
 	sig = signature(func)
 	dec_params = [p for p in sig.parameters.values() if p.kind is Parameter.POSITIONAL_OR_KEYWORD]

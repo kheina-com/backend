@@ -2,14 +2,14 @@ from asyncio import sleep
 from enum import IntEnum
 from typing import Any, Optional, Self
 
-from avrofastapi.schema import convert_schema
-from avrofastapi.serialization import AvroDeserializer, AvroSerializer, Schema, parse_avro_schema
-from cache import AsyncLRU
+from async_lru import alru_cache
 from pydantic import BaseModel
 
 from avro_schema_repository.schema_repository import SchemaRepository
 from posts.repository import Repository as Posts
 from shared.auth import KhUser, Scope
+from shared.avro.schema import convert_schema
+from shared.avro.serialization import AvroDeserializer, AvroSerializer, Schema, parse_avro_schema
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
 from shared.datetime import datetime
@@ -47,13 +47,13 @@ class Repository(SqlInterface) :
 		super().__init__(*args, conversions={ IntEnum: lambda x: x.value }, **kwargs)
 
 
-	@AsyncLRU(maxsize=32)
 	@staticmethod
+	@alru_cache(maxsize=32)
 	async def _get_schema(fingerprint: bytes) -> Schema:
 		return parse_avro_schema((await repo.getSchema(fingerprint)).decode())
 
 
-	@AsyncLRU(maxsize=0)
+	@alru_cache(None)
 	async def _get_serializer(self: Self, report_type: InternalReportType) -> tuple[bytes, AvroSerializer] :
 		model = Repository._report_type_map[report_type]
 		return AvroMarker + await repo.addSchema(convert_schema(model)), AvroSerializer(model)

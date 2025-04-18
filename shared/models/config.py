@@ -1,42 +1,34 @@
 from abc import ABCMeta, abstractmethod
 from enum import Enum
-from typing import Callable, Self
+from functools import lru_cache
+from typing import Self
 
-from avrofastapi import schema, serialization
-from avrofastapi.serialization import AvroDeserializer, AvroSerializer, Schema, parse_avro_schema
-from cache import AsyncLRU
+from async_lru import alru_cache
 from pydantic import BaseModel
 
 from avro_schema_repository.schema_repository import AvroMarker, SchemaRepository
-from shared.caching import ArgsCache
-from shared.utilities.json import json_stream
+
+from ..avro.schema import convert_schema
+from ..avro.serialization import AvroDeserializer, AvroSerializer, Schema, parse_avro_schema
 
 
 repo: SchemaRepository = SchemaRepository()
 
 
-@AsyncLRU(maxsize=32)
+@alru_cache(maxsize=32)
 async def getSchema(fingerprint: bytes) -> Schema :
 	return parse_avro_schema((await repo.getSchema(fingerprint)).decode())
-
-
-def _convert_schema(model: type[BaseModel], error: bool = False, conversions: dict[type, Callable[[schema.AvroSchemaGenerator, type], schema.AvroSchema] | schema.AvroSchema] = { }) -> schema.AvroSchema :
-	generator: schema.AvroSchemaGenerator = schema.AvroSchemaGenerator(model, error, conversions)
-	return json_stream(generator.schema())
-
-
-serialization.convert_schema = schema.convert_schema = _convert_schema
 
 
 class Store(BaseModel, metaclass=ABCMeta) :
 
 	@classmethod
-	@ArgsCache(float('inf'))
+	@alru_cache(None)
 	async def fingerprint(cls: type[Self]) -> bytes :
-		return await repo.addSchema(schema.convert_schema(cls))
+		return await repo.addSchema(convert_schema(cls))
 
 	@classmethod
-	@ArgsCache(float('inf'))
+	@lru_cache(maxsize=0)
 	def serializer(cls: type[Self]) -> AvroSerializer :
 		return AvroSerializer(cls)
 
