@@ -6,9 +6,10 @@ from random import randrange
 from re import Match, Pattern
 from re import compile as re_compile
 from typing import Literal, Optional, Self
+from platform import platform
 
 import aerospike
-from patreon import API as PatreonApi
+from aiohttp import ClientTimeout, request
 
 from shared.auth import KhUser
 from shared.caching import AerospikeCache
@@ -24,7 +25,7 @@ from users.repository import Repository as Users
 from .models import OTP, BannerStore, BlockBehavior, Blocking, BlockingBehavior, ConfigsResponse, ConfigType, CostsStore, CssProperty, CssValue, Funding, OtpType, Store, Theme, UserConfigKeyFormat, UserConfigResponse, UserConfigType
 
 
-PatreonClient: PatreonApi = PatreonApi(fetch('creator_access_token', str))
+creator_access_token: str = fetch('creator_access_token', str)
 KVS: KeyValueStore = KeyValueStore('kheina', 'configs', local_TTL=60)
 users: Users = Users()
 ColorRegex: Pattern = re_compile(r'^(?:#(?P<hex>[a-f0-9]{8}|[a-f0-9]{6})|(?P<var>[a-z0-9-]+))$')
@@ -53,7 +54,18 @@ class Configs(SqlInterface) :
 		if environment.is_local() :
 			return randrange(1000, 1500)
 
-		campaign = PatreonClient.fetch_campaign()
+		async with request(
+			'GET',
+			'https://www.patreon.com/api/oauth2/api/current_user/campaigns',
+			raise_for_status = True,
+			timeout = ClientTimeout(10),
+			headers = {
+				'Authorization': f'Bearer {creator_access_token}',
+				'User-Agent': f'Patreon-Python, version 0.5.0, platform {platform()}'
+			},
+		) as r:
+			campaign = await r.json()
+
 		return campaign.data()[0].attribute('campaign_pledge_sum') # type: ignore
 
 
