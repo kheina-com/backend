@@ -1,5 +1,4 @@
 from asyncio import Lock
-from collections import OrderedDict
 from copy import copy
 from functools import partial, wraps
 from inspect import FullArgSpec, Parameter, getfullargspec, iscoroutinefunction, signature
@@ -7,7 +6,7 @@ from time import time
 from typing import Any, Callable, Dict, Hashable, Iterable, Optional, Tuple
 
 from ..timing import timed
-from ..utilities import __clear_cache__
+from ..utilities import __clear_cache__, ensure_future
 from .key_value_store import KeyValueStore
 
 
@@ -174,14 +173,14 @@ def AerospikeCache(
 					data = await func(*args, **kwargs)
 
 					if writable :
-						await decorator.kvs.put_async(key, data, TTL)
+						ensure_future(decorator.kvs.put_async(key, data, TTL))
 
 				else :
 					if not deepTypecheck(return_type, data) :
 						data = await func(*args, **kwargs)
 
 						if writable :
-							await decorator.kvs.put_async(key, data, TTL)
+							ensure_future(decorator.kvs.put_async(key, data, TTL))
 
 				return data
 
