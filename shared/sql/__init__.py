@@ -8,6 +8,7 @@ from typing import Any, Awaitable, Callable, Optional, Protocol, Self, Union
 from uuid import UUID
 
 from psycopg import AsyncClientCursor, AsyncConnection, AsyncCursor, Binary, OperationalError
+from psycopg.sql import SQL
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 from pydantic.fields import ModelField
@@ -123,7 +124,7 @@ class SqlInterface :
 	@timed
 	async def query_async(
 		self:      Self,
-		sql:       Union[str, Query],
+		sql:       Query | SQL | str,
 		params:    tuple[Any, ...] = (),
 		commit:    bool            = False,
 		fetch_one: bool            = False,
@@ -133,7 +134,13 @@ class SqlInterface :
 		await self.open()
 
 		if isinstance(sql, Query) :
-			sql, params = sql.build()
+			params = tuple(sql.params())
+
+		elif isinstance(sql, str) :
+			sql = SQL(sql)  # type: ignore
+
+		elif not isinstance(sql, SQL) :
+			raise TypeError('sql must be one of: psycopg.sql.SQL, shared.sql.query.Query, or str.')
 
 		params = tuple(map(self._convert_item, params))
 		self.logger.debug({ 'sql': sql, 'params': params })
@@ -142,8 +149,7 @@ class SqlInterface :
 			async with SqlInterface.pool.connection() as conn :
 				try :
 					async with AsyncClientCursor(conn) as cur :
-						# TODO: convert fuzzly's Query implementation into a psycopg composable
-						await cur.execute(sql, params) # type: ignore
+						await cur.execute(sql, params)
 
 						if commit :
 							await conn.commit()
@@ -630,21 +636,26 @@ class Transaction :
 	@timed
 	async def query_async(
 		self:      Self,
-		sql:       Union[str, Query],
+		sql:       Query | SQL | str,
 		params:    tuple[Any, ...] = (),
 		fetch_one: bool            = False,
 		fetch_all: bool            = False,
 	) -> Any :
-		if isinstance(sql, Query) :
-			sql, params = sql.build()
-
 		assert self.conn
+		if isinstance(sql, Query) :
+			params = tuple(sql.params())
+
+		elif isinstance(sql, str) :
+			sql = SQL(sql)  # type: ignore
+
+		elif not isinstance(sql, SQL) :
+			raise TypeError('sql must be one of: psycopg.sql.SQL, shared.sql.query.Query, or str.')
+
 		params = tuple(map(self._sql._convert_item, params))
 		self._sql.logger.debug({ 'sql': sql, 'params': params })
 
 		try :
-			# TODO: convert fuzzly's Query implementation into a psycopg composable
-			cur: AsyncCursor = await self.conn.execute(sql, params) # type: ignore
+			cur: AsyncCursor = await self.conn.execute(sql, params)
 
 			if fetch_one :
 				return await cur.fetchone()

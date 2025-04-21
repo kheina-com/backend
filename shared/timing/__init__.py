@@ -4,7 +4,7 @@ from logging import getLogger
 from sys import _getframe
 from time import time
 from types import FrameType
-from typing import Any, Callable, Coroutine, Hashable, Literal, Optional, Self
+from typing import Any, Awaitable, Callable, Coroutine, Hashable, Literal, Optional, ParamSpec, Self, TypeVar, overload
 
 from ..utilities import get_arg_spec
 from ..utilities.units import Time as TimeUnit
@@ -109,6 +109,23 @@ def _get_parent(frame: Optional[FrameType]) -> Optional[Execution] :
 		frame = frame.f_back
 
 
+P = ParamSpec('P'); T = TypeVar('T')
+
+# @overload
+# def timed(root: Callable[P, Awaitable[T]], key: None = None, tags: None = None) -> Callable[P, Awaitable[T]] : ...
+
+# @overload
+# def timed(root: Callable[P, CoroutineType[..., ..., T]], key: None = None, tags: None = None) -> Callable[P, CoroutineType[..., ..., T]] : ...
+
+@overload
+def timed(root: Callable[P, T], key: None = None, tags: None = None) -> Callable[P, T] : ...
+
+# @overload
+# def timed(root: bool, key: Any = None, tags: Any = None) -> Callable[[Callable[P, Awaitable[T]]], Callable[P, Awaitable[T]]] : ...
+
+@overload
+def timed(root: bool, key: str | Callable[[Any, ...], str] | None = None, tags: dict[str, int | str] | Callable[[Any, ...], dict[str, str]] | None = None) -> Callable[[Callable[P, T]], Callable[P, T]] : ...
+
 # it's required for timed and decorator to not be annotated otherwise it fucks up @wraps(func), don't ask me why.
 def timed(root, key = None, tags = None) :
 	"""
@@ -117,9 +134,12 @@ def timed(root, key = None, tags = None) :
 	- if root = True, timing values are logged on completion.
 	- if root = False, timing values are stored in the root's callstack and logged upon the root's completion.
 	- if timed is used without passing root, it is assumed to be false.
-	- key can be a string or a function.
+	- key can be a string or a function returning such.
 		- if type(key) == str, args and kwargs are passed to key.format
-		- if type(key) == callable, arms and kwards are passed to key directly: key(*args, **kwargs)
+		- if type(key) == callable, args and kwargs are passed to key directly: key(*args, **kwargs)
+	- tags can be a dict[str, int | str] or a function returning dict[str, str].
+		- if type(tags) == dict, tags are assembled where keys are used as tag keys and the values pull data from func args. int may be used to pull positional args, str may be used to pull keyword args
+		- if type(tags) == callable, args and kwargs are passed to tags directly: key(*args, **kwargs)
 
 	`@timed.root` may be used as a shorthand for `@timed(True)`
 	`@timed.key('key')` may be used as a shorthand for `@timed(False, 'key')`
@@ -135,7 +155,7 @@ def timed(root, key = None, tags = None) :
 		logger = getLogger('stats')
 		timed.logger = lambda n, x : logger.info({ n: x.dict() })
 
-	def decorator(func) :
+	def decorator(func: Any) -> Any :
 		fkey: Optional[
 			Callable[[str, tuple[Any, ...], dict[str, Any]], str] |
 			Callable[[Callable[[Any, Any], str], tuple[Any, ...], dict[str, Any]], str]
@@ -256,7 +276,7 @@ def timed(root, key = None, tags = None) :
 					completed(s)
 
 			@wraps(func)
-			def wrapper(*args: Any, **kwargs: Any) -> Coroutine[Any, Any, Any] :
+			def wrapper(*args: Any, **kwargs: Any) -> Any :
 				parent = _get_parent(_getframe())
 				return coro(parent, args, kwargs)
 

@@ -505,7 +505,7 @@ class Posts(Repository) :
 		cte, _sort, parsed = await self._parse_tags(tags)
 		sort = _sort or sort
 
-		cte.join(
+		cte = cte.clone().join(
 			Join(
 				JoinType.inner,
 				Table('kheina.public.post_scores'),
@@ -537,6 +537,15 @@ class Posts(Repository) :
 		).page(
 			page,
 		)
+
+		sql, params = cte.build()
+		self.logger.debug({
+			'trace':  trace,
+			'query':  sql,
+			'params': params,
+			'tags':   tags,
+			**parsed.__dict__,
+		})
 
 		if sort in { PostSort.new, PostSort.old } :
 			order = Order.descending_nulls_first if sort == PostSort.new else Order.ascending_nulls_last

@@ -1,3 +1,4 @@
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum, unique
 from functools import lru_cache
@@ -268,7 +269,7 @@ class CTE :
 		yield from self.query.params()
 
 
-class Query(Composable) :
+class Query(Composed) :
 
 	def __init__(self: Self, *table: Table) -> None :
 		for t in table :
@@ -291,6 +292,10 @@ class Query(Composable) :
 		self._insert:    Optional[Insert]                     = None
 		self._returning: Optional[tuple[str, ...]]            = None
 
+	@timed
+	def clone(self: Self) -> 'Query' :
+		return deepcopy(self)
+
 	def as_string(self: Self, context: Optional[AdaptContext] = None) -> str :
 		return self.__build_query__() + ';'
 
@@ -300,10 +305,10 @@ class Query(Composable) :
 		return self.as_string().encode(enc)
 
 	def __add__(self: Self, _: Composable) -> Composed :
-		raise NotImplementedError('don\'t want this')
+		raise NotImplementedError("don't want this")
 
 	def __mul__(self: Self, _: int) -> Composed :
-		raise NotImplementedError('don\'t want this')
+		raise NotImplementedError("don't want this")
 
 	@timed
 	def __build_query__(self: Self) -> str :
