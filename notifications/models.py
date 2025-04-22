@@ -15,6 +15,15 @@ class ServerKey(BaseModel) :
 	application_server_key: str
 
 
+class VapidConfig(BaseModel) :
+	__table_name__ = Table('kheina.public.vapid_config')
+
+	vapid_id: int = Field(description='orm:"pk; gen"')
+	key_id:   int
+	created:  datetime = datetime.fromtimestamp(0)
+	data:     bytes
+
+
 class SubscriptionInfo(Store) :
 	endpoint:       str
 	expirationTime: Optional[int]
@@ -33,7 +42,8 @@ class Subscription(BaseModel) :
 	sub_id refers to the guid from an auth token. this way, on log out or expiration, a subscription can be removed from the database proactively
 	"""
 
-	user_id:           int   = Field(description='orm:"pk"')
+	user_id:           int = Field(description='orm:"pk"')
+	key_id:            int
 	subscription_info: bytes = Field(description='orm:"col[sub_info]"')
 
 

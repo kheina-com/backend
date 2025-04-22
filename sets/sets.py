@@ -2,7 +2,7 @@ from asyncio import Task, ensure_future, wait
 from collections import defaultdict
 from typing import Optional, Self, Tuple, Union
 
-from async_lru import alru_cache
+from shared.caching import alru_cache
 from psycopg.errors import UniqueViolation
 
 from posts.models import InternalPost, MediaType, Post, PostId, PostSize, Privacy, Rating

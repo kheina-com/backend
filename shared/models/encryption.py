@@ -1,7 +1,7 @@
 from dataclasses import dataclass
+from datetime import datetime
 from secrets import token_bytes
 from typing import Optional, Self
-from xmlrpc.client import boolean
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
@@ -9,12 +9,15 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.serialization import load_der_public_key
+from pydantic import BaseModel, Field
 
 from ..base64 import b64decode, b64encode
+from ..config.credentials import fetch
+from ..sql.query import Table
 
 
 @dataclass
-class Keys :
+class RootKeys :
 	aes:             AESGCM
 	_aes_bytes:      bytes
 	ed25519:         Optional[Ed25519PrivateKey]
@@ -44,21 +47,21 @@ class Keys :
 		)
 
 	@staticmethod
-	def generate() -> 'Keys' :
+	def generate() -> 'RootKeys' :
 		aesbytes = AESGCM.generate_key(256)
 		aeskey = AESGCM(aesbytes)
 		ed25519priv = Ed25519PrivateKey.generate()
 
-		return Keys(
+		return RootKeys(
 			aes             = aeskey,
-			_aes_bytes      = aesbytes,
 			ed25519         = ed25519priv,
 			pub             = ed25519priv.public_key(),
-			associated_data = Keys._encode_pub(ed25519priv.public_key()),
+			associated_data = RootKeys._encode_pub(ed25519priv.public_key()),
+			_aes_bytes      = aesbytes,
 		)
 
 	@staticmethod
-	def load(aes: str, pub: str, priv: Optional[str] = None) -> 'Keys' :
+	def load(aes: str, pub: str, priv: Optional[str] = None) -> 'RootKeys' :
 		aesbytes: bytes; aes_sig: bytes
 		aesbytes, aes_sig = map(b64decode, aes.split('.', 2))
 
@@ -73,7 +76,7 @@ class Keys :
 		pub_key.verify(pub_sig, pub_decrypted)
 		pub_key.verify(aes_sig, aesbytes)
 
-		associated_data: bytes = Keys._encode_pub(pub_key)
+		associated_data: bytes = RootKeys._encode_pub(pub_key)
 
 		pk: Optional[Ed25519PrivateKey] = None
 		if priv :
@@ -83,7 +86,7 @@ class Keys :
 			pub_key.verify(priv_sig, priv_decrypted)
 			pk = Ed25519PrivateKey.from_private_bytes(priv_decrypted)
 
-		return Keys(
+		return RootKeys(
 			aes             = aeskey,
 			_aes_bytes      = aesbytes,
 			ed25519         = pk,
@@ -91,7 +94,7 @@ class Keys :
 			associated_data = associated_data,
 		)
 
-	def dump(self: Self, priv: boolean = False) -> dict[str, str] :
+	def dump(self: Self, priv: bool = False) -> dict[str, str] :
 		if not self.ed25519 :
 			raise ValueError('can only dump keys that contain private keys')
 
@@ -104,3 +107,95 @@ class Keys :
 			data['priv'] = b'.'.join(map(b64encode, [(nonce := token_bytes(12)), self.aes.encrypt(nonce, (pb := self.ed25519.private_bytes_raw()), self.associated_data), self.ed25519.sign(pb)])).decode()
 
 		return data
+
+
+@dataclass
+class Keys(RootKeys) :
+	key_id:  int
+	purpose: str
+	ed25519: Ed25519PrivateKey
+
+	@staticmethod
+	def generate(purpose: str) -> 'Keys' :
+		aesbytes = AESGCM.generate_key(256)
+		aeskey = AESGCM(aesbytes)
+		ed25519priv = Ed25519PrivateKey.generate()
+
+		return Keys(
+			_aes_bytes      = aesbytes,
+			aes             = aeskey,
+			ed25519         = ed25519priv,
+			pub             = ed25519priv.public_key(),
+			associated_data = Keys._encode_pub(ed25519priv.public_key()),
+			purpose         = purpose,
+			key_id          = -1,
+		)
+
+
+class Key(BaseModel) :
+	__table_name__: Table = Table('kheina.public.data_encryption_keys')
+
+	key_id:         int      = Field(description='orm:"pk; gen"')
+	purpose:        str      = Field(description='orm:"pk"')
+	created:        datetime = Field(description='orm:"gen"')
+	aes_bytes:      bytes
+	aes_nonce:      bytes
+	aes_signature:  bytes
+	pub_bytes:      bytes
+	pub_nonce:      bytes
+	pub_signature:  bytes
+	priv_bytes:     bytes
+	priv_nonce:     bytes
+	priv_signature: bytes
+
+	@staticmethod
+	def new(key_id: int, purpose: str) -> 'Key' :
+		return Key(
+			key_id         = key_id,
+			purpose        = purpose,
+			created        = datetime.fromtimestamp(0),
+			aes_bytes      = b'',
+			aes_nonce      = b'',
+			aes_signature  = b'',
+			pub_bytes      = b'',
+			pub_nonce      = b'',
+			pub_signature  = b'',
+			priv_bytes     = b'',
+			priv_nonce     = b'',
+			priv_signature = b'',
+		)
+
+	def ToKeys(self: Self) -> Keys :
+		root      = fetch('root', dict[str, str])
+		root_keys = Keys.load(root['aes'], root['pub'], root['priv'])
+
+		aes_dec  = root_keys.decrypt(b'.'.join(list(map(b64encode, (self.aes_nonce,  self.aes_bytes,  self.aes_signature)))))
+		pub_dec  = root_keys.decrypt(b'.'.join(list(map(b64encode, (self.pub_nonce,  self.pub_bytes,  self.pub_signature)))))
+		priv_dec = root_keys.decrypt(b'.'.join(list(map(b64encode, (self.priv_nonce, self.priv_bytes, self.priv_signature)))))
+		pub_key  = load_der_public_key(pub_dec, backend=default_backend())
+		assert isinstance(pub_key, Ed25519PublicKey)
+
+		return Keys(
+			_aes_bytes      = aes_dec,
+			aes             = AESGCM(aes_dec),
+			ed25519         = Ed25519PrivateKey.from_private_bytes(priv_dec),
+			pub             = pub_key,
+			associated_data = Keys._encode_pub(pub_key),
+			purpose         = self.purpose,
+			key_id          = self.key_id,
+		)
+
+	@staticmethod
+	def FromKeys(keys: Keys) -> 'Key' :
+		if not keys.ed25519 :
+			raise ValueError('can only dump keys that contain private keys')
+
+		root      = fetch('root', dict[str, str])
+		root_keys = Keys.load(root['aes'], root['pub'], root['priv'])
+		key       = Key.new(-1, keys.purpose)
+
+		key.aes_nonce,  key.aes_bytes,  key.aes_signature  = tuple(map(b64decode, root_keys.encrypt(keys._aes_bytes).split(b'.', 3)))
+		key.pub_nonce,  key.pub_bytes,  key.pub_signature  = tuple(map(b64decode, root_keys.encrypt(keys.associated_data).split(b'.', 3)))
+		key.priv_nonce, key.priv_bytes, key.priv_signature = tuple(map(b64decode, root_keys.encrypt(keys.ed25519.private_bytes_raw()).split(b'.', 3)))
+
+		return key

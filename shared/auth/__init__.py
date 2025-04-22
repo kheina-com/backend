@@ -6,7 +6,7 @@ from uuid import UUID
 
 import aerospike
 import ujson as json
-from async_lru import alru_cache
+from ..caching import alru_cache
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes

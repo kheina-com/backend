@@ -1,6 +1,6 @@
 from typing import Self, Tuple
 
-from async_lru import alru_cache
+from .caching import alru_cache
 
 from .models import Privacy
 from .sql import SqlInterface

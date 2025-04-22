@@ -4,7 +4,7 @@ from hashlib import sha1
 from typing import Any, Callable, Optional, Self
 
 import aerospike
-from async_lru import alru_cache
+from shared.caching import alru_cache
 from pydantic import BaseModel
 
 from avro_schema_repository.schema_repository import SchemaRepository

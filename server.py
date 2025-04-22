@@ -51,9 +51,11 @@ app.add_middleware(
 		'api.fuzz.ly',
 		'fuzz.ly',
 	},
-	allowed_protocols = set(['http', 'https'] 
+	allowed_protocols = set(
+		['http', 'https'] 
 		if environment.is_local()
-		else ['https']),
+		else ['https']
+	),
 	allowed_headers = [
 		'accept',
 		'accept-language',
@@ -95,7 +97,7 @@ app.add_middleware(
 	max_age = 86400,
 )
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=[
-	environ.get('pod_ip', '127.0.0.1'),
+	environ.get('pod_ip',   '127.0.0.1'),
 	environ.get('pod_host', 'localhost'),
 ])
 app.add_middleware(KhAuthMiddleware, required=False)

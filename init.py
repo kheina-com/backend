@@ -22,7 +22,7 @@ from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import decryptCredentialFile, fetch
 from shared.datetime import datetime
 from shared.logging import TerminalAgent
-from shared.models.encryption import Keys
+from shared.models.encryption import RootKeys
 from shared.sql import SqlInterface
 
 
@@ -327,8 +327,8 @@ async def updatePassword() -> LoginRequest :
 	return acct
 
 
-def _generate_keys() -> Keys :
-	keys = Keys.generate()
+def _generate_keys() -> RootKeys :
+	keys = RootKeys.generate()
 
 	if isfile('credentials/aes.key') :
 		remove('credentials/aes.key')

@@ -1,5 +1,4 @@
 from asyncio import Task, create_task
-from datetime import datetime, timedelta
 from typing import Self
 
 from posts.models import InternalPost, Post

@@ -2,11 +2,11 @@ from asyncio import Task, create_task
 from collections.abc import Iterable
 from datetime import datetime
 from enum import Enum
+from platform import platform
 from random import randrange
 from re import Match, Pattern
 from re import compile as re_compile
 from typing import Literal, Optional, Self
-from platform import platform
 
 import aerospike
 from aiohttp import ClientTimeout, request

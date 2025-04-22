@@ -4,7 +4,7 @@ from logging import getLogger
 from sys import _getframe
 from time import time
 from types import FrameType
-from typing import Any, Awaitable, Callable, Coroutine, Hashable, Literal, Optional, ParamSpec, Self, TypeVar, overload
+from typing import Any, Callable, Hashable, Literal, Optional, ParamSpec, Self, TypeVar, overload
 
 from ..utilities import get_arg_spec
 from ..utilities.units import Time as TimeUnit
@@ -328,21 +328,30 @@ timed.key = lambda x : timed(False, x)
 timed.tagged = lambda x : timed(False, tags=x)
 
 
-def link(func: Callable) -> Callable :
-	# assert iscoroutinefunction(func)
-
-	async def coro(parent: Optional[Execution], args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any :
+def link(func: Callable[P, T]) -> Callable[P, T] :
+	def start(parent: Optional[Execution]) :
 		if parent :
 			frame = _getframe().f_back
 			assert frame
 			frame.f_locals[EXEC] = parent
 
-		return await func(*args, **kwargs)
+	if iscoroutinefunction(func) :
+		async def coro(parent: Optional[Execution], args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any :
+			start(parent)
+			return await func(*args, **kwargs)
 
-	@wraps(func)
-	def wrapper(*args: Any, **kwargs: Any) -> Coroutine[Any, Any, Any] :
-		parent = _get_parent(_getframe())
-		return coro(parent, args, kwargs)
+		@wraps(func)
+		def wrapper(*args: Any, **kwargs: Any) -> Any :
+			parent = _get_parent(_getframe())
+			return coro(parent, args, kwargs)
+
+		markcoroutinefunction(wrapper)
+
+	else :
+		@wraps(func)
+		def wrapper(*args: Any, **kwargs: Any) -> Any :
+			start(_get_parent(_getframe()))
+			return func(*args, **kwargs)
 
 	sig = signature(func)
 	dec_params = [p for p in sig.parameters.values() if p.kind is Parameter.POSITIONAL_OR_KEYWORD]
@@ -351,11 +360,10 @@ def link(func: Callable) -> Callable :
 	wrapper.__signature__ = sig.replace(parameters=dec_params)      # type: ignore
 	wrapper.__name__ = func.__name__
 	wrapper.__doc__ = func.__doc__
-	wrapper.__wrapped__ = func
+	wrapper.__wrapped__ = func                                      # type: ignore
 	wrapper.__qualname__ = func.__qualname__
 	wrapper.__kwdefaults__ = getattr(func, '__kwdefaults__', None)  # type: ignore
 	wrapper.__dict__.update(func.__dict__)
-	markcoroutinefunction(wrapper)
 
 	return wrapper
 

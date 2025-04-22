@@ -4,7 +4,7 @@ from datetime import timedelta
 from math import ceil
 from typing import Iterable, Optional, Self
 
-from async_lru import alru_cache
+from shared.caching import alru_cache
 
 from sets.models import InternalSet, SetId
 from sets.repository import Repository as Sets

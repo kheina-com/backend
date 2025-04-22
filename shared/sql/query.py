@@ -399,6 +399,9 @@ class Query(Composed) :
 
 		return query
 
+	def __repr__(self) -> str:
+		return self.__build_query__() + ';'
+
 	def __str__(self: Self) -> str :
 		if self._function :
 			return f'{self._function}(' + self.__build_query__() + ')'

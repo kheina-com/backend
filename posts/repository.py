@@ -2,7 +2,7 @@ from asyncio import Task, create_task
 from collections import defaultdict
 from typing import Callable, Iterable, Mapping, Optional, Self
 
-from async_lru import alru_cache
+from shared.caching import alru_cache
 
 from shared.auth import KhUser, Scope
 from shared.caching import AerospikeCache

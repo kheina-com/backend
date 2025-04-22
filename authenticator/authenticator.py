@@ -12,7 +12,7 @@ import pyotp
 import ujson as json
 from argon2 import PasswordHasher as Argon2
 from argon2.exceptions import VerifyMismatchError
-from async_lru import alru_cache
+from shared.caching import alru_cache
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM

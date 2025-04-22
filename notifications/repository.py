@@ -11,25 +11,23 @@ from py_vapid import Vapid02
 from pydantic import BaseModel
 from pywebpush import WebPusher as _WebPusher
 
-from configs.models import Config
-from posts.models import InternalPost, Post
+from posts.models import Post
 from shared.auth import KhUser, tokenMetadata
 from shared.base64 import b64encode
 from shared.caching import AerospikeCache
 from shared.caching.key_value_store import KeyValueStore
-from shared.config.credentials import fetch
 from shared.datetime import datetime
 from shared.exceptions.http_error import HttpErrorHandler, InternalServerError
-from shared.models import PostId, UserPortable
+from shared.kms import KeyManager, KeyPurpose, key_cutoff
+from shared.models import UserPortable
 from shared.models.auth import AuthState, TokenMetadata
-from shared.models.encryption import Keys
 from shared.sql import SqlInterface
-from shared.sql.query import Field, Operator, Order, Value, Where
+from shared.sql.query import Field, Operator, Order, Query, Value, Where
 from shared.timing import timed
 from shared.utilities import uuid7
 from shared.utilities.json import json_stream
 
-from .models import InteractNotification, InternalInteractNotification, InternalNotification, InternalPostNotification, InternalUserNotification, NotificationType, PostNotification, ServerKey, Subscription, SubscriptionInfo, UserNotification
+from .models import InteractNotification, InternalInteractNotification, InternalNotification, InternalPostNotification, InternalUserNotification, NotificationType, PostNotification, ServerKey, Subscription, SubscriptionInfo, UserNotification, VapidConfig
 
 
 @timed
@@ -67,11 +65,11 @@ class WebPusher(_WebPusher) :
 
 
 kvs: KeyValueStore = KeyValueStore('kheina', 'notifications')
+kms: KeyManager    = KeyManager()
 
 
 class Notifier(SqlInterface) :
 
-	keys:               Keys
 	subInfoFingerprint: bytes
 	serializerTypeMap:  dict[NotificationType, type[BaseModel]] = {
 		NotificationType.post:     InternalPostNotification,
@@ -80,33 +78,40 @@ class Notifier(SqlInterface) :
 	}
 
 	async def startup(self) -> None :
-		if getattr(Notifier, 'keys', None) is None :
-			Notifier.keys = Keys.load(**fetch('notifications', dict[str, str]))
+		await kms.open()
 
 
 	@timed
-	@AerospikeCache('kheina', 'notifications', 'vapid-config', _kvs=kvs)
+	@AerospikeCache('kheina', 'notifications', 'vapid-config', TTL_days=1, _kvs=kvs)
 	async def getVapidPem(self: Self) -> bytes :
 		async with self.transaction() as t :
-			vapid = Vapid02()
-			vapid_config = Config(
-				key        = 'vapid-config',
-				created    = datetime.zero(),
-				updated    = datetime.zero(),
-				updated_by = 0,
-				bytes_     = None,
+			data = await t.where(VapidConfig,
+				Where(
+					Field('vapid_config', 'created'),
+					Operator.greater_than,
+					Value(datetime.now() - key_cutoff),
+				),
+				order = [(
+					Field('vapid_config', 'vapid_id'),
+					Order.descending_nulls_last,
+				)],
+				limit = 1,
 			)
 
-			try :
-				vapid_config = await t.select(vapid_config)
-				assert vapid_config.bytes_
-				return Notifier.keys.decrypt(vapid_config.bytes_)
+			if data :
+				key = await kms.GetKeysByKeyId(data[0].key_id, KeyPurpose.notifications)
+				return key.decrypt(data[0].data)
 
-			except KeyError :
-				pass
-
+			vapid = Vapid02()
 			vapid.generate_keys()
-			vapid_config.bytes_ = Notifier.keys.encrypt(vapid.private_pem())
+
+			key = await kms.GetKeysByPurpose(KeyPurpose.notifications)
+			vapid_config = VapidConfig(
+				vapid_id = -1,
+				key_id   = key.key_id,
+				data     = key.encrypt(vapid.private_pem()),
+			)
+
 			await t.insert(vapid_config)
 			return vapid.private_pem()
 
@@ -131,30 +136,36 @@ class Notifier(SqlInterface) :
 	@HttpErrorHandler('registering subscription info', exclusions=['self', 'sub_info'])
 	async def registerSubInfo(self: Self, user: KhUser, sub_info: SubscriptionInfo) -> None :
 		assert user.token, 'this should always be populated when the user is authenticated'
+		key = await kms.GetKeysByPurpose(KeyPurpose.notifications)
 		data: bytes = await sub_info.serialize()
-		await self.query_async("""
-			select kheina.public.register_subscription(%s::uuid, %s, %s);
-			""", (
+		await kvs.remove_async(f'sub_info={user.user_id}')
+		await self.query_async(
+			'select kheina.public.register_subscription(%s::uuid, %s, %s, %s);',
+			(
 				user.token.guid,
 				user.user_id,
-				Notifier.keys.encrypt(data),
+				key.key_id,
+				key.encrypt(data),
 			),
 			commit = True,
 		)
-		await kvs.remove_async(f'sub_info={user.user_id}')
 
 
 	@timed
 	async def unregisterSubInfo(self: Self, user_id: int, sub_ids: list[UUID]) -> None :
-		await self.query_async("""
-			delete from kheina.public.subscriptions
-			where subscriptions.sub_id = any(%s);
-			""", (
-				sub_ids,
+		await kvs.remove_async(f'sub_info={user_id}')
+		await self.query_async(
+			Query(
+				Subscription.__table_name__,
+			).delete().where(
+				Where(
+					Field('subscriptions', 'sub_id'),
+					Operator.equal,
+					Value(sub_ids, functions=['any']),
+				),
 			),
 			commit = True,
 		)
-		await kvs.remove_async(f'sub_info={user_id}')
 
 
 	@timed
@@ -168,7 +179,8 @@ class Notifier(SqlInterface) :
 		))
 
 		for s in subs :
-			sub = Notifier.keys.decrypt(s.subscription_info)
+			key = await kms.GetKeysByKeyId(s.key_id, KeyPurpose.notifications)
+			sub = key.decrypt(s.subscription_info)
 			sub_info[s.sub_id] = await SubscriptionInfo.deserialize(sub)
 
 		return sub_info
@@ -204,7 +216,7 @@ class Notifier(SqlInterface) :
 			).send_async(
 				data             = ujson.dumps(json_stream(data)),
 				headers          = await self.vapidHeaders(sub),
-				content_encoding = "aes128gcm",
+				content_encoding = 'aes128gcm',
 			)
 
 			if not isinstance(res, ClientResponse) :

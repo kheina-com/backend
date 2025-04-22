@@ -3,7 +3,7 @@ from enum import Enum
 from functools import lru_cache
 from typing import Self
 
-from async_lru import alru_cache
+from ..caching import alru_cache
 from pydantic import BaseModel
 
 from avro_schema_repository.schema_repository import AvroMarker, SchemaRepository

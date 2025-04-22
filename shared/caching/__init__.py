@@ -3,26 +3,25 @@ from copy import copy
 from functools import partial, wraps
 from inspect import FullArgSpec, Parameter, getfullargspec, iscoroutinefunction, signature
 from time import time
-from typing import Any, Callable, Dict, Hashable, Iterable, Optional, Tuple
+from typing import Any, Callable, Dict, Hashable, Iterable, Optional, ParamSpec, Tuple, TypeVar, overload
+
+from async_lru import alru_cache as _alru_cache
 
 from ..timing import timed
 from ..utilities import __clear_cache__, ensure_future
 from .key_value_store import KeyValueStore
 
 
-class CalcDict(dict) :
+P = ParamSpec('P'); T = TypeVar('T')
 
-	def __init__(self, default: Callable[[Hashable], Any]) -> None :
-		self.default: Callable = default
+@overload
+def alru_cache(maxsize: Optional[int] = 128, typed: bool = False, *, ttl: Optional[float] = None) -> Callable[[Callable[P, T]], Callable[P, T]] : ...
 
+@overload
+def alru_cache(maxsize: Callable[P, T], /) -> Callable[P, T] : ...
 
-	def setdefault(self, default: Callable[[Hashable], Any]) -> None :
-		self.default = default
-
-
-	def __missing__(self, key: Hashable) -> Any :
-		self[key] = self.default(key)
-		return self[key]
+def alru_cache(*a: Any, **kw: Any) -> Any :
+	return _alru_cache(*a, **kw)
 
 
 _conversions: Dict[type, Callable] = {

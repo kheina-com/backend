@@ -1,7 +1,7 @@
 from typing import Iterable, Optional, Self
 
 import async_lru
-from async_lru import alru_cache
+from shared.caching import alru_cache
 
 from configs.configs import Configs
 from configs.models import Blocking

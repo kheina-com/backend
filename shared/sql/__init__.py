@@ -143,7 +143,7 @@ class SqlInterface :
 			raise TypeError('sql must be one of: psycopg.sql.SQL, shared.sql.query.Query, or str.')
 
 		params = tuple(map(self._convert_item, params))
-		self.logger.debug({ 'sql': sql, 'params': params })
+		self.logger.debug({ 'sql': sql.as_string(), 'params': params })
 
 		for _ in range(attempts) :
 			async with SqlInterface.pool.connection() as conn :
@@ -171,7 +171,7 @@ class SqlInterface :
 				except Exception as e :
 					self.logger.warning({
 						'message': 'unexpected error encountered during sql query.',
-						'query': sql,
+						'query': sql.as_string(),
 					}, exc_info=e)
 					# now attempt to recover by rolling back
 					raise
@@ -652,7 +652,7 @@ class Transaction :
 			raise TypeError('sql must be one of: psycopg.sql.SQL, shared.sql.query.Query, or str.')
 
 		params = tuple(map(self._sql._convert_item, params))
-		self._sql.logger.debug({ 'sql': sql, 'params': params })
+		self._sql.logger.debug({ 'sql': sql.as_string(), 'params': params })
 
 		try :
 			cur: AsyncCursor = await self.conn.execute(sql, params)
@@ -666,6 +666,6 @@ class Transaction :
 		except Exception as e :
 			self._sql.logger.warning({
 				'message': 'unexpected error encountered during sql query.',
-				'query': sql,
+				'query': sql.as_string(),
 			}, exc_info=e)
 			raise

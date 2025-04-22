@@ -2,7 +2,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Iterable, Mapping, Optional, Self
 
-from async_lru import alru_cache
+from shared.caching import alru_cache
 
 from shared.auth import KhUser
 from shared.caching import AerospikeCache
