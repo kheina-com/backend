@@ -2,13 +2,13 @@ from asyncio import Task, ensure_future, wait
 from collections import defaultdict
 from typing import Optional, Self, Tuple, Union
 
-from shared.caching import alru_cache
 from psycopg.errors import UniqueViolation
 
 from posts.models import InternalPost, MediaType, Post, PostId, PostSize, Privacy, Rating
 from posts.repository import Repository as Posts
 from posts.repository import privacy_map
 from shared.auth import KhUser, Scope
+from shared.caching import alru_cache
 from shared.datetime import datetime
 from shared.exceptions.http_error import BadRequest, Conflict, HttpErrorHandler, NotFound
 from shared.models.user import UserPrivacy

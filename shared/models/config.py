@@ -3,13 +3,13 @@ from enum import Enum
 from functools import lru_cache
 from typing import Self
 
-from ..caching import alru_cache
 from pydantic import BaseModel
 
 from avro_schema_repository.schema_repository import AvroMarker, SchemaRepository
 
 from ..avro.schema import convert_schema
 from ..avro.serialization import AvroDeserializer, AvroSerializer, Schema, parse_avro_schema
+from ..caching import alru_cache
 
 
 repo: SchemaRepository = SchemaRepository()

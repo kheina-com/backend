@@ -1,11 +1,11 @@
 from typing import Iterable, Optional, Self
 
 import async_lru
-from shared.caching import alru_cache
 
 from configs.configs import Configs
 from configs.models import Blocking
 from shared.auth import KhUser
+from shared.caching import alru_cache
 from shared.timing import timed
 
 from .models import Rating

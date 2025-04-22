@@ -6,7 +6,6 @@ from uuid import UUID
 
 import aerospike
 import ujson as json
-from ..caching import alru_cache
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
@@ -17,6 +16,7 @@ from authenticator.authenticator import AuthAlgorithm, Authenticator, AuthState,
 from shared.models.auth import AuthToken, _KhUser
 
 from ..base64 import b64decode, b64encode
+from ..caching import alru_cache
 from ..datetime import datetime
 from ..exceptions.http_error import Forbidden, Unauthorized
 from ..utilities import int_from_bytes

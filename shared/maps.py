@@ -1,7 +1,6 @@
 from typing import Self, Tuple
 
 from .caching import alru_cache
-
 from .models import Privacy
 from .sql import SqlInterface
 from .timing import timed

@@ -2,10 +2,8 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Iterable, Mapping, Optional, Self
 
-from shared.caching import alru_cache
-
 from shared.auth import KhUser
-from shared.caching import AerospikeCache
+from shared.caching import AerospikeCache, alru_cache
 from shared.caching.key_value_store import KeyValueStore
 from shared.exceptions.http_error import BadRequest, NotFound
 from shared.maps import privacy_map

@@ -12,7 +12,6 @@ import pyotp
 import ujson as json
 from argon2 import PasswordHasher as Argon2
 from argon2.exceptions import VerifyMismatchError
-from shared.caching import alru_cache
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -21,6 +20,7 @@ from psycopg.errors import UniqueViolation
 from shared import logging
 from shared.avro.serialization import AvroDeserializer, AvroSerializer
 from shared.base64 import b64decode, b64encode
+from shared.caching import alru_cache
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import fetch
 from shared.datetime import datetime

@@ -3,9 +3,7 @@ from enum import IntEnum
 from typing import Self
 
 from ..caching import alru_cache
-
-from shared.datetime import datetime
-
+from ..datetime import datetime
 from ..models.encryption import Key, Keys
 from ..sql import SqlInterface
 from ..sql.query import Field, Operator, Order, Value, Where

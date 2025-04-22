@@ -4,7 +4,6 @@ from hashlib import sha1
 from typing import Any, Callable, Optional, Self
 
 import aerospike
-from shared.caching import alru_cache
 from pydantic import BaseModel
 
 from avro_schema_repository.schema_repository import SchemaRepository
@@ -12,7 +11,7 @@ from posts.repository import Repository as Posts
 from shared.auth import KhUser, Scope
 from shared.avro.schema import convert_schema
 from shared.avro.serialization import AvroDeserializer, AvroSerializer, Schema, parse_avro_schema
-from shared.caching import AerospikeCache
+from shared.caching import AerospikeCache, alru_cache
 from shared.caching.key_value_store import KeyValueStore
 from shared.config.credentials import fetch
 from shared.datetime import datetime
