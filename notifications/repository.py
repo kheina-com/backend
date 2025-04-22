@@ -109,6 +109,7 @@ class Notifier(SqlInterface) :
 			vapid_config = VapidConfig(
 				vapid_id = -1,
 				key_id   = key.key_id,
+				created  = datetime.zero(),
 				data     = key.encrypt(vapid.private_pem()),
 			)
 

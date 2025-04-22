@@ -20,7 +20,7 @@ class VapidConfig(BaseModel) :
 
 	vapid_id: int = Field(description='orm:"pk; gen"')
 	key_id:   int
-	created:  datetime = datetime.fromtimestamp(0)
+	created:  datetime = Field(description='orm:"gen"')
 	data:     bytes
 
 
