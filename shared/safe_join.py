@@ -1,5 +1,4 @@
 import os
-from typing import List
 
 import ujson as json
 
@@ -12,7 +11,7 @@ cwd = setCwd()
 
 
 @SimpleCache(900)  # 15 minute cache
-def secureFolders() -> List[str] :
+def secureFolders() -> list[str] :
 	try :
 		with open('securefolders.json') as folders :
 			return json.load(folders)

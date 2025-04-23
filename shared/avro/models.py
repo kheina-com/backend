@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, conbytes, validator
@@ -29,10 +29,10 @@ class Error(BaseModel) :
 
 
 class ValidationErrorDetail(BaseModel) :
-	loc: List[str]
+	loc: list[str]
 	msg: str
 	type: str
 
 
 class ValidationError(BaseModel) :
-	detail: List[ValidationErrorDetail]
+	detail: list[ValidationErrorDetail]

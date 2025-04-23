@@ -1,7 +1,7 @@
 from asyncio import ensure_future
 from hashlib import sha1
 from re import compile as re_compile
-from typing import Callable, Dict, Optional
+from typing import Callable, Optional
 from uuid import UUID
 
 import aerospike
@@ -139,7 +139,7 @@ async def v1token(token: str) -> AuthToken :
 	)
 
 
-tokenVersionSwitch: Dict[bytes, Callable] = {
+tokenVersionSwitch: dict[bytes, Callable] = {
 	b'1': v1token,
 }
 

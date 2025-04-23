@@ -4,7 +4,7 @@ from enum import Enum, IntEnum
 from re import Pattern
 from re import compile as re_compile
 from types import UnionType
-from typing import Any, Callable, Dict, ForwardRef, List, Mapping, Optional, Self, Sequence, Set, Type, Union
+from typing import Any, Callable, ForwardRef, Mapping, Optional, Self, Sequence, Union
 from uuid import UUID
 
 from avro.errors import AvroException
@@ -25,7 +25,7 @@ class AvroFloat(float) :
 class SerializableIntEnum(IntEnum) :
 
 	@classmethod
-	def __call__(cls, value: Union[str, int], *args: Any, **kwargs: Any) :
+	def __call__(cls, value: str | int, *args: Any, **kwargs: Any) :
 		if isinstance(value, str) :
 			return cls[value]
 		IntEnum.__call__(cls, value, *args, **kwargs)
@@ -34,7 +34,7 @@ class SerializableIntEnum(IntEnum) :
 AvroSchema = Union[str, Mapping[str, Union['AvroSchema', list[str], int]], list['AvroSchema']]
 
 
-def convert_schema(model: Type[BaseModel], error: bool = False, conversions: dict[type, Union[Callable[['AvroSchemaGenerator', type], AvroSchema], AvroSchema]] = { }) -> AvroSchema :
+def convert_schema(model: type[BaseModel], error: bool = False, conversions: dict[type, Callable[['AvroSchemaGenerator', type], AvroSchema] | AvroSchema] = { }) -> AvroSchema :
 	generator: AvroSchemaGenerator = AvroSchemaGenerator(model, error, conversions)
 	return json_stream(generator.schema())
 
@@ -94,20 +94,20 @@ def _validate_avro_namespace(namespace: str, parent_namespace: Optional[str] = N
 
 class AvroSchemaGenerator :
 
-	def __init__(self, model: Type[BaseModel], error: bool = False, conversions: dict[type, Union[Callable[[Self, type], AvroSchema], AvroSchema]] = { }) -> None :
+	def __init__(self, model: type[BaseModel], error: bool = False, conversions: dict[type, Callable[[Self, type], AvroSchema] | AvroSchema] = { }) -> None :
 		"""
 		:param model: the pydantic model to generate a schema for
 		:param error: whether or not the model is an error
 		:param conversions: additional type conversion functions. it's a good idea to make sure the avro type is convertable to the python type through pydantic for encoding/decoding.
 		"""
-		self.model: Type[BaseModel] = model
+		self.model: type[BaseModel] = model
 		self.name: str = get_name(model)
 		_validate_avro_name(self.name)
 		self.namespace: str = getattr(model, '__namespace__', self.name)
 		_validate_avro_namespace(self.namespace)
 		self.error: bool = error or self.name.lower().endswith('error')
-		self.refs: Set[str] = set()
-		self._conversions: dict[type, Union[Callable[[Self, type], AvroSchema], AvroSchema]] = {
+		self.refs: set[str] = set()
+		self._conversions: dict[type, Callable[[Self, type], AvroSchema] | AvroSchema] = {
 			**AvroSchemaGenerator._conversions_,
 			**conversions,
 		}
@@ -125,7 +125,7 @@ class AvroSchemaGenerator :
 
 		return schema
 
-	def _convert_array(self: Self, model: Type[Sequence[Any]]) -> AvroSchema :
+	def _convert_array(self: Self, model: type[Sequence[Any]]) -> AvroSchema :
 		object_type: AvroSchema = self._get_type(model.__args__[0]) # type: ignore
 
 		# TODO: does this do anything?
@@ -142,28 +142,33 @@ class AvroSchemaGenerator :
 		}
 
 
-	def _convert_object(self: Self, model: Type[BaseModel]) -> AvroSchema :
+	def _convert_object(self: Self, model: type[BaseModel]) -> AvroSchema :
 		sub_namespace: Optional[str] = getattr(model, '__namespace__', None)
 		parent_namespace: str = self.namespace
 		if sub_namespace :
 			_validate_avro_namespace(sub_namespace, self.namespace)
 			self.namespace = sub_namespace
 
-		fields: List[AvroSchema] = []
+		fields: list[AvroSchema] = []
 
 		for name, field in model.__fields__.items() :
 			f: AvroSchema = { }
 			f['name'] = _validate_avro_name(name)
 			submodel = model.__annotations__[name]
 
-			if getattr(submodel, '__origin__', None) is Union and len(submodel.__args__) == 2 and type(None) in submodel.__args__ and field.default is None :
+			if (
+				(getattr(submodel, '__origin__', None) is Union or isinstance(submodel, UnionType)) and
+				len(submodel.__args__) == 2 and
+				type(None) in submodel.__args__ and
+				field.default is None
+			) :
 				# this is a special case where the field is nullable and the default value is null, but the actual value can be omitted from the schema
-				# we rearrange Optional[Type] and Union[Type, None] to Union[None, Type] so that null becomes the default type and the 'default' key is unnecessary
+				# we rearrange Optional[type] and Union[type, None] to Union[None, type] so that null becomes the default type and the 'default' key is unnecessary
 				type_index: int = 0 if submodel.__args__.index(type(None)) else 1
-				f['type'] = self._get_type(Union[None, submodel.__args__[type_index]]) # type: ignore
+				f['type'] = self._get_type(None | submodel.__args__[type_index])  # type: ignore
 
 			else :
-				f['type'] = self._get_type(submodel)
+				f['type'] = self._get_type(submodel)  # type: ignore
 
 				if not field.required :
 					# TODO: does this value need to be avro-encoded?
@@ -174,7 +179,7 @@ class AvroSchemaGenerator :
 		name: str = get_name(model)
 		_validate_avro_name(name)
 
-		schema: Dict[str, Union[str, List[AvroSchema]]] = {
+		schema: dict[str, str | list[AvroSchema]] = {
 			'type': 'record',
 			'name': name,
 			'fields': fields,
@@ -189,20 +194,20 @@ class AvroSchemaGenerator :
 		return schema
 
 
-	def _convert_union(self: Self, model: Type[Union[Any, Any]]) -> List[AvroSchema] :
-		return list(map(self._get_type, model.__args__))
+	def _convert_union(self: Self, model: type[Union[Any, ...] | UnionType]) -> list[AvroSchema] :
+		return list(map(self._get_type, model.__args__))  # type: ignore
 
 
-	def _convert_enum(self: Self, model: Type[Enum]) -> AvroSchema :
+	def _convert_enum(self: Self, model: type[Enum]) -> AvroSchema :
 		name: str = get_name(model)
 		_validate_avro_name(name)
 
-		values: Optional[List[str]] = list(map(lambda x : x.value, model.__members__.values()))
+		values: Optional[list[str]] = list(map(lambda x : x.value, model.__members__.values()))
 
 		if len(values) != len(set(values)) :
 			raise AvroException('enums must contain all unique values to be avro encoded')
 
-		schema: Dict[str, Union[str, List[str]]] = {
+		schema: dict[str, str | list[str]] = {
 			'type': 'enum',
 			'name': name,
 			'symbols': values,
@@ -216,7 +221,7 @@ class AvroSchemaGenerator :
 		return schema
 
 
-	def _convert_int_enum(self: Self, model: Type[IntEnum]) -> AvroSchema :
+	def _convert_int_enum(self: Self, model: type[IntEnum]) -> AvroSchema :
 		name: str = get_name(model) 
 		_validate_avro_name(name)
 
@@ -225,7 +230,7 @@ class AvroSchemaGenerator :
 		if len(values) != len(set(model.__members__.values())) :
 			raise AvroException('enums must contain all unique values to be avro encoded')
 
-		schema: Dict[str, Union[str, List[str]]] = {
+		schema: dict[str, str | list[str]] = {
 			'type': 'enum',
 			'name': name,
 			'symbols': values,
@@ -239,9 +244,9 @@ class AvroSchemaGenerator :
 		return schema
 
 
-	def _convert_bytes(self: Self, model: Type[ConstrainedBytes]) -> AvroSchema :
+	def _convert_bytes(self: Self, model: type[ConstrainedBytes]) -> AvroSchema :
 		if model.min_length == model.max_length and model.max_length :
-			schema: Dict[str, Union[str, int]] = {
+			schema: dict[str, str | int] = {
 				'type': 'fixed',
 				'name': _validate_avro_name(get_name(model)),
 				'size': model.max_length,
@@ -257,9 +262,9 @@ class AvroSchemaGenerator :
 		return 'bytes'
 
 
-	def _convert_map(self: Self, model: Type[dict[str, Any]]) -> AvroSchema :
+	def _convert_map(self: Self, model: type[dict[str, Any]]) -> AvroSchema :
 		if not hasattr(model, '__args__') :
-			raise AvroException('typing.Dict must be used to determine key/value type, not dict')
+			raise AvroException('typing.dict must be used to determine key/value type, not dict')
 
 		if model.__args__[0] is not str : # type: ignore
 			raise AvroException('maps must have string keys')
@@ -270,11 +275,11 @@ class AvroSchemaGenerator :
 		}
 
 
-	def _convert_decimal(self: Self, _: Type[Decimal]) -> AvroSchema :
+	def _convert_decimal(self: Self, _: type[Decimal]) -> AvroSchema :
 		raise AvroException('Support for unconstrained decimals is not possible due to the nature of avro decimals. please use pydantic.condecimal(max_digits=int, decimal_places=int)')
 
 
-	def _convert_condecimal(self: Self, model: Type[ConstrainedDecimal]) -> AvroSchema :
+	def _convert_condecimal(self: Self, model: type[ConstrainedDecimal]) -> AvroSchema :
 		if not model.max_digits or model.decimal_places is None :
 			raise AvroException('Decimal attributes max_digits and decimal_places must be provided in order to map to avro decimals')
 
@@ -285,13 +290,13 @@ class AvroSchemaGenerator :
 			'scale': model.decimal_places,
 		}
 
-	_conversions_: dict[type, Union[Callable[[Self, type], AvroSchema], AvroSchema]] = {
+	_conversions_: dict[type, Callable[[Self, type], AvroSchema] | AvroSchema] = {
 		BaseModel: _convert_object,
 		list: _convert_array,
 		Enum: _convert_enum,
 		IntEnum: _convert_int_enum,
 		ConstrainedBytes: _convert_bytes,
-		Dict: _convert_map,
+		dict: _convert_map,
 		dict: _convert_map,
 		Decimal: _convert_decimal,
 		ConstrainedDecimal: _convert_condecimal,
@@ -339,7 +344,7 @@ class AvroSchemaGenerator :
 		if name in self.refs :
 			return name
 
-		origin: Optional[Type] = getattr(model, '__origin__', None)
+		origin: Optional[type] = getattr(model, '__origin__', None)
 
 		if origin and origin in self._conversions :
 			c = self._conversions[origin]
@@ -350,7 +355,7 @@ class AvroSchemaGenerator :
 				return schema
 			return c
 
-		clss: Optional[Type] = getattr(model, '__class__', None)
+		clss: Optional[type] = getattr(model, '__class__', None)
 
 		if clss and clss in self._conversions :
 			c = self._conversions[clss]
@@ -375,5 +380,5 @@ class AvroSchemaGenerator :
 
 
 # I didn't want to ignore the whole definition above, so assign it down here
-AvroSchemaGenerator._conversions_[Union] = AvroSchemaGenerator._convert_union # type: ignore
-AvroSchemaGenerator._conversions_[UnionType] = AvroSchemaGenerator._convert_union # type: ignore
+AvroSchemaGenerator._conversions_[Union] = AvroSchemaGenerator._convert_union      # type: ignore
+AvroSchemaGenerator._conversions_[UnionType] = AvroSchemaGenerator._convert_union  # type: ignore

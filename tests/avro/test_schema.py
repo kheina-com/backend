@@ -1,7 +1,7 @@
 from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum, IntEnum
-from typing import Dict, List, Optional, Type, Union
+from typing import Optional
 
 import pytest
 from avro.errors import AvroException
@@ -41,10 +41,10 @@ class NestedModelBasicTypes(BaseModel) :
 
 
 class BasicModelTypingTypes(BaseModel) :
-	A: List[int]
-	B: Dict[str, int]
+	A: list[int]
+	B: dict[str, int]
 	C: Optional[int]
-	D: Union[int, str]
+	D: int | str
 	E: Optional[str]
 	F: str
 
@@ -101,7 +101,7 @@ BasicRecursiveSchema.update_forward_refs()
 		(BasicRecursiveSchema, { 'namespace': 'BasicRecursiveSchema', 'name': 'BasicRecursiveSchema', 'type': 'record', 'fields': [{ 'name': 'A', 'type': 'long' }, { 'name': 'B', 'type': ['null', 'BasicRecursiveSchema'] }] })
 	],
 )
-def test_ConvertSchema_ValidInputError_ModelConvertedSuccessfully(input_model: Type[BaseModel], expected: dict) :
+def test_ConvertSchema_ValidInputError_ModelConvertedSuccessfully(input_model: type[BaseModel], expected: dict) :
 
 	# act
 	schema: AvroSchema = convert_schema(input_model)
@@ -122,7 +122,7 @@ def test_ConvertSchema_ValidInputError_ModelConvertedSuccessfully(input_model: T
 		(BasicModelCustomTypes, { 'namespace': 'BasicModelCustomTypes', 'name': 'BasicModelCustomTypes', 'type': 'error', 'fields': [{ 'name': 'A', 'type': 'int' }, { 'name': 'B', 'type': 'float' }] }),
 	],
 )
-def test_ConvertSchema_ValidInputError_ErrorModelConvertedSuccessfully(input_model: Type[BaseModel], expected: dict) :
+def test_ConvertSchema_ValidInputError_ErrorModelConvertedSuccessfully(input_model: type[BaseModel], expected: dict) :
 
 	# act
 	schema: AvroSchema = convert_schema(input_model, error=True)
@@ -148,7 +148,7 @@ class BasicModelInvalidType4(BaseModel) :
 
 
 class BasicModelInvalidType5(BaseModel) :
-	A: Dict[int, int]
+	A: dict[int, int]
 
 
 class BasicModelInvalidType6(BaseModel) :
@@ -183,7 +183,7 @@ class NestedModelInvalidNamespace2(BaseModel) :
 		NestedModelInvalidNamespace2,
 	],
 )
-def test_ConvertSchema_InvalidModel_ConvertSchemaThrowsError(input_model: Type[BaseModel]) :
+def test_ConvertSchema_InvalidModel_ConvertSchemaThrowsError(input_model: type[BaseModel]) :
 
 	# assert
 	with raises(AvroException) :
@@ -230,7 +230,7 @@ from shared.avro.models import Error, ValidationError
 		}),
 	],
 )
-def test_ConvertSchema_ErrorModels_ErrorConvertedSuccessfully(input_model: Type[BaseModel], expected: dict) :
+def test_ConvertSchema_ErrorModels_ErrorConvertedSuccessfully(input_model: type[BaseModel], expected: dict) :
 
 	# act
 	schema: AvroSchema = convert_schema(input_model)

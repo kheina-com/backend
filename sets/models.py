@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, conint, conlist, constr, validator
 
@@ -46,7 +46,7 @@ class SetNeighbors(BaseModel) :
 	the central index post around which the neighbors exist in the set
 	"""
 
-	before: List[Post]
+	before: list[Post]
 	"""
 	neighbors before the index are arranged in descending order such that the first item in the list is always index - 1 where index is PostNeighbors.index
 
@@ -54,7 +54,7 @@ class SetNeighbors(BaseModel) :
 	before: [index - 1, index - 2, index - 3, ...]
 	"""
 
-	after: List[Post]
+	after: list[Post]
 	"""
 	neighbors after the index are arranged in ascending order such that the first item in the list is always index + 1 where index is PostNeighbors.index
 

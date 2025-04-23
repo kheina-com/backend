@@ -6,7 +6,7 @@ from inspect import getfullargspec, iscoroutinefunction
 from math import ceil
 from time import time
 from types import CoroutineType
-from typing import Any, Awaitable, Callable, Generator, Hashable, Iterable, Optional, Tuple, Type, TypeGuard, TypeVar, overload
+from typing import Any, Awaitable, Callable, Generator, Hashable, Iterable, Optional, TypeGuard, TypeVar, overload
 from uuid import UUID, uuid4
 
 from fastapi import Request
@@ -14,7 +14,7 @@ from pydantic import parse_obj_as
 from uuid_extensions import uuid7 as _uuid7
 
 
-def __clear_cache__(cache: OrderedDict[Hashable, Tuple[float, Any]], t: Callable[[], float] = time) -> None :
+def __clear_cache__(cache: OrderedDict[Hashable, tuple[float, Any]], t: Callable[[], float] = time) -> None :
 	"""
 	clears the cache structure of all stale data up to the time returned by t. assumes the cache is an OrderedDict in standard format used by ..caching:
 	OrderedDict({
@@ -74,7 +74,7 @@ def int_from_bytes(bytestring: bytes) -> int :
 	return int.from_bytes(bytestring, 'big')
 
 
-def coerse[T](obj: Any, type: Type[T]) -> T :
+def coerse[T](obj: Any, type: type[T]) -> T :
 	"""
 	attempts to convert an object of any type into the type given
 

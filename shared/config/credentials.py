@@ -1,5 +1,5 @@
 from os import environ, listdir, path
-from typing import Any, Dict, Optional, Type
+from typing import Any, Optional
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -54,7 +54,7 @@ def decryptCredentialFile(cred: bytes) -> Any :
 
 __secret_paths__ = ('credentials', '/credentials')
 
-def fetch[T](secret_path: str, type: Optional[Type[T]] = None) -> T :
+def fetch[T](secret_path: str, type: Optional[type[T]] = None) -> T :
 	"""
 	retrieves credentials from locally encrypted files or encrypted kube secrets and returns them parsed into the type provided
 
@@ -82,16 +82,16 @@ def fetch[T](secret_path: str, type: Optional[Type[T]] = None) -> T :
 		if path.isdir(p) :
 			for filename in listdir(p) :
 				if filename.endswith('.json') :
-					config: Dict[str, Dict[str, Any]]
+					config: dict[str, dict[str, Any]]
 					with open(f'{p}/{filename}', 'r') as file :
 						value: str = load(file).get('value')
 
 						if not value or not isinstance(value, str) :
 							continue
 
-						config: Dict[str, Dict[str, Any]] = decryptCredentialFile(value.encode())
+						config: dict[str, dict[str, Any]] = decryptCredentialFile(value.encode())
 
-					c: Optional[Dict[str, Any]] = config.get(environment.name)
+					c: Optional[dict[str, Any]] = config.get(environment.name)
 
 					if not c :
 						continue
@@ -99,11 +99,11 @@ def fetch[T](secret_path: str, type: Optional[Type[T]] = None) -> T :
 					sec.update(c)
 
 				if filename.endswith('.aes') :
-					config: Dict[str, Dict[str, Any]]
+					config: dict[str, dict[str, Any]]
 					with open(f'{p}/{filename}', 'rb') as file :
 						config = decryptCredentialFile(file.read())
 
-					c: Optional[Dict[str, Any]] = config.get(environment.name)
+					c: Optional[dict[str, Any]] = config.get(environment.name)
 
 					if not c :
 						continue

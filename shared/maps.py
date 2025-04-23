@@ -1,4 +1,4 @@
-from typing import Self, Tuple
+from typing import Self
 
 from .caching import alru_cache
 from .models import Privacy
@@ -12,7 +12,7 @@ class PrivacyMap(SqlInterface) :
 	@alru_cache(None)
 	@timed.link
 	async def get(self: Self, key: int) -> Privacy :
-		data: Tuple[str] = await self.query_async(
+		data: tuple[str] = await self.query_async(
 			"""
 			SELECT type
 			FROM kheina.public.privacy
@@ -31,7 +31,7 @@ class PrivacyMap(SqlInterface) :
 	@alru_cache(None)
 	@timed.link
 	async def get_id(self: Self, key: Privacy) -> int :
-		data: Tuple[int] = await self.query_async(
+		data: tuple[int] = await self.query_async(
 			"""
 			SELECT privacy_id
 			FROM kheina.public.privacy

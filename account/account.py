@@ -210,7 +210,7 @@ class Account(SqlInterface, Hashable) :
 			'Password recovery for your fuzz.ly account',
 			Account.VerifyEmailText,
 			title='Hey, fuzz.ly User',
-			button=Button(text='Set New Password', link=self._recovery_link.format(token=data.token)),
+			button=Button(text='set New Password', link=self._recovery_link.format(token=data.token)),
 			subtext='If you did not initiate this account recovery, you do not need to do anything. However, someone may be trying to gain access to your account. Changing your passwords may be a good idea.',
 		)
 

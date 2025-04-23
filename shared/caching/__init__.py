@@ -3,7 +3,7 @@ from copy import copy
 from functools import partial, wraps
 from inspect import FullArgSpec, Parameter, getfullargspec, iscoroutinefunction, signature
 from time import time
-from typing import Any, Callable, Dict, Hashable, Iterable, Optional, ParamSpec, Tuple, TypeVar, overload
+from typing import Any, Callable, Hashable, Iterable, Optional, ParamSpec, TypeVar, overload
 
 from async_lru import alru_cache as _alru_cache
 
@@ -24,13 +24,13 @@ def alru_cache(*a: Any, **kw: Any) -> Any :
 	return _alru_cache(*a, **kw)
 
 
-_conversions: Dict[type, Callable] = {
+_conversions: dict[type, Callable] = {
 	dict: lambda x : tuple((key, x[key]) for key in sorted(x.keys())),
 	list: tuple,
 }
 
 
-def _convert_item(item: Any) -> Any :
+def _convert_item(item: Any) -> Hashable :
 	if isinstance(item, str) :
 		return item
 	if isinstance(item, Iterable) :
@@ -49,7 +49,7 @@ def _cache_stream(stream: Iterable) :
 		return tuple(map(_convert_item, stream))
 
 
-def SimpleCache(TTL_seconds:float=0, TTL_minutes:float=0, TTL_hours:float=0, TTL_days:float=0) -> Callable :
+def SimpleCache(TTL_seconds:float=0, TTL_minutes:float=0, TTL_hours:float=0, TTL_days:float=0) -> Callable[[Callable[P, T]], Callable[P, T]] :
 	"""
 	stores single result for all arguments used to call.
 	any arguments/keywords can be used.
@@ -60,7 +60,7 @@ def SimpleCache(TTL_seconds:float=0, TTL_minutes:float=0, TTL_hours:float=0, TTL
 	def decorator(func: Callable) -> Callable :
 		if iscoroutinefunction(func) :
 			@wraps(func)
-			async def wrapper(*args: Tuple[Any], **kwargs:Dict[str, Any]) -> Any : # type: ignore
+			async def wrapper(*args: tuple[Any], **kwargs:dict[str, Any]) -> Any : # type: ignore
 				async with decorator.lock :
 					if time() > decorator.expire :
 						decorator.expire = time() + TTL
@@ -69,7 +69,7 @@ def SimpleCache(TTL_seconds:float=0, TTL_minutes:float=0, TTL_hours:float=0, TTL
 
 		else :
 			@wraps(func)
-			def wrapper(*args: Tuple[Any], **kwargs:Dict[str, Any]) -> Any :
+			def wrapper(*args: tuple[Any], **kwargs:dict[str, Any]) -> Any :
 				if time() > decorator.expire :
 					decorator.expire = time() + TTL
 					decorator.data = func(*args, **kwargs)
@@ -122,7 +122,7 @@ def AerospikeCache(
 	local_TTL:   float                   = 1,
 	read_only:   bool                    = False,
 	_kvs:        Optional[KeyValueStore] = None,
-) -> Callable :
+) -> Callable[[Callable[P, T]], Callable[P, T]] :
 	"""
 	checks if data exists in aerospike before running the function. cached data is automatically type checked against the wrapped fucntion's return type
 	if data doesn't exist, it is stored after running this function, if read only is false (default)
@@ -149,9 +149,9 @@ def AerospikeCache(
 	def decorator(func: Callable) -> Callable :
 
 		argspec: FullArgSpec = getfullargspec(func)
-		kw: Dict[str, Hashable] = dict(zip(argspec.args[-len(argspec.defaults):], argspec.defaults)) if argspec.defaults else { }
+		kw: dict[str, Hashable] = dict(zip(argspec.args[-len(argspec.defaults):], argspec.defaults)) if argspec.defaults else { }
 		return_type: Optional[type] = argspec.annotations.get('return')
-		arg_spec: Tuple[str, ...] = tuple(argspec.args)
+		arg_spec: tuple[str, ...] = tuple(argspec.args)
 		del argspec
 
 		if not return_type :

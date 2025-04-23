@@ -4,7 +4,7 @@ from enum import Enum, IntEnum
 from functools import lru_cache, partial
 from re import compile
 from types import TracebackType
-from typing import Any, Awaitable, Callable, Optional, Protocol, Self, Union
+from typing import Any, Awaitable, Callable, Optional, Protocol, Self
 from uuid import UUID
 
 from psycopg import AsyncClientCursor, AsyncConnection, AsyncCursor, Binary, OperationalError
@@ -188,7 +188,7 @@ class SqlInterface :
 
 
 	@staticmethod
-	def _table_name(model: Union[BaseModel, type[BaseModel]]) -> Table :
+	def _table_name(model: BaseModel | type[BaseModel]) -> Table :
 		if not hasattr(model, '__table_name__') :
 			raise AttributeError('model must be defined with the __table_name__ attribute')
 

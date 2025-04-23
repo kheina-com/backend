@@ -4,7 +4,7 @@ from re import IGNORECASE
 from re import compile as re_compile
 from secrets import randbelow, token_bytes
 from time import time
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Self, Tuple
+from typing import Any, Awaitable, Callable, Optional, Self
 from uuid import UUID, uuid4
 
 import aerospike
@@ -37,7 +37,7 @@ from .models import AuthAlgorithm, BotCreateResponse, BotLogin, BotType, LoginRe
 
 """
                                                            Table "auth.token_keys"
-   Column   |           Type           | Collation | Nullable |               Default                | Storage  | Stats target | Description 
+   Column   |           type           | Collation | Nullable |               Default                | Storage  | Stats target | Description 
 ------------+--------------------------+-----------+----------+--------------------------------------+----------+--------------+-------------
  key_id     | integer                  |           | not null | generated always as identity         | plain    |              | 
  algorithm  | text                     |           | not null |                                      | extended |              | 
@@ -53,7 +53,7 @@ Access method: heap
 
 
                                     Table "auth.user_login"
-   Column   |   Type   | Collation | Nullable | Default | Storage  | Stats target | Description 
+   Column   |   type   | Collation | Nullable | Default | Storage  | Stats target | Description 
 ------------+----------+-----------+----------+---------+----------+--------------+-------------
  user_id    | bigint   |           | not null |         | plain    |              | 
  email_hash | bytea    |           | not null |         | extended |              | 
@@ -68,7 +68,7 @@ Access method: heap
 
 
                                                 Table "auth.bot_login"
-   Column    |   Type   | Collation | Nullable |           Default            | Storage  | Stats target | Description 
+   Column    |   type   | Collation | Nullable |           Default            | Storage  | Stats target | Description 
 -------------+----------+-----------+----------+------------------------------+----------+--------------+-------------
  bot_id      | bigint   |           | not null | generated always as identity | plain    |              | 
  user_id     | bigint   |           |          |                              | plain    |              | 
@@ -106,7 +106,7 @@ except aerospike.exception.IndexFoundError :
 class BotTypeMap(SqlInterface):
 	@alru_cache(None)
 	async def get(self: Self, key: int) -> BotType :
-		data: Tuple[str] = await self.query_async(
+		data: tuple[str] = await self.query_async(
 			"""
 			SELECT bot_type
 			FROM kheina.auth.bot_type
@@ -122,7 +122,7 @@ class BotTypeMap(SqlInterface):
 
 	@alru_cache(None)
 	async def get_id(self: Self, key: BotType) -> int :
-		data: Tuple[int] = await self.query_async(
+		data: tuple[int] = await self.query_async(
 			"""
 			SELECT bot_type_id
 			FROM kheina.auth.bot_type
@@ -163,7 +163,7 @@ class Authenticator(SqlInterface, Hashable) :
 		}
 
 
-	def _validateEmail(self, email: str) -> Dict[str, str] :
+	def _validateEmail(self, email: str) -> dict[str, str] :
 		e = Authenticator.EmailRegex.search(email)
 		if not e :
 			raise BadRequest('the given email is invalid.')
@@ -171,9 +171,9 @@ class Authenticator(SqlInterface, Hashable) :
 
 
 	def _initArgon2(self) :
-		argon2 = fetch('argon2', Dict[str, Any])
+		argon2 = fetch('argon2', dict[str, Any])
 		self._argon2 = Argon2(**argon2)
-		secrets = fetch('secrets', List[str])
+		secrets = fetch('secrets', list[str])
 		self._secrets = tuple(bytes.fromhex(salt) for salt in secrets)
 
 
@@ -225,7 +225,7 @@ class Authenticator(SqlInterface, Hashable) :
 			signature = private_key.sign(public_key)
 
 			# insert the new key into db
-			data: Tuple[int, datetime, datetime] = await self.query_async("""
+			data: tuple[int, datetime, datetime] = await self.query_async("""
 				INSERT INTO kheina.auth.token_keys
 				(public_key, signature, algorithm)
 				VALUES
@@ -355,7 +355,7 @@ class Authenticator(SqlInterface, Hashable) :
 			del token_data['scope']
 
 		try :
-			email_dict: Dict[str, str] = self._validateEmail(email)
+			email_dict: dict[str, str] = self._validateEmail(email)
 			email_hash = self._hash_email(email)
 			data: Optional[tuple[int, bytes, int, str, str, bool, Optional[int], Optional[bytes], Optional[bytes]]] = await self.query_async("""
 				SELECT
@@ -517,7 +517,7 @@ class Authenticator(SqlInterface, Hashable) :
 		bot_type: BotType
 
 		try :
-			data: Tuple[int, bytes, int, int] = await self.query_async("""
+			data: tuple[int, bytes, int, int] = await self.query_async("""
 				SELECT
 					bot_login.user_id,
 					bot_login.password,
@@ -675,7 +675,7 @@ class Authenticator(SqlInterface, Hashable) :
 		)
 
 
-	async def create(self, handle: str, name: str, email: str, password: str, token_data:Dict[str, Any]={ }) -> LoginResponse :
+	async def create(self, handle: str, name: str, email: str, password: str, token_data:dict[str, Any]={ }) -> LoginResponse :
 		"""
 		returns user data on success otherwise raises Bad Request
 		"""

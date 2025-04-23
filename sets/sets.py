@@ -1,6 +1,6 @@
 from asyncio import Task, ensure_future, wait
 from collections import defaultdict
-from typing import Optional, Self, Tuple, Union
+from typing import Optional, Self
 
 from psycopg.errors import UniqueViolation
 
@@ -73,7 +73,7 @@ class Sets(Repository) :
 
 	@alru_cache(None)
 	async def _id_to_privacy(self: Self, privacy_id: int) -> Privacy :
-		data: Tuple[str] = await self.query_async("""
+		data: tuple[str] = await self.query_async("""
 			SELECT
 				type
 			FROM kheina.public.privacy
@@ -88,7 +88,7 @@ class Sets(Repository) :
 
 	@alru_cache(None)
 	async def _id_to_rating(self: Self, rating_id: int) -> Rating :
-		data: Tuple[str] = await self.query_async("""
+		data: tuple[str] = await self.query_async("""
 			SELECT
 				rating
 			FROM kheina.public.ratings
@@ -106,7 +106,7 @@ class Sets(Repository) :
 		if media_type_id is None :
 			return None
 
-		data: Tuple[str, str] = await self.query_async("""
+		data: tuple[str, str] = await self.query_async("""
 			SELECT
 				file_type,
 				mime_type
@@ -125,7 +125,7 @@ class Sets(Repository) :
 
 	@alru_cache(None)
 	async def _id_to_set_privacy(self: Self, privacy_id: int) -> UserPrivacy :
-		data: Tuple[str] = await self.query_async("""
+		data: tuple[str] = await self.query_async("""
 			SELECT
 				type
 			FROM kheina.public.privacy
@@ -158,7 +158,7 @@ class Sets(Repository) :
 			if not data[0] :
 				break
 
-		data: Tuple[datetime, datetime] = await self.query_async("""
+		data: tuple[datetime, datetime] = await self.query_async("""
 			INSERT INTO kheina.public.sets
 			(set_id, owner, title, description, privacy)
 			VALUES
@@ -204,7 +204,7 @@ class Sets(Repository) :
 		if not await Sets._verify_authorized(user, iset) :
 			raise NotFound(SetNotFound.format(set_id=set_id))
 
-		params: list[Union[str, Privacy, int, None]] = []
+		params: list[str | Privacy | int | None] = []
 		bad_mask: list[str] = []
 		query: list[str] = []
 
@@ -244,7 +244,7 @@ class Sets(Repository) :
 		params.append(set_id.int())
 		query.append('updated = now()')
 
-		data: Tuple[datetime] = await self.query_async(f"""
+		data: tuple[datetime] = await self.query_async(f"""
 			UPDATE kheina.public.sets
 				SET {', '.join(query)}
 			WHERE set_id = %s
@@ -354,7 +354,7 @@ class Sets(Repository) :
 
 	async def get_post_sets(self: Self, user: KhUser, post_id: PostId) -> list[PostSet] :
 		neighbor_range: int = 3  # const
-		data: list[Tuple[
+		data: list[tuple[
 			int, int, Optional[str], Optional[str], int, datetime, datetime,  # set
 			int, int,  # post index
 			int, Optional[str], Optional[str], int, int, datetime, datetime, int, int,  # posts
@@ -444,8 +444,8 @@ class Sets(Repository) :
 		)
 
 		# both tuples are formatted: index, object. set is the index of the parent post. posts is index of the neighbors
-		isets: list[Tuple[int, InternalSet]] = []
-		iposts: dict[int, list[Tuple[int, InternalPost]]] = defaultdict(list)
+		isets: list[tuple[int, InternalSet]] = []
+		iposts: dict[int, list[tuple[int, InternalPost]]] = defaultdict(list)
 
 		sets_made: set = set()
 		for row in data :
@@ -492,7 +492,7 @@ class Sets(Repository) :
 				))
 
 		# again, this is index, set task
-		allowed: list[Tuple[int, Task[Set]]] = [
+		allowed: list[tuple[int, Task[Set]]] = [
 			(index, ensure_future(self.set(iset, user))) for index, iset in isets if await self.authorized(iset, user)
 		]
 
@@ -529,7 +529,7 @@ class Sets(Repository) :
 	@timed
 	async def get_user_sets(self: Self, user: KhUser, handle: Optional[str]) -> list[Set] :
 		owner: int = user.user_id if handle is None else await users._handle_to_user_id(handle)
-		data: list[Tuple[
+		data: list[tuple[
 			int, int, Optional[str], Optional[str], int, datetime, datetime, # set
 			int, int, # first
 			int, int, # last

@@ -1,6 +1,6 @@
 from asyncio import Task, ensure_future
 from enum import Enum
-from typing import Optional, Self, Tuple, Union
+from typing import Optional, Self
 
 from posts.models import InternalPost, Post, PostId, Privacy
 from posts.repository import Repository as Posts
@@ -39,7 +39,7 @@ class Repository(SqlInterface, Hashable) :
 
 
 	@staticmethod
-	def _validate_privacy(p: Optional[Union[Privacy, int]]) -> UserPrivacy :
+	def _validate_privacy(p: Optional[Privacy | int]) -> UserPrivacy :
 		assert isinstance(p, Privacy), 'privacy value must of the Privacy type'
 		assert p == Privacy.public or p == Privacy.private, 'privacy value must be public or private'
 		return p
@@ -47,7 +47,7 @@ class Repository(SqlInterface, Hashable) :
 
 	@AerospikeCache('kheina', 'sets', '{set_id}', _kvs=SetKVS)
 	async def _get_set(self: Self, set_id: SetId) -> InternalSet :
-		data: Tuple[int, Optional[str], Optional[str], int, datetime, datetime, int, int, int] = await self.query_async("""
+		data: tuple[int, Optional[str], Optional[str], int, datetime, datetime, int, int, int] = await self.query_async("""
 			WITH f AS (
 				SELECT post_id AS first, index
 				FROM kheina.public.set_post
@@ -128,16 +128,16 @@ class Repository(SqlInterface, Hashable) :
 		owner: InternalUser = await owner_task
 
 		return Set(
-			set_id=SetId(iset.set_id),
-			owner=await users.portable(user, owner),
-			count=iset.count,
-			title=iset.title,
-			description=iset.description,
-			privacy=Repository._validate_privacy(await privacy_map.get(iset.privacy)),
-			created=iset.created,
-			updated=iset.updated,
-			first=first_post,
-			last=last_post,
+			set_id      = SetId(iset.set_id),
+			owner       = await users.portable(user, owner),
+			count       = iset.count,
+			title       = iset.title,
+			description = iset.description,
+			privacy     = Repository._validate_privacy(await privacy_map.get(iset.privacy)),
+			created     = iset.created,
+			updated     = iset.updated,
+			first       = first_post,
+			last        = last_post,
 		)
 
 

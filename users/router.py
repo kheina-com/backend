@@ -1,5 +1,3 @@
-from typing import List
-
 from fastapi import APIRouter
 
 from shared.exceptions.http_error import HttpErrorHandler
@@ -43,9 +41,9 @@ async def v1UpdateSelf(req: Request, body: UpdateSelf) -> None :
 	)
 
 
-@usersRouter.get('/all', response_model=List[User])
+@usersRouter.get('/all', response_model=list[User])
 @timed.root
-async def v1FetchUsers(req: Request) -> List[User] :
+async def v1FetchUsers(req: Request) -> list[User] :
 	await req.user.verify_scope(Scope.admin)
 	return await users.getUsers(req.user)
 
@@ -64,9 +62,9 @@ async def v1Verify(req: Request, body: SetVerified) -> None :
 	await users.verifyUser(body.handle, body.verified)
 
 
-@usersRouter.get('/badges', response_model=List[Badge])
+@usersRouter.get('/badges', response_model=list[Badge])
 @timed.root
-async def v1Badges() -> List[Badge] :
+async def v1Badges() -> list[Badge] :
 	return await users.fetchBadges()
 
 

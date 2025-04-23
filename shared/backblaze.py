@@ -7,7 +7,7 @@ from hashlib import sha1 as hashlib_sha1
 from io import BytesIO
 from time import sleep
 from types import TracebackType
-from typing import Any, Dict, Generator, Iterator, Optional, Self, Type, Union
+from typing import Any, Generator, Iterator, Optional, Self
 
 from minio import Minio
 from minio.datatypes import Object
@@ -35,7 +35,7 @@ class FileResponse :
 		return self
 
 
-	def __exit__(self: Self, exc_type: Optional[Type[BaseException]], exc_obj: Optional[BaseException], exc_tb: Optional[TracebackType]) :
+	def __exit__(self: Self, exc_type: Optional[type[BaseException]], exc_obj: Optional[BaseException], exc_tb: Optional[TracebackType]) :
 		self.res.close()
 		self.res.release_conn()
 
@@ -91,10 +91,10 @@ class B2Interface :
 			raise ValueError(f'file extention does not have a known mime type: {filename}')
 
 
-	# def _obtain_upload_url(self: Self) -> Dict[str, Any] :
+	# def _obtain_upload_url(self: Self) -> dict[str, Any] :
 	# 	backoff: float = 1
-	# 	content: Union[str, None] = None
-	# 	status: Union[int, None] = None
+	# 	content: str | None = None
+	# 	status: int | None = None
 
 	# 	for _ in range(self.b2_max_retries) :
 	# 		try :
@@ -128,10 +128,10 @@ class B2Interface :
 	# 	)
 
 
-	# async def _obtain_upload_url_async(self: Self) -> Dict[str, Any] :
+	# async def _obtain_upload_url_async(self: Self) -> dict[str, Any] :
 	# 	backoff: float = 1
-	# 	content: Union[str, None] = None
-	# 	status: Union[int, None] = None
+	# 	content: str | None = None
+	# 	status: int | None = None
 
 	# 	for _ in range(self.b2_max_retries) :
 	# 		try :
@@ -166,7 +166,7 @@ class B2Interface :
 	# 	)
 
 
-	def upload(self: Self, file_data: bytes, filename: str, content_type: Union[MimeType, None] = None, sha1: Union[str, None] = None) -> None :
+	def upload(self: Self, file_data: bytes, filename: str, content_type: MimeType | None = None, sha1: str | None = None) -> None :
 		sha1: str = sha1 or b64encode(hashlib_sha1(file_data).digest()).decode()
 		content_type: str = (content_type or self._get_mime_from_filename(filename)).value
 
@@ -208,7 +208,7 @@ class B2Interface :
 
 
 	@timed
-	async def upload_async(self: Self, file_data: bytes, filename: str, content_type: Union[MimeType, None] = None, sha1: Union[str, None] = None) -> None :
+	async def upload_async(self: Self, file_data: bytes, filename: str, content_type: MimeType | None = None, sha1: str | None = None) -> None :
 		with ThreadPoolExecutor() as threadpool :
 			return await get_event_loop().run_in_executor(threadpool, partial(self.upload, file_data, filename, content_type, sha1))
 
@@ -277,24 +277,24 @@ class B2Interface :
 			return await get_event_loop().run_in_executor(threadpool, partial(self._delete_files, prefix))
 
 
-	# async def upload_async(self: Self, file_data: bytes, filename: str, content_type:Union[str, None]=None, sha1:Union[str, None]=None) -> Dict[str, Any] :
+	# async def upload_async(self: Self, file_data: bytes, filename: str, content_type:str | None=None, sha1:str | None=None) -> dict[str, Any] :
 	# 	# obtain upload url
 	# 	upload_url: str = await self._obtain_upload_url_async()
 
 	# 	sha1: str = sha1 or hashlib_sha1(file_data).hexdigest()
 	# 	content_type: str = content_type or self._get_mime_from_filename(filename)
 
-	# 	headers: Dict[str, str] = {
+	# 	headers: dict[str, str] = {
 	# 		'authorization': upload_url['authorizationToken'],
 	# 		'X-Bz-File-Name': quote(filename),
-	# 		'Content-Type': content_type,
+	# 		'Content-type': content_type,
 	# 		'Content-Length': str(len(file_data)),
 	# 		'X-Bz-Content-Sha1': sha1,
 	# 	}
 
 	# 	backoff: float = 1
-	# 	content: Union[str, None] = None
-	# 	status: Union[int, None] = None
+	# 	content: str | None = None
+	# 	status: int | None = None
 
 	# 	for _ in range(self.b2_max_retries) :
 	# 		try :
@@ -307,7 +307,7 @@ class B2Interface :
 	# 			) as response :
 	# 				status = response.status
 	# 				if response.ok :
-	# 					content: Dict[str, Any] = await response.json()
+	# 					content: dict[str, Any] = await response.json()
 	# 					assert content_type == content['contentType']
 	# 					assert sha1 == content['contentSha1']
 	# 					assert filename == unquote(content['fileName'])

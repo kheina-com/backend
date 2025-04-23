@@ -1,6 +1,6 @@
 from asyncio import Task, ensure_future
 from collections import defaultdict
-from typing import Any, Optional, Self, Sequence, Tuple
+from typing import Any, Optional, Self, Sequence
 
 import aerospike
 from psycopg.errors import NotNullViolation, UniqueViolation
@@ -52,7 +52,7 @@ class Tagger(Repository) :
 
 
 	@HttpErrorHandler('adding tags to post')
-	async def addTags(self, user: KhUser, post_id: PostId, tags: Tuple[str, ...]) :
+	async def addTags(self, user: KhUser, post_id: PostId, tags: tuple[str, ...]) :
 		tags = tuple(map(str.lower, tags))
 		await self.query_async("""
 			insert into kheina.public.tag_post
@@ -98,7 +98,7 @@ class Tagger(Repository) :
 
 
 	@HttpErrorHandler('removing tags from post')
-	async def removeTags(self, user: KhUser, post_id: PostId, tags: Tuple[str, ...]) :
+	async def removeTags(self, user: KhUser, post_id: PostId, tags: tuple[str, ...]) :
 		tags = tuple(map(str.lower, tags))
 
 		post:   InternalPost = await posts._get_post(post_id)

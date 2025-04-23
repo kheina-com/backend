@@ -1,11 +1,9 @@
-from typing import Dict
-
 from fastapi import Request
 
 from ...config.repo import short_hash
 
 
-HeadersToSet: Dict[str, str] = {
+HeadersToSet: dict[str, str] = {
 	'kh-hash': str(short_hash),
 }
 

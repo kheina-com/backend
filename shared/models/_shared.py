@@ -4,7 +4,7 @@ from functools import lru_cache
 from re import Pattern
 from re import compile as re_compile
 from secrets import token_bytes
-from typing import Any, List, Literal, Optional, Self, Type, Union
+from typing import Any, Literal, Optional, Self
 
 from pydantic import BaseModel, Field, validator
 from pydantic_core import core_schema
@@ -100,7 +100,7 @@ class PostId(str) :
 		return b64encode(value).decode()
 
 
-	def __new__(cls, value: Union[str, bytes, int]) :
+	def __new__(cls, value: str | bytes | int) :
 		# technically, the only thing needed to be done here to utilize the full 64 bit range is update the 6 bytes encoding to 8 and the allowed range in the int subtype
 
 		if type(value) == PostId :
@@ -135,7 +135,7 @@ class PostId(str) :
 		raise NotImplementedError('value must be of type str, bytes, or int.')
 
 
-	def __get_pydantic_core_schema__(self, _: Type[Any]) -> core_schema.CoreSchema :
+	def __get_pydantic_core_schema__(self, _: type[Any]) -> core_schema.CoreSchema :
 		return core_schema.no_info_after_validator_function(
 			PostId,
 			core_schema.any_schema(serialization=core_schema.str_schema()), # type: ignore
@@ -220,7 +220,7 @@ class User(BaseModel) :
 	description: Optional[str]
 	verified: Optional[Verified]
 	following: Optional[bool]
-	badges: List[Badge]
+	badges: list[Badge]
 
 	def portable(self: 'User') -> UserPortable :
 		return UserPortable(
@@ -250,7 +250,7 @@ class InternalUser(BaseModel) :
 	created:     datetime = Field(description='orm:"gen"')
 	description: Optional[str]
 	verified:    Optional[Verified] = Field(description='orm:"-"')
-	badges:      List[Badge]        = Field([], description='orm:"-"')
+	badges:      list[Badge]        = Field([], description='orm:"-"')
 
 
 ################################################## SETS ##################################################
@@ -288,7 +288,7 @@ class SetId(str) :
 		return b64encode(value).decode()
 
 
-	def __new__(cls, value: Union[str, bytes, int]) :
+	def __new__(cls, value: str | bytes | int) :
 		# technically, the only thing needed to be done here to utilize the full 64 bit range is update the 4 bytes encoding to 8 and the allowed range in the int subtype
 
 		if type(value) == SetId :
@@ -323,7 +323,7 @@ class SetId(str) :
 		raise NotImplementedError('value must be of type str, bytes, or int.')
 
 
-	def __get_pydantic_core_schema__(self, _: Type[Any]) -> core_schema.CoreSchema :
+	def __get_pydantic_core_schema__(self, _: type[Any]) -> core_schema.CoreSchema :
 		return core_schema.no_info_after_validator_function(
 			SetId,
 			core_schema.any_schema(serialization=core_schema.str_schema()), # type: ignore

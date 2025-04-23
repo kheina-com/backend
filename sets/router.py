@@ -9,7 +9,7 @@ from .sets import Sets
 
 
 setRouter = APIRouter(
-	prefix='/set',
+	prefix='/Set',
 )
 setsRouter = APIRouter(
 	prefix='/sets',

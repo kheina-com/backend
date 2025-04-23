@@ -1,5 +1,4 @@
 from math import log10, sqrt
-from typing import Union
 
 from scipy.stats import norm
 
@@ -20,7 +19,7 @@ resources:
 z_score_08 = norm.ppf(0.9)
 
 
-def _sign(x: Union[int, float]) -> int :
+def _sign(x: int | float) -> int :
 	return (x > 0) - (x < 0)
 
 

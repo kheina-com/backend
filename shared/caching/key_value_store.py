@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import copy
 from functools import partial
 from time import time
-from typing import Any, Callable, Iterable, Optional, Self, Union
+from typing import Any, Callable, Iterable, Optional, Self
 
 import aerospike
 
@@ -15,7 +15,7 @@ from ..timing import timed
 from ..utilities import __clear_cache__, coerse
 
 
-KeyType = Union[str, bytes, int]
+KeyType = str | bytes | int
 
 class KeyValueStore :
 
@@ -24,7 +24,7 @@ class KeyValueStore :
 	def __init__(self: Self, namespace: str, set: str, local_TTL: float = 1) :
 		if not KeyValueStore._client and not environment.is_test() :
 			config = {
-				'hosts': fetch('aerospike.hosts', list[tuple[str, int]]),
+				'hosts':    fetch('aerospike.hosts', list[tuple[str, int]]),
 				'policies': fetch('aerospike.policies', dict[str, Any]),
 			}
 			KeyValueStore._client = aerospike.client(config).connect()
@@ -101,7 +101,7 @@ class KeyValueStore :
 		values:      dict[K, Any]
 
 		if remote_keys :
-			data: list[Tuple[Any, Any, Any]] = KeyValueStore._client.get_many(list(map(lambda k : (self._namespace, self._set, k), remote_keys))) # type: ignore
+			data: list[tuple[Any, Any, Any]] = KeyValueStore._client.get_many(list(map(lambda k : (self._namespace, self._set, k), remote_keys))) # type: ignore
 			data_map: dict[K, Any] = { }
 
 			exp: float = time() + self._local_TTL

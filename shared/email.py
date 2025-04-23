@@ -1,6 +1,6 @@
 from asyncio import sleep
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Optional
 from uuid import uuid4
 
 from aiohttp import BasicAuth, ClientTimeout
@@ -90,7 +90,7 @@ async def sendEmail(
 		payload['bcc'] = bcc
 
 	endpoint = fetch('mailgun.endpoint', str)
-	auth = fetch('mailgun.auth', Dict[str, str])
+	auth = fetch('mailgun.auth', dict[str, str])
 
 	for i in range(5) :
 		try :

@@ -3,7 +3,7 @@ from decimal import Decimal
 from enum import Enum, IntEnum
 from io import BytesIO
 from json import dumps
-from typing import Any, Callable, Dict, Generator, Mapping, Optional, Self, Sequence, Type, Union
+from typing import Any, Callable, Generator, Mapping, Optional, Self, Sequence
 from uuid import UUID
 from warnings import warn
 
@@ -45,7 +45,7 @@ def read_avro_frames(avro_bytes: bytes) -> Generator[bytes, None, None] :
 
 class ABetterDatumWriter(DatumWriter) :
 
-	def write_enum(self, writers_schema: EnumSchema, datum: Union[Enum, str], encoder: BinaryEncoder) -> None :
+	def write_enum(self, writers_schema: EnumSchema, datum: Enum | str, encoder: BinaryEncoder) -> None :
 		"""
 		An enum is encoded by a int, representing the zero-based position of the symbol in the schema.
 		python Enums are converted to their indexvalue
@@ -55,7 +55,7 @@ class ABetterDatumWriter(DatumWriter) :
 		return encoder.write_int(index_of_datum)
 
 
-	def write_int_enum(self, _: EnumSchema, datum: Union[int, IntEnum], encoder: BinaryEncoder) -> None :
+	def write_int_enum(self, _: EnumSchema, datum: int | IntEnum, encoder: BinaryEncoder) -> None :
 		"""
 		An enum is encoded by a int, representing the zero-based position of the symbol in the schema.
 		python IntEnums are converted to their value
@@ -79,7 +79,7 @@ class ABetterDatumWriter(DatumWriter) :
 
 
 	@staticmethod
-	def _writer_type_str_(writers_schema: Schema, datum: Union[str, UUID], encoder: BinaryEncoder) -> None :
+	def _writer_type_str_(writers_schema: Schema, datum: str | UUID, encoder: BinaryEncoder) -> None :
 		if isinstance(datum, str) :
 			return encoder.write_utf8(datum)
 
@@ -110,14 +110,14 @@ class ABetterDatumWriter(DatumWriter) :
 
 
 	@staticmethod
-	def _writer_type_float_(writers_schema: Schema, datum: Union[int, float], encoder: BinaryEncoder) -> None :
+	def _writer_type_float_(writers_schema: Schema, datum: int | float, encoder: BinaryEncoder) -> None :
 		if isinstance(datum, (int, float)) :
 			return encoder.write_float(datum)
 		raise AvroTypeException(writers_schema, datum)
 
 
 	@staticmethod
-	def _writer_type_double_(writers_schema: Schema, datum: Union[int, float], encoder: BinaryEncoder) -> None :
+	def _writer_type_double_(writers_schema: Schema, datum: int | float, encoder: BinaryEncoder) -> None :
 		if isinstance(datum, (int, float)) :
 			return encoder.write_double(datum)
 		raise AvroTypeException(writers_schema, datum)
@@ -149,7 +149,7 @@ class ABetterDatumWriter(DatumWriter) :
 
 
 	@staticmethod
-	def _writer_type_bytes_(writers_schema: Schema, datum: Union[Decimal, bytes], encoder: BinaryEncoder) -> None :
+	def _writer_type_bytes_(writers_schema: Schema, datum: Decimal | bytes, encoder: BinaryEncoder) -> None :
 		logical_type: Optional[str] = getattr(writers_schema, 'logical_type', None)
 
 		if logical_type == DECIMAL :
@@ -175,7 +175,7 @@ class ABetterDatumWriter(DatumWriter) :
 		raise AvroTypeException(writers_schema, datum)
 
 
-	def _writer_type_fixed_(self: Self, writers_schema: FixedSchema, datum: Union[Decimal, bytes], encoder: BinaryEncoder) -> None :
+	def _writer_type_fixed_(self: Self, writers_schema: FixedSchema, datum: Decimal | bytes, encoder: BinaryEncoder) -> None :
 		logical_type: Optional[str] = getattr(writers_schema, 'logical_type', None)
 
 		if logical_type == DECIMAL :
@@ -199,7 +199,7 @@ class ABetterDatumWriter(DatumWriter) :
 		raise AvroTypeException(writers_schema, datum)
 
 
-	def _writer_type_enum_(self, writers_schema: EnumSchema, datum: Union[str, int, IntEnum, Enum], encoder: BinaryEncoder) -> None :
+	def _writer_type_enum_(self, writers_schema: EnumSchema, datum: str | int | IntEnum | Enum, encoder: BinaryEncoder) -> None :
 		if isinstance(datum, (int, IntEnum)) :
 			return self.write_int_enum(writers_schema, datum, encoder)
 
@@ -215,7 +215,7 @@ class ABetterDatumWriter(DatumWriter) :
 		raise AvroTypeException(writers_schema, datum)
 
 
-	def _writer_type_map_schema_(self, writers_schema: MapSchema, datum: Dict[str, Any], encoder: BinaryEncoder) -> None :
+	def _writer_type_map_schema_(self, writers_schema: MapSchema, datum: dict[str, Any], encoder: BinaryEncoder) -> None :
 		if isinstance(datum, Mapping) :
 			return self.write_map(writers_schema, datum, encoder)
 		raise AvroTypeException(writers_schema, datum)
@@ -268,8 +268,8 @@ _data_converter_map = {
 
 class AvroSerializer :
 
-	def __init__(self, model: Union[Schema, Type[BaseModel]]) :
-		self._model: Optional[Type[BaseModel]] = None
+	def __init__(self, model: Schema | type[BaseModel]) :
+		self._model: Optional[type[BaseModel]] = None
 		schema: Schema
 
 		if isinstance(model, Schema) :
@@ -297,10 +297,10 @@ class AvroSerializer :
 class AvroDeserializer[T: BaseModel] :
 
 	def __init__(self,
-		read_model:  Optional[Type[T]]                             = None,
-		read_schema: Optional[Union[Schema, str]]                  = None,
-		write_model: Optional[Union[Schema, Type[BaseModel], str]] = None,
-		parse:       bool                                          = True,
+		read_model:  Optional[type[T]]                     = None,
+		read_schema: Schema | str | None                   = None,
+		write_model: Schema | type[BaseModel] | str | None = None,
+		parse:       bool                                  = True,
 	) :
 		assert read_model or (read_schema and not parse), 'either read_model or read_schema must be provided. if only read schema is provided, parse must be false'
 		write_schema: Schema

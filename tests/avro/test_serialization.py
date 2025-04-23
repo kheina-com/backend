@@ -1,7 +1,7 @@
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from enum import Enum, IntEnum
-from typing import Dict, List, Optional, Type, Union
+from typing import Optional, Union
 
 import pytest
 from avro.errors import AvroException, AvroTypeException
@@ -41,8 +41,8 @@ class NestedModelBasicTypes(BaseModel) :
 
 
 class BasicModelTypingTypes(BaseModel) :
-	A: List[int]
-	B: Dict[str, int]
+	A: list[int]
+	B: dict[str, int]
 	C: Optional[int]
 	D: Union[int, str]
 
@@ -110,7 +110,7 @@ class BasicModelInvalidType4(BaseModel) :
 
 
 class BasicModelInvalidType5(BaseModel) :
-	A: Dict[int, int]
+	A: dict[int, int]
 
 
 class BasicModelInvalidType6(BaseModel) :
@@ -134,7 +134,7 @@ class BasicEnumInvalidType7(Enum) :
 		BasicEnumInvalidType7,
 	],
 )
-def test_serialize_InvalidModel_SerializerThrowsError(input_model: Type[BaseModel]) :
+def test_serialize_InvalidModel_SerializerThrowsError(input_model: type[BaseModel]) :
 
 	# assert
 	with raises(AvroException) :
