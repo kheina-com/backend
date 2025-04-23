@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from enum import Enum, unique
 from functools import lru_cache
 from re import compile
-from typing import Any, Generator, Optional, Self
+from typing import Any, Generator, Optional, Self, Union
 
 from psycopg._encodings import conn_encoding
 from psycopg.abc import AdaptContext
@@ -137,9 +137,9 @@ class WindowFunction :
 
 @dataclass
 class Where :
-	field:    Field | Value | 'Query'
+	field:    Union[Field, Value, 'Query']
 	operator: Operator
-	value:    Field | Value | 'Query' | None = None
+	value:    Union[Field, Value, 'Query', None] = None
 
 	def __str__(self: Self) :
 		if self.operator in { Operator.is_null, Operator.is_not_null } :
@@ -215,9 +215,9 @@ class Insert :
 
 	def __init__(self: Self, *columns: str) :
 		self.columns: tuple[str, ...] = tuple(map(__sanitize__, columns))
-		self._values: list[tuple[Field | Value | 'Query', ...]] = []
+		self._values: list[tuple[Union[Field, Value, 'Query'], ...]] = []
 
-	def values(self: Self, *values: Field | Value | 'Query') -> Self :
+	def values(self: Self, *values: Union[Field, Value, 'Query']) -> Self :
 		assert len(values) == len(self.columns)
 		self._values.append(values)
 		return self
