@@ -165,7 +165,7 @@ class AvroSchemaGenerator :
 				# this is a special case where the field is nullable and the default value is null, but the actual value can be omitted from the schema
 				# we rearrange Optional[type] and Union[type, None] to Union[None, type] so that null becomes the default type and the 'default' key is unnecessary
 				type_index: int = 0 if submodel.__args__.index(type(None)) else 1
-				f['type'] = self._get_type(None | submodel.__args__[type_index])  # type: ignore
+				f['type'] = self._get_type(Union[None, submodel.__args__[type_index]])  # type: ignore
 
 			else :
 				f['type'] = self._get_type(submodel)  # type: ignore
