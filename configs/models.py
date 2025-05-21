@@ -35,17 +35,7 @@ class CostsStore(Store) :
 		return ConfigType.costs
 
 
-class UpdateBannerRequest(BaseModel) :
-	config: Literal[ConfigType.banner]
-	value:  BannerStore
-
-
-class UpdateCostsRequest(BaseModel) :
-	config: Literal[ConfigType.costs]
-	value:  CostsStore
-
-
-UpdateConfigRequest = UpdateBannerRequest | UpdateCostsRequest
+UpdateConfigRequest = BannerStore | CostsStore
 
 
 class Funding(BaseModel) :

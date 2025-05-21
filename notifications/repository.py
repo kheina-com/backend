@@ -70,13 +70,6 @@ kms: KeyManager    = KeyManager()
 
 class Notifier(SqlInterface) :
 
-	subInfoFingerprint: bytes
-	serializerTypeMap:  dict[NotificationType, type[BaseModel]] = {
-		NotificationType.post:     InternalPostNotification,
-		NotificationType.user:     InternalUserNotification,
-		NotificationType.interact: InternalInteractNotification,
-	}
-
 	async def startup(self) -> None :
 		await kms.open()
 
@@ -213,7 +206,6 @@ class Notifier(SqlInterface) :
 
 			res = await WebPusher(
 				sub.dict(),
-				verbose = True,
 			).send_async(
 				data             = ujson.dumps(json_stream(data)),
 				headers          = await self.vapidHeaders(sub),

@@ -5,7 +5,7 @@ from shared.auth import Scope
 from shared.models.server import Request
 
 from .configs import Configs
-from .models import ConfigsResponse, UserConfigRequest, UserConfigResponse
+from .models import ConfigsResponse, UpdateConfigRequest, UserConfigRequest, UserConfigResponse
 
 
 app = APIRouter(
@@ -52,11 +52,10 @@ async def v1UserTheme(req: Request) -> PlainTextResponse :
 	)
 
 
-# @app.patch('', status_code=204)
-# async def v1UpdateConfig(req: Request, body: UpdateConfigRequest) -> None :
-# 	await req.user.verify_scope(Scope.mod)
-# 	await configs.updateConfig(
-# 		req.user,
-# 		body.config,
-# 		body.value,
-# 	)
+@app.patch('', status_code=204)
+async def v1UpdateConfig(req: Request, body: UpdateConfigRequest) -> None :
+	await req.user.verify_scope(Scope.mod)
+	await configs.updateConfig(
+		req.user,
+		body,
+	)

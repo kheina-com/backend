@@ -96,7 +96,7 @@ app.add_middleware(
 	] + list(HeadersToSet.keys()),
 	max_age = 86400,
 )
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=[
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=['*'] if environment.is_local() else [
 	environ.get('pod_ip',   '127.0.0.1'),
 	environ.get('pod_host', 'localhost'),
 ])

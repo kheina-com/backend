@@ -135,7 +135,7 @@ class PostId(str) :
 		raise NotImplementedError('value must be of type str, bytes, or int.')
 
 
-	def __get_pydantic_core_schema__(self, _: type[Any]) -> core_schema.CoreSchema :
+	def __get_pydantic_core_schema__(self: Self, _: type[Any]) -> core_schema.CoreSchema :
 		return core_schema.no_info_after_validator_function(
 			PostId,
 			core_schema.any_schema(serialization=core_schema.str_schema()), # type: ignore
@@ -143,7 +143,7 @@ class PostId(str) :
 
 
 	@lru_cache(maxsize=128)
-	def int(self: 'PostId') -> int :
+	def int(self: Self) -> int :
 		return int.from_bytes(b64decode(self), 'big')
 
 	__int__ = int
@@ -206,6 +206,9 @@ class Badge(BaseModel) :
 	emoji: str
 	label: str
 
+	def __hash__(self: Self) -> int :
+		return hash((self.emoji, self.label))
+
 
 class User(BaseModel) :
 	_post_id_converter = validator('icon', 'banner', pre=True, always=True, allow_reuse=True)(_post_id_converter)
@@ -222,7 +225,7 @@ class User(BaseModel) :
 	following: Optional[bool]
 	badges: list[Badge]
 
-	def portable(self: 'User') -> UserPortable :
+	def portable(self: Self) -> UserPortable :
 		return UserPortable(
 			name = self.name,
 			handle = self.handle,
@@ -323,7 +326,7 @@ class SetId(str) :
 		raise NotImplementedError('value must be of type str, bytes, or int.')
 
 
-	def __get_pydantic_core_schema__(self, _: type[Any]) -> core_schema.CoreSchema :
+	def __get_pydantic_core_schema__(self: Self, _: type[Any]) -> core_schema.CoreSchema :
 		return core_schema.no_info_after_validator_function(
 			SetId,
 			core_schema.any_schema(serialization=core_schema.str_schema()), # type: ignore
@@ -331,7 +334,7 @@ class SetId(str) :
 
 
 	@lru_cache(maxsize=128)
-	def int(self: 'SetId') -> int :
+	def int(self: Self) -> int :
 		return int.from_bytes(b64decode(self), 'big')
 
 	__int__ = int

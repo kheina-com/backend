@@ -55,31 +55,11 @@ class Tagger(Repository) :
 	async def addTags(self, user: KhUser, post_id: PostId, tags: tuple[str, ...]) :
 		tags = tuple(map(str.lower, tags))
 		await self.query_async("""
-			insert into kheina.public.tag_post
-			(tag_id, user_id, post_id)
-			with unnested as (
-				select tag_to_id(unnest(%s::text[])) as tag_id
-			), tag_ids as (
-				select tags.tag_id
-				from kheina.public.tags
-				inner join unnested
-					on tags.class_id != tag_class_to_id('system')
-						and tags.tag_id = unnested.tag_id
-			)
-			select tag_ids.tag_id, %s as user_id, %s as post_id
-			from tag_ids
-			union
-			select tag_inheritance.child, %s as user_id, %s as post_id
-			from tag_ids
-				inner join kheina.public.tag_inheritance
-					on tag_inheritance.parent = tag_ids.tag_id
-			on conflict do nothing;
+			call kheina.public.add_tags(%s, %s, %s);
 			""", (
+				post_id.int(),
+				user.user_id,
 				tags,
-				user.user_id,
-				post_id.int(),
-				user.user_id,
-				post_id.int(),
 			),
 			commit = True,
 		)

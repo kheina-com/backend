@@ -1,5 +1,8 @@
 from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
+from hashlib import blake2b
+from hmac import HMAC
 from secrets import token_bytes
 from typing import Optional, Self
 
@@ -17,27 +20,37 @@ from ..sql.query import Table
 
 
 @dataclass
+class RootKey :
+	aes:  str
+	pub:  str
+	priv: str
+
+
+@dataclass
 class RootKeys :
-	aes:             AESGCM
-	_aes_bytes:      bytes
-	ed25519:         Optional[Ed25519PrivateKey]
-	pub:             Ed25519PublicKey
-	associated_data: bytes
+	aes:        AESGCM
+	_aes_bytes: bytes
+	ed25519:    Optional[Ed25519PrivateKey]
+	pub:        Ed25519PublicKey
+	_pub_bytes: bytes
 
 	def encrypt(self: Self, data: bytes) -> bytes :
 		if not self.ed25519 :
 			raise ValueError('can only encrypt data with private keys')
 
 		nonce = token_bytes(12)
-		return b'.'.join(map(b64encode, [nonce, self.aes.encrypt(nonce, data, self.associated_data), self.ed25519.sign(data)]))
+		return b'.'.join(map(b64encode, [nonce, self.aes.encrypt(nonce, data, self._pub_bytes), self.ed25519.sign(data)]))
 
 	def decrypt(self: Self, data: bytes) -> bytes :
 		nonce: bytes; encrypted: bytes; sig: bytes
 		nonce, encrypted, sig = map(b64decode, b''.join(data.split()).split(b'.', 3))
 
-		decrypted: bytes = self.aes.decrypt(nonce, encrypted, self.associated_data)
+		decrypted: bytes = self.aes.decrypt(nonce, encrypted, self._pub_bytes)
 		self.pub.verify(sig, decrypted)
 		return decrypted
+
+	def hmac256(self: Self, data: bytes) -> bytes :
+		return HMAC(self._aes_bytes, data + self._pub_bytes, digestmod=partial(blake2b, digest_size=32)).digest()
 
 	@staticmethod
 	def _encode_pub(pub: Ed25519PublicKey) -> bytes :
@@ -53,11 +66,11 @@ class RootKeys :
 		ed25519priv = Ed25519PrivateKey.generate()
 
 		return RootKeys(
-			aes             = aeskey,
-			ed25519         = ed25519priv,
-			pub             = ed25519priv.public_key(),
-			associated_data = RootKeys._encode_pub(ed25519priv.public_key()),
-			_aes_bytes      = aesbytes,
+			aes        = aeskey,
+			ed25519    = ed25519priv,
+			pub        = ed25519priv.public_key(),
+			_pub_bytes = RootKeys._encode_pub(ed25519priv.public_key()),
+			_aes_bytes = aesbytes,
 		)
 
 	@staticmethod
@@ -76,22 +89,22 @@ class RootKeys :
 		pub_key.verify(pub_sig, pub_decrypted)
 		pub_key.verify(aes_sig, aesbytes)
 
-		associated_data: bytes = RootKeys._encode_pub(pub_key)
+		_pub_bytes: bytes = RootKeys._encode_pub(pub_key)
 
 		pk: Optional[Ed25519PrivateKey] = None
 		if priv :
 			priv_encrypted: bytes; priv_sig: bytes
 			nonce, priv_encrypted, priv_sig = map(b64decode, priv.split('.', 3))
-			priv_decrypted: bytes = aeskey.decrypt(nonce, priv_encrypted, associated_data)
+			priv_decrypted: bytes = aeskey.decrypt(nonce, priv_encrypted, _pub_bytes)
 			pub_key.verify(priv_sig, priv_decrypted)
 			pk = Ed25519PrivateKey.from_private_bytes(priv_decrypted)
 
 		return RootKeys(
-			aes             = aeskey,
-			_aes_bytes      = aesbytes,
-			ed25519         = pk,
-			pub             = pub_key,
-			associated_data = associated_data,
+			aes        = aeskey,
+			_aes_bytes = aesbytes,
+			ed25519    = pk,
+			pub        = pub_key,
+			_pub_bytes = _pub_bytes,
 		)
 
 	def dump(self: Self, priv: bool = False) -> dict[str, str] :
@@ -100,11 +113,11 @@ class RootKeys :
 
 		data = {
 			'aes': b'.'.join(map(b64encode, [self._aes_bytes, self.ed25519.sign(self._aes_bytes)])).decode(),
-			'pub': b'.'.join(map(b64encode, [(nonce := token_bytes(12)), self.aes.encrypt(nonce, self.associated_data, self._aes_bytes), self.ed25519.sign(self.associated_data)])).decode(),
+			'pub': b'.'.join(map(b64encode, [(nonce := token_bytes(12)), self.aes.encrypt(nonce, self._pub_bytes, self._aes_bytes), self.ed25519.sign(self._pub_bytes)])).decode(),
 		}
 
 		if priv :
-			data['priv'] = b'.'.join(map(b64encode, [(nonce := token_bytes(12)), self.aes.encrypt(nonce, (pb := self.ed25519.private_bytes_raw()), self.associated_data), self.ed25519.sign(pb)])).decode()
+			data['priv'] = b'.'.join(map(b64encode, [(nonce := token_bytes(12)), self.aes.encrypt(nonce, (pb := self.ed25519.private_bytes_raw()), self._pub_bytes), self.ed25519.sign(pb)])).decode()
 
 		return data
 
@@ -122,13 +135,13 @@ class Keys(RootKeys) :
 		ed25519priv = Ed25519PrivateKey.generate()
 
 		return Keys(
-			_aes_bytes      = aesbytes,
-			aes             = aeskey,
-			ed25519         = ed25519priv,
-			pub             = ed25519priv.public_key(),
-			associated_data = Keys._encode_pub(ed25519priv.public_key()),
-			purpose         = purpose,
-			key_id          = -1,
+			_aes_bytes = aesbytes,
+			aes        = aeskey,
+			ed25519    = ed25519priv,
+			pub        = ed25519priv.public_key(),
+			_pub_bytes = Keys._encode_pub(ed25519priv.public_key()),
+			purpose    = purpose,
+			key_id     = -1,
 		)
 
 
@@ -166,8 +179,8 @@ class Key(BaseModel) :
 		)
 
 	def ToKeys(self: Self) -> Keys :
-		root      = fetch('root', dict[str, str])
-		root_keys = Keys.load(root['aes'], root['pub'], root['priv'])
+		root      = fetch('root', RootKey)
+		root_keys = Keys.load(root.aes, root.pub, root.priv)
 
 		aes_dec  = root_keys.decrypt(b'.'.join(list(map(b64encode, (self.aes_nonce,  self.aes_bytes,  self.aes_signature)))))
 		pub_dec  = root_keys.decrypt(b'.'.join(list(map(b64encode, (self.pub_nonce,  self.pub_bytes,  self.pub_signature)))))
@@ -176,26 +189,23 @@ class Key(BaseModel) :
 		assert isinstance(pub_key, Ed25519PublicKey)
 
 		return Keys(
-			_aes_bytes      = aes_dec,
-			aes             = AESGCM(aes_dec),
-			ed25519         = Ed25519PrivateKey.from_private_bytes(priv_dec),
-			pub             = pub_key,
-			associated_data = Keys._encode_pub(pub_key),
-			purpose         = self.purpose,
-			key_id          = self.key_id,
+			_aes_bytes = aes_dec,
+			aes        = AESGCM(aes_dec),
+			ed25519    = Ed25519PrivateKey.from_private_bytes(priv_dec),
+			pub        = pub_key,
+			_pub_bytes = Keys._encode_pub(pub_key),
+			purpose    = self.purpose,
+			key_id     = self.key_id,
 		)
 
 	@staticmethod
 	def FromKeys(keys: Keys) -> 'Key' :
-		if not keys.ed25519 :
-			raise ValueError('can only dump keys that contain private keys')
-
-		root      = fetch('root', dict[str, str])
-		root_keys = Keys.load(root['aes'], root['pub'], root['priv'])
-		key       = Key.new(-1, keys.purpose)
+		root      = fetch('root', RootKey)
+		root_keys = Keys.load(root.aes, root.pub, root.priv)
+		key       = Key.new(keys.key_id, keys.purpose)
 
 		key.aes_nonce,  key.aes_bytes,  key.aes_signature  = tuple(map(b64decode, root_keys.encrypt(keys._aes_bytes).split(b'.', 3)))
-		key.pub_nonce,  key.pub_bytes,  key.pub_signature  = tuple(map(b64decode, root_keys.encrypt(keys.associated_data).split(b'.', 3)))
+		key.pub_nonce,  key.pub_bytes,  key.pub_signature  = tuple(map(b64decode, root_keys.encrypt(keys._pub_bytes).split(b'.', 3)))
 		key.priv_nonce, key.priv_bytes, key.priv_signature = tuple(map(b64decode, root_keys.encrypt(keys.ed25519.private_bytes_raw()).split(b'.', 3)))
 
 		return key

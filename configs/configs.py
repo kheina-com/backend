@@ -146,7 +146,7 @@ class Configs(SqlInterface) :
 					updated    = now(),
 					bytes      = excluded.bytes,
 					updated_by = excluded.updated_by
-				where key = excluded.key;
+				where configs.key = excluded.key;
 			""", (
 				config.key(),
 				await config.serialize(),

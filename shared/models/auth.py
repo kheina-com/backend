@@ -41,7 +41,7 @@ class Scope(IntEnum) :
 	admin    = 4
 	internal = 5
 
-	def all_included_scopes(self: 'Scope') -> list['Scope'] :
+	def all_included_scopes(self: Self) -> list['Scope'] :
 		return [v for v in Scope.__members__.values() if Scope.user.value <= v.value <= self.value] or [self]
 
 
@@ -51,11 +51,11 @@ class _KhUser(NamedTuple) :
 	scope:   set[Scope]          = set()
 	banned:  Optional[bool]      = None
 
-	def __hash__(self) -> int :
+	def __hash__(self: Self) -> int :
 		return hash(f'{self.user_id}{self.scope}')
 
 
-	def __str__(self) -> str :
+	def __str__(self: Self) -> str :
 		# this is here for caching purposes
 		return str(self.user_id)
 

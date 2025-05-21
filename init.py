@@ -53,25 +53,12 @@ def cli() :
 	pass
 
 
-@cli.command('pbtest')
-@click.option(
-	'-t',
-	default=10,
-)
-def pbtest(t: int) -> None :
-	timer = 0
-	while timer < t :
-		progress_bar(t, timer)
-		sleeper = random.random() * 0.01
-		time.sleep(sleeper)
-		timer += sleeper
-
-	progress_bar(t, timer)
-
-
 AerospikeSets = ['token', 'avro_schemas', 'configs', 'score', 'votes', 'posts', 'sets', 'tag_count', 'tags', 'users', 'following', 'user_handle_map']
 
 def nukeCache() -> None :
+	"""
+	deletes all data from aerospike
+	"""
 	# wipe all caching first, just in case
 	# TODO: fetch all the sets or have a better method of clearing aerospike than this
 	for set in AerospikeSets :
@@ -101,6 +88,8 @@ cli.command('nuke-cache')(nukeCache)
 )
 async def execSql(unlock: bool = False, file: str = '', lock: Optional[int] = None) -> None :
 	"""
+	initializes or updates the database on a fuzzly instance
+
 	connects to the database and runs all files stored under the db folder
 	folders under db are sorted numberically and run in descending order
 	files within those folders are treated the same.
@@ -166,6 +155,10 @@ EmojiMapUrl = r'https://github.com/kheina-com/EmojiMap/releases/download/v15.1/e
 
 @cli.command('emojis')
 async def uploadEmojis() -> None :
+	"""
+	initializes the emoji database from AppleColorEmoji-HD.ttc
+	"""
+
 	from emojis.models import InternalEmoji
 	from emojis.repository import EmojiRepository
 	from shared.backblaze import B2Interface
@@ -283,10 +276,12 @@ async def uploadEmojis() -> None :
 
 @cli.command('admin')	
 async def createAdmin() -> LoginRequest :
-	from authenticator.authenticator import Authenticator
 	"""
 	creates a default admin account on your fuzzly instance
 	"""
+
+	from authenticator.authenticator import Authenticator
+
 	auth = Authenticator()
 	email = 'localhost@kheina.com'
 	password = b64encode(token_bytes(18)).decode()
@@ -313,10 +308,12 @@ async def createAdmin() -> LoginRequest :
 
 @cli.command('pw')	
 async def updatePassword() -> LoginRequest :
-	from authenticator.authenticator import Authenticator
 	"""
 	resets admin's password incase you lost or forgot it
 	"""
+
+	from authenticator.authenticator import Authenticator
+
 	auth = Authenticator()
 	email = 'localhost@kheina.com'
 	password = b64encode(token_bytes(18)).decode()
@@ -356,6 +353,8 @@ def writeAesFile(file: BinaryIO, contents: bytes) :
 @cli.command('gen')
 def generateCredentials() -> None :
 	"""
+	creates usable encrypted credentials from the sample file
+
 	generates an encrypted credentials file from the sample-creds.json file in the root directory
 	"""
 	keys = _generate_keys()
@@ -371,6 +370,8 @@ def generateCredentials() -> None :
 @cli.command('encrypt')
 def encryptCredentials() -> None :
 	"""
+	encrypts json credential files into usable secrets
+
 	encrypts all existing credentials files within the credentials directory
 	"""
 	keys = _generate_keys()
@@ -432,7 +433,6 @@ def readKubeSecret(secret: str, format: str = '') -> None :
 		return click.echo(f'{err}: {err.decode()}')
 
 	cred   = b64decode(json.loads(out).values().__iter__().__next__())
-	print("==> cred:", cred)
 	parsed = decryptCredentialFile(json.loads(cred)['value'].encode())
 
 	for p in path :
@@ -454,14 +454,14 @@ def readKubeSecret(secret: str, format: str = '') -> None :
 @cli.command('upload-secret')
 @click.option('--secret', '-s', help='secret file')
 @click.option('--name',   '-n', help='kube secret name, should be .json')
-def readKubeSecret(secret: str, name: str) -> None :
+def uploadKubeSecret(secret: str, name: str = 'credentials') -> None :
 	"""
-	reads an encrypted kube secret
+	uploads and encrypts a kube secret to the given secret name
 	"""
 
 	cred = ''.join(list(map(str.strip, open(secret, 'r').readlines())))
 	cred_json = f'{{"value":"{cred}"}}'
-	Popen(['kubectl', 'delete', 'secret', 'credentials'], stdout=PIPE, stderr=PIPE).communicate()
+	Popen(['kubectl', 'delete', 'secret', name], stdout=PIPE, stderr=PIPE).communicate()
 	out, err = Popen(['kubectl', 'create', 'secret', 'generic', name, '--from-literal=creds.json=' + cred_json], stdout=PIPE, stderr=PIPE).communicate()
 	if err :
 		return click.echo(err.decode(), err=True)

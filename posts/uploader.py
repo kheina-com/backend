@@ -3,7 +3,7 @@ from asyncio import Task, create_subprocess_exec, create_task
 from enum import Enum
 from hashlib import sha1
 from io import BytesIO
-from os import path, remove
+from os import path, remove, rename
 from secrets import token_bytes
 from subprocess import PIPE
 from time import time
@@ -91,6 +91,24 @@ async def validate_video(file_on_disk: str) -> None :
 		'-',
 		f = 'null',
 	).execute()
+
+
+@timed
+async def parse_audio_stream(file_on_disk: str) -> dict[str, str] :
+	p    = await create_subprocess_exec('ffmpeg', '-i', file_on_disk, '-map', '0:a:0', '-af', 'astats', '-f', 'null', '-', stdout=PIPE, stderr=PIPE)
+	raw  = b''.join(await p.communicate())
+	data = { }
+
+	for line in raw.split(b'\n') :
+		if not line.startswith(b'[Parsed_astats_0') :
+			continue
+
+		lstr = line[line.find(b']') + 1:].decode()
+
+		if (idx := lstr.find(':')) > 0 :
+			data[lstr[:idx].strip()] = lstr[idx + 1:].strip()
+
+	return data
 
 
 class Uploader(SqlInterface, B2Interface) :
@@ -1111,24 +1129,30 @@ class Uploader(SqlInterface, B2Interface) :
 
 
 	@timed
-	async def parse_audio_stream(
-		self:         Self,
-		file_on_disk: str,
-	) -> dict[str, str] :
-		p    = await create_subprocess_exec('ffmpeg', '-i', file_on_disk, '-map', '0:a:0', '-af', 'astats', '-f', 'null', '-', stdout=PIPE, stderr=PIPE)
-		raw  = b''.join(await p.communicate())
-		data = { }
+	async def remove_audio_channels(self: Self, file_on_disk: str, trace: str, post_id: PostId) -> None :
+		temp: str = f'images/temp_{uuid4().hex}_{file_on_disk[file_on_disk.find("/") + 1:]}'
+		try :
+			# ffmpeg -i $input_file -c copy -an $output_file
+			await FFmpeg().input(
+				file_on_disk,
+			).output(
+				temp,
+				c  = 'copy',
+				an = None,
+				y  = None,
+			).execute()
 
-		for line in raw.split(b'\n') :
-			if not line.startswith(b'[Parsed_astats_0') :
-				continue
+			rename(temp, file_on_disk)
 
-			lstr = line[line.find(b']') + 1:].decode()
-
-			if (idx := lstr.find(':')) > 0 :
-				data[lstr[:idx].strip()] = lstr[idx + 1:].strip()
-
-		return data
+		except :
+			self.logger.exception({
+				'message':      'failed to remove audio channels',
+				'trace':        trace,
+				'post_id':      post_id,
+				'file_on_disk': file_on_disk,
+				'temp':         temp,
+			})
+			self.delete_file(temp)
 
 
 	@HttpErrorHandler('uploading video')
@@ -1203,7 +1227,7 @@ class Uploader(SqlInterface, B2Interface) :
 			})
 
 			async with self.transaction() as transaction :
-				data: tuple[Optional[str], Optional[int]] = await transaction.query_async("""
+				data: Optional[tuple[Optional[str], Optional[int]]] = await transaction.query_async("""
 					select media.filename, media.crc
 					from kheina.public.posts
 						left join kheina.public.media
@@ -1217,7 +1241,7 @@ class Uploader(SqlInterface, B2Interface) :
 					fetch_one = True,
 				)
 
-				# if the user owns the above post, then data should always be populated, even if it's just [None]
+				# if the user owns the above post, then data should always be populated, even if it's just [None, None]
 				if not data :
 					raise Forbidden('the post you are trying to upload to does not belong to this account.')
 
@@ -1256,11 +1280,21 @@ class Uploader(SqlInterface, B2Interface) :
 
 				if audio :
 					# since there can be empty audio streams, we need to do a further check of the audio stream itself
-					media = await self.parse_audio_stream(file_on_disk)
+					media = await parse_audio_stream(file_on_disk)
 					if (rms := media.get('RMS level dB')) and rms != '-inf' :
 						query.append("(tag_to_id('audio'), %s, 0)")
 						params.append(post_id.int())
 						flags.append(MediaFlag.audio)
+
+					else :
+						# it bothers me when there are just empty audio channels, so let's remove those
+						await self.remove_audio_channels(file_on_disk, trace, post_id)
+						self.logger.debug({
+							'trace':   trace,
+							'post':    post_id,
+							'elapsed': datetime.now() - start,
+							'message': 'stripped audio channel',
+						})
 
 					del media
 
