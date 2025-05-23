@@ -168,6 +168,7 @@ async def v1UploadVideo(
 	req:        Request,
 	file:       UploadFile = File(None),
 	post_id:    PostId     = Form(None),
+	thumbnail:  float      = Form(0),
 ) -> Media :
 	"""
 	FORMDATA: {
@@ -183,6 +184,7 @@ async def v1UploadVideo(
 		user         = req.user,
 		file_on_disk = file_on_disk,
 		filename     = file.filename,
+		thumbnail    = thumbnail,
 		post_id      = PostId(post_id),
 		trace        = trace(req),
 	)

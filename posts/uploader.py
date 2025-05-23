@@ -14,6 +14,7 @@ import aerospike
 from aiohttp import ClientResponseError
 from exiftool import ExifToolAlpha as ExifTool
 from ffmpeg.asyncio import FFmpeg
+from ffmpeg.errors import FFmpegError
 from wand import resource
 from wand.image import Image
 
@@ -54,6 +55,7 @@ posts:    Posts    = Posts()
 users:    Users    = Users()
 tagger:   Tags     = Tags()
 notifier: Notifier = Notifier()
+quantum_range = Image().quantum_range
 
 
 @timed
@@ -63,15 +65,21 @@ def crc(value: bytes) -> int :
 
 
 @timed
-async def extract_frame(file_on_disk: str, filename: str) -> str :
-	await FFmpeg().input(
-		file_on_disk,
-		accurate_seek = None,
-		ss            = '0',
-	).output(
-		(screenshot := f'images/{uuid4().hex}_{filename}.webp'),
-		{ 'frames:v': '1' },
-	).execute()
+async def extract_frame(file_on_disk: str, filename: str, seek: float) -> str :
+	screenshot = f'images/{uuid4().hex}_{filename}.webp'
+	try :
+		await FFmpeg().input(
+			file_on_disk,
+			ss = str(seek),
+			y  = None,
+		).output(
+			screenshot,
+			{ 'frames:v': '1' },
+		).execute()
+
+	except FFmpegError as e :
+		raise InternalServerError(f'Failed generate screenshot from video', err=e)
+
 	return screenshot
 
 
@@ -1162,6 +1170,7 @@ class Uploader(SqlInterface, B2Interface) :
 		user:         KhUser,
 		file_on_disk: str,
 		filename:     str,
+		thumbnail:    float,
 		post_id:      PostId,
 		trace:        str,
 	) -> Media :
@@ -1180,6 +1189,7 @@ class Uploader(SqlInterface, B2Interface) :
 			'post':         post_id,
 			'elapsed':      datetime.now() - start,
 			'file_on_disk': file_on_disk,
+			'thumbnail':    thumbnail,
 			'message':      'validated input video file',
 		})
 
@@ -1202,7 +1212,7 @@ class Uploader(SqlInterface, B2Interface) :
 
 		try :
 			# extract the first frame of the video to use for thumbnails/hash
-			screenshot = await extract_frame(file_on_disk, filename)
+			screenshot = await extract_frame(file_on_disk, filename, thumbnail)
 
 			post: InternalPost = await posts._get_post(post_id)
 			self.logger.debug({

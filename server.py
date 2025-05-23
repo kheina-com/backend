@@ -42,15 +42,17 @@ app.add_exception_handler(BaseError, jsonErrorHandler)
 app.middleware('http')(CustomHeaderMiddleware)
 app.add_middleware(
 	KhCorsMiddleware,
-	allowed_origins = {
-		'localhost',
-		'127.0.0.1',
-		'api.dev.fuzz.ly',
-		'api-dev.fuzz.ly',
-		'dev.fuzz.ly',
-		'api.fuzz.ly',
-		'fuzz.ly',
-	},
+	allowed_origins = set(
+		['*'] if environment.is_local() else [
+			'localhost',
+			'127.0.0.1',
+			'api.dev.fuzz.ly',
+			'api-dev.fuzz.ly',
+			'dev.fuzz.ly',
+			'api.fuzz.ly',
+			'fuzz.ly',
+		]
+	),
 	allowed_protocols = set(
 		['http', 'https'] 
 		if environment.is_local()

@@ -44,7 +44,10 @@ class KhCorsMiddleware:
 		if 'origin' in request.headers :
 			origin = urlparse(request.headers['origin'])
 
-			if origin.scheme not in self.allowed_protocols or origin.netloc.split(':')[0] not in self.allowed_origins :
+			if '*' in self.allowed_origins :
+				pass
+
+			elif origin.scheme not in self.allowed_protocols or origin.netloc.split(':')[0] not in self.allowed_origins :
 				response = jsonErrorHandler(request, BadRequest('Origin not allowed.'))
 				await response(scope, receive, send)
 				return

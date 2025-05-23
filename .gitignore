@@ -1,3 +1,5 @@
+!**/.gitignore
+
 # credentials
 **/credentials*.*
 **/credentials*
@@ -5,6 +7,9 @@ credentials*
 
 # config files
 .vscode
+
+# docker volumes
+docker/**
 
 # database files
 sql.lock
