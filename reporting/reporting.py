@@ -73,6 +73,7 @@ class Reporting(Repository) :
 						icon      = None,
 						verified  = None,
 						following = None,
+						self      = False,
 					),
 				)
 

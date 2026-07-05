@@ -5,12 +5,14 @@ from uuid import UUID
 import aerospike
 import ujson
 from aiohttp import ClientResponse, ClientSession, ClientTimeout
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
 from py_vapid import Vapid02
-from pydantic import BaseModel
 from pywebpush import WebPusher as _WebPusher
 
+from chat.models import Message
 from posts.models import Post
 from shared.auth import KhUser, tokenMetadata
 from shared.base64 import b64encode
@@ -27,7 +29,7 @@ from shared.timing import timed
 from shared.utilities import uuid7
 from shared.utilities.json import json_stream
 
-from .models import InteractNotification, InternalInteractNotification, InternalNotification, InternalPostNotification, InternalUserNotification, NotificationType, PostNotification, ServerKey, Subscription, SubscriptionInfo, UserNotification, VapidConfig
+from .models import ChatNotification, InteractNotification, InternalChatNotification, InternalInteractNotification, InternalNotification, InternalPostNotification, InternalUserNotification, PostNotification, ServerKey, Subscription, SubscriptionInfo, UserNotification, VapidConfig
 
 
 @timed
@@ -95,8 +97,8 @@ class Notifier(SqlInterface) :
 				key = await kms.GetKeysByKeyId(data[0].key_id, KeyPurpose.notifications)
 				return key.decrypt(data[0].data)
 
-			vapid = Vapid02()
-			vapid.generate_keys()
+			# can't use vapid.generate_keys() due to deprecation of a cryptographty api
+			vapid = Vapid02(ec.generate_private_key(ec.SECP256R1(), default_backend()))
 
 			key = await kms.GetKeysByPurpose(KeyPurpose.notifications)
 			vapid_config = VapidConfig(
@@ -242,14 +244,20 @@ class Notifier(SqlInterface) :
 	async def sendNotification(
 		self: Self,
 		user_id: int,
-		data: InternalInteractNotification | InternalPostNotification | InternalUserNotification,
-		**kwargs: UserPortable | Post,
+		data: InternalInteractNotification | InternalPostNotification | InternalUserNotification | InternalChatNotification,
+		**kwargs: UserPortable | Post | Message,
 	) -> None :
 		"""
 		creates, persists and then sends the given notification to the provided user_id.
-		kwargs must include the user and/or post of the notification's user_id/post_id in the form of
+
+		kwargs must include external notification data in the form of
 		```
-		await sendNotification(..., user=UserPortable(...), post=Post(...))
+		await sendNotification(
+			...,
+			user    = UserPortable(...),
+			post    = Post(...),
+			message = Message(...),
+		)
 		```
 		"""
 		try :
@@ -303,6 +311,17 @@ class Notifier(SqlInterface) :
 						event   = data.event,
 						created = inotification.created,
 						user    = user,
+					)
+					await self._send(user_id, notification.dict())
+
+				case InternalChatNotification() :
+					message = kwargs.get('message')
+					assert isinstance(message, Message), 'chat notifications must include a message kwarg'
+					notification = ChatNotification(
+						id      = inotification.id,
+						event   = data.event,
+						created = inotification.created,
+						message = message,
 					)
 					await self._send(user_id, notification.dict())
 

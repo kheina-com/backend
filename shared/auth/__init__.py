@@ -10,7 +10,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
 from cryptography.hazmat.primitives.serialization import load_der_public_key
-from fastapi import Request
+from fastapi import Request, WebSocket
 
 from authenticator.authenticator import AuthAlgorithm, Authenticator, AuthState, PublicKeyResponse, Scope, TokenMetadata, token_kvs
 from shared.models.auth import AuthToken, _KhUser
@@ -179,13 +179,30 @@ async def deactivateAuthToken(token: str, guid: Optional[bytes] = None) -> None 
 		return await token_kvs.remove_async(guid)
 
 
-async def retrieveAuthToken(request: Request) -> AuthToken :
-	token: Optional[str] = request.headers.get('Authorization') or request.cookies.get('kh-auth')
+def tokenFromWebSocket(request: Request | WebSocket) -> Optional[str] :
+	wsp = request.headers.get('sec-websocket-protocol')
+	if not wsp :
+		return
+
+	protocols = wsp.split(',')
+	if len(protocols) <= 1 :
+		return
+
+	for p in protocols :
+		if len(p) > 7 and p[:6].lower() == 'bearer' :
+			return p
+
+
+async def retrieveAuthToken(request: Request | WebSocket) -> AuthToken :
+	token: Optional[str] = request.headers.get('authorization') or tokenFromWebSocket(request) or request.cookies.get('kh-auth')
 
 	if not token :
 		raise Unauthorized('An authentication token was not provided.')
 
-	token_data: AuthToken = await verifyToken(token.split()[-1])
+	if len(token) > 7 and token[:6].lower() == 'bearer' :
+		token = token[7:]
+
+	token_data: AuthToken = await verifyToken(token)
 
 	# TODO: this still isn't stable, I don't know why, one of the headers used is probably ephemeral
 	# if 'fp' in token_data.data and token_data.data['fp'] != browserFingerprint(request) :
@@ -196,7 +213,7 @@ async def retrieveAuthToken(request: Request) -> AuthToken :
 
 def browserFingerprint(request: Request) -> str :
 	headers = json.dumps({
-		'user-agent': userAgentStrip(request.headers.get('user-agent')),
+		'user-agent': request.headers.get('user-agent'),
 		'connection': request.headers.get('connection'),
 		'host': request.headers.get('host'),
 		'accept-language': request.headers.get('accept-language'),
@@ -212,10 +229,3 @@ def browserFingerprint(request: Request) -> str :
 	})
 
 	return b64encode(sha1(headers.encode()).digest()).decode()
-
-
-def userAgentStrip(ua: Optional[str]) -> Optional[str] :
-	if not ua :
-		return None
-	parts = ua.partition('/')
-	return ''.join(parts[:-1] + (ua_strip.sub('', parts[-1]),))

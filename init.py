@@ -1,9 +1,6 @@
 import json
-import random
 import re
 import shutil
-import time
-from base64 import urlsafe_b64encode
 from os import environ, listdir, remove
 from os.path import isdir, isfile, join
 from secrets import token_bytes
@@ -150,14 +147,127 @@ async def execSql(unlock: bool = False, file: str = '', lock: Optional[int] = No
 		f.write(str(int(dir)))
 
 
+def extractFileExt(url: str) -> str :
+	return url[url.rfind('.')+1:]
+
+
+async def uploadSlackEmojis(file: str) -> None :
+	from aiohttp import request
+	from psycopg.errors import UniqueViolation
+
+	from emojis.models import InternalEmoji
+	from emojis.repository import EmojiRepository
+	from shared.backblaze import B2Interface
+	from shared.exceptions.http_error import BadRequest
+
+	try :
+		map_file = json.load(open(file))
+
+	except :
+		return click.echo('failed to load map file.')
+
+	if not map_file.get('ok') :
+		return click.echo('map file not marked ok.')
+
+	emoji_map: dict[str, str] = map_file['emoji']
+	aliases: dict[str, tuple[str, str]] = { }
+
+	click.echo(f'loaded emoji map with {len(emoji_map)} emojis.')
+
+	b2 = B2Interface()
+	repo = EmojiRepository()
+
+	total = len(emoji_map)
+	completed = 0
+	progress_bar(total, completed)
+
+	for emoji, url in emoji_map.items() :
+		ext = extractFileExt(url)
+		filename = f'{emoji}.{ext}'
+		emoji = emoji.replace('_', '-')
+
+		if url.startswith('alias:') :
+			aliases[emoji] = (filename, url[6:].replace('_', '-'))
+			continue
+
+		try :
+			await repo.create(InternalEmoji(
+				emoji    = emoji,
+				filename = filename,
+				updated  = datetime.now(),
+			))
+
+		except UniqueViolation :
+			click.echo(f'failed to insert emoji {emoji}: {url} (an emoji already exists with that name)')
+			completed += 1
+			progress_bar(total, completed)
+			continue
+
+		emoji_data: bytes = b''
+		for _ in range(3) :
+			try :
+				async with request('GET', url) as r :
+					if r.status != 200 :
+						continue
+
+					# with open(f'images/{emoji}{extractFileExt(url)}', 'wb') as f :
+					# 	async for chunk, _ in r.content.iter_chunks() :
+					# 		f.write(chunk)
+
+					emoji_data: bytes = await r.content.read()
+					break
+
+			except Exception as e :
+				continue
+
+		if not emoji_data :
+			click.echo(f'failed to download emoji {emoji}: {url}')
+			completed += 1
+			progress_bar(total, completed)
+			continue
+
+		await b2.upload_async(emoji_data, f'emoji/{filename}', MimeType[ext])
+
+		completed += 1
+		progress_bar(total, completed)
+
+	for alias, (filename, emoji) in aliases.items() :
+		try :
+			await repo.alias(emoji, alias)
+
+		except BadRequest as e :
+			click.echo(f'failed to insert alias {alias}: {emoji} ({e})')
+			completed += 1
+			progress_bar(total, completed)
+			continue
+
+		except UniqueViolation :
+			click.echo(f'failed to insert alias {alias}: {emoji} (an emoji already exists with that name)')
+			completed += 1
+			progress_bar(total, completed)
+			continue
+
+		completed += 1
+		progress_bar(total, completed)
+
+
 EmojiFontURL = r'https://github.com/PoomSmart/EmojiFonts/releases/download/15.1.0/AppleColorEmoji-HD.ttc'
 EmojiMapUrl = r'https://github.com/kheina-com/EmojiMap/releases/download/v15.1/emoji_map.json'
 
-@cli.command('emojis')
-async def uploadEmojis() -> None :
+@cli.command('emoji')
+@click.option(
+	'-f',
+	'--file',
+	help='accepts an emoji.list file downloaded from slack to import slack emojis: https://api.slack.com/methods/emoji.list/test',
+	default='',
+)
+async def uploadEmojis(file: str) -> None :
 	"""
 	initializes the emoji database from AppleColorEmoji-HD.ttc
 	"""
+
+	if file :
+		return await uploadSlackEmojis(file)
 
 	from emojis.models import InternalEmoji
 	from emojis.repository import EmojiRepository

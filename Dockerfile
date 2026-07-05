@@ -1,34 +1,33 @@
-FROM python:3.13-alpine
+FROM python:3.14-alpine
 
-RUN apk update && \
-	apk upgrade && \
-	apk add --no-cache git && \
-	apk add --no-cache --virtual \
-	.build-deps \
-	gcc \
-	g++ \
-	musl-dev \
-	libffi-dev \
-	postgresql-dev \
-	build-base \
-	bash \
-	linux-headers \
-	libuv \
-	libuv-dev \
-	openssl \
-	openssl-dev \
-	lua5.1 \
-	lua5.1-dev \
-	zlib \
-	zlib-dev \
-	python3-dev \
-	libpng-dev \
-	libjpeg-turbo-dev \
-	tiff-dev \
-	libwebp-dev \
-	imagemagick \
-	exiftool \
-	jq
+RUN apk update && apk upgrade
+RUN apk add --no-cache git
+RUN apk add --no-cache gcc
+RUN apk add --no-cache g++
+RUN apk add --no-cache musl-dev
+RUN apk add --no-cache libffi-dev
+# RUN apk add --no-cache postgresql-dev
+RUN apk add --no-cache build-base
+RUN apk add --no-cache bash
+RUN apk add --no-cache linux-headers
+RUN apk add --no-cache libuv
+RUN apk add --no-cache libuv-dev
+RUN apk add --no-cache openssl
+RUN apk add --no-cache openssl-dev
+RUN apk add --no-cache lua5.1
+RUN apk add --no-cache lua5.1-dev
+RUN apk add --no-cache zlib
+RUN apk add --no-cache zlib-dev
+RUN apk add --no-cache python3-dev
+RUN apk add --no-cache libpng-dev
+RUN apk add --no-cache libjpeg-turbo-dev
+RUN apk add --no-cache tiff-dev
+RUN apk add --no-cache libwebp-dev
+RUN apk add --no-cache libev
+RUN apk add --no-cache libev-dev
+RUN apk add --no-cache imagemagick
+RUN apk add --no-cache exiftool
+RUN apk add --no-cache jq
 
 RUN rm -rf /var/lib/apt/lists/*
 

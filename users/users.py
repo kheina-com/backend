@@ -149,21 +149,22 @@ class Users(Repository) :
 
 		return [
 			User(
-				name = row[0],
-				handle = row[1],
-				privacy = self._validate_privacy(await privacy_map.get(row[2])),
-				icon = row[3],
-				banner = row[7],
-				website = row[4],
-				created = row[5],
+				name        = row[0],
+				handle      = row[1],
+				privacy     = self._validate_privacy(await privacy_map.get(row[2])),
+				icon        = row[3],
+				banner      = row[7],
+				website     = row[4],
+				created     = row[5],
 				description = row[6],
-				badges = [await badge_map.get(i) for i in filter(None, row[11])],
+				badges      = [await badge_map.get(i) for i in filter(None, row[11])],
 				verified = Verified.admin if row[9] else (
 					Verified.mod if row[8] else (
 						Verified.artist if row[10] else None
 					)
 				),
 				following = None,
+				self      = False,
 			)
 			for row in data
 		]

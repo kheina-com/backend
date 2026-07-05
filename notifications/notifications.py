@@ -1,5 +1,6 @@
 from asyncio import Task, create_task
 from typing import Self
+from uuid import UUID
 
 from posts.models import InternalPost, Post
 from posts.repository import Repository as Posts
@@ -9,7 +10,7 @@ from shared.models import InternalUser, PostId, UserPortable
 from shared.sql.query import Field, Operator, Order, Value, Where
 from users.repository import Repository as Users
 
-from .models import InteractNotification, InternalInteractNotification, InternalNotification, InternalPostNotification, InternalUserNotification, NotificationType, PostNotification, UserNotification
+from .models import ChatNotification, InteractNotification, InternalChatNotification, InternalInteractNotification, InternalNotification, InternalPostNotification, InternalUserNotification, NotificationType, PostNotification, UserNotification
 from .repository import Notifier
 
 
@@ -20,7 +21,7 @@ users: Users = Users()
 class Notifications(Notifier) :
 
 	@HttpErrorHandler('fetching notifications')
-	async def fetchNotifications(self: Self, user: KhUser) -> list[InteractNotification | PostNotification | UserNotification] :
+	async def fetchNotifications(self: Self, user: KhUser) -> list[InteractNotification | PostNotification | UserNotification | ChatNotification] :
 		data: list[InternalNotification] = await self.where(
 			InternalNotification,
 			Where(
@@ -37,9 +38,11 @@ class Notifications(Notifier) :
 		if not data :
 			return []
 
-		inotifications: list[tuple[InternalNotification, InternalInteractNotification | InternalPostNotification | InternalUserNotification]] = []
+		inotifications: list[tuple[InternalNotification, InternalInteractNotification | InternalPostNotification | InternalUserNotification | InternalChatNotification]] = []
+		message_ids: list[UUID] = []
 		post_ids: list[PostId] = []
 		user_ids: list[int] = []
+
 		for n in data :
 			match n.type() :
 				case NotificationType.interact :
@@ -55,6 +58,17 @@ class Notifications(Notifier) :
 					inotifications.append((n, notif := await InternalUserNotification.deserialize(n.data)))
 					user_ids.append(notif.user_id)
 
+				case NotificationType.chat :
+					inotifications.append((n, notif := await InternalChatNotification.deserialize(n.data)))
+					message_ids.append(notif.message_id)
+
+				case type_ :
+					self.logger.warning({
+						'message':      'encountered unknown notification type during fetch',
+						'type':         type_,
+						'notification': n,
+					})
+
 		iposts: Task[dict[PostId, InternalPost]] = create_task(posts._get_posts(post_ids))
 		iusers: Task[dict[int, InternalUser]] = create_task(users._get_users(user_ids))
 
@@ -65,7 +79,7 @@ class Notifications(Notifier) :
 			for p in await posts_task
 		}
 
-		notifications: list[InteractNotification | PostNotification | UserNotification] = []
+		notifications: list[InteractNotification | PostNotification | UserNotification | ChatNotification] = []
 
 		for n, i in inotifications :
 			match i :
@@ -93,5 +107,12 @@ class Notifications(Notifier) :
 						created = n.created,
 						user    = all_users[i.user_id],
 					))
+
+				# case InternalChatNotification() :
+				# 	notifications.append(ChatNotification(
+				# 		id      = n.id,
+				# 		event   = i.event,
+				# 		created = n.created,
+				# 	))
 
 		return notifications

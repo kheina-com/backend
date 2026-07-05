@@ -91,7 +91,7 @@ class SqlInterface :
 	_read_conversions = { }
 
 	def __init__(self: Self, long_query_metric: float = 1, conversions: dict[type, Callable] = { }) -> None :
-		self.logger: Logger = getLogger(level=DEBUG if environment.is_local() else INFO)
+		self.logger: Logger = getLogger()
 		self._long_query = long_query_metric	
 		self._conversions: dict[type, Callable] = {
 			tuple: list,
@@ -107,7 +107,8 @@ class SqlInterface :
 			SqlInterface.db = fetch('db', dict[str, str])
 
 
-	async def open(self: Self) :
+	@staticmethod
+	async def open() :
 		if getattr(SqlInterface, 'pool', None) is None :
 			SqlInterface.pool = AsyncConnectionPool(' '.join(map('='.join, SqlInterface.db.items())), open=False)
 			await SqlInterface.pool.open()
@@ -169,10 +170,10 @@ class SqlInterface :
 					pass
 
 				except Exception as e :
-					self.logger.warning({
-						'message': 'unexpected error encountered during sql query.',
-						'query': sql.as_string(),
-					}, exc_info=e)
+					# self.logger.warning({
+					# 	'message': 'unexpected error encountered during sql query.',
+					# 	'query': sql.as_string(),
+					# }, exc_info=e)
 					# now attempt to recover by rolling back
 					raise
 
@@ -181,7 +182,8 @@ class SqlInterface :
 		return Transaction(self)
 
 
-	async def close(self: Self) -> int :
+	@staticmethod
+	async def close() -> int :
 		if not SqlInterface.pool.closed :
 			await SqlInterface.pool.close()
 		return SqlInterface.pool.closed
@@ -664,8 +666,8 @@ class Transaction :
 				return await cur.fetchall()
 
 		except Exception as e :
-			self._sql.logger.warning({
-				'message': 'unexpected error encountered during sql query.',
-				'query': sql.as_string(),
-			}, exc_info=e)
+			# self._sql.logger.warning({
+			# 	'message': 'unexpected error encountered during sql query.',
+			# 	'query': sql.as_string(),
+			# }, exc_info=e)
 			raise

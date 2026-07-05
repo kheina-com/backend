@@ -4,7 +4,7 @@ from shared.models.auth import Scope
 from shared.models.server import Request
 from shared.server import timed
 
-from .models import InteractNotification, PostNotification, ServerKey, SubscriptionInfo, UserNotification
+from .models import ChatNotification, InteractNotification, PostNotification, ServerKey, SubscriptionInfo, UserNotification
 from .notifications import Notifications
 
 
@@ -27,20 +27,20 @@ async def v1GetServerKey(req: Request) -> ServerKey :
 	"""
 	only auth required
 	"""
-	await req.user.authenticated()
+	await req.user.verify_scope(Scope.user)
 	return await notifier.getApplicationServerKey()
 
 
 @notificationsRouter.put('/register', response_model=None)
 @timed.request
 async def v1RegisterNotificationTarget(req: Request, body: SubscriptionInfo) -> None :
-	await req.user.authenticated()
+	await req.user.verify_scope(Scope.user)
 	await notifier.registerSubInfo(req.user, body)
 
 
 @notificationsRouter.get('')
 @timed.request
-async def v1GetNotifications(req: Request) -> list[InteractNotification | PostNotification | UserNotification] :
+async def v1GetNotifications(req: Request) -> list[InteractNotification | PostNotification | UserNotification | ChatNotification] :
 	await req.user.authenticated()
 	return await notifier.fetchNotifications(req.user)
 

@@ -41,6 +41,10 @@ class NotFound(HttpError) :
 	status: int = 404
 
 
+class Timeout(HttpError) :
+	status: int = 408
+
+
 class Conflict(HttpError) :
 	status: int = 409
 

@@ -76,7 +76,6 @@ spec:
           # Enable structured logging with LogEntry format:
           - "--structured-logs"
 
-
           # Replace DB_PORT with the port the proxy should listen on
           - "--port=5432"
           - "kheinacom:us-east1:kheina-1"

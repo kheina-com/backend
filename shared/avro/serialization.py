@@ -191,7 +191,7 @@ class ABetterDatumWriter(DatumWriter) :
 				raise AvroTypeException(writers_schema, datum)
 
 			else :
-				return encoder.write_decimal_fixed(datum, scale, writers_schema.size)
+				return encoder.write_decimal_fixed(datum, scale, writers_schema.size)  # type: ignore
 
 		if isinstance(datum, bytes) :
 			return self.write_fixed(writers_schema, datum, encoder)

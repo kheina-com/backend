@@ -4,14 +4,14 @@ from contextvars import Context
 from functools import partial
 from inspect import getfullargspec, iscoroutinefunction
 from math import ceil
+from os import urandom
 from time import time
 from types import CoroutineType
 from typing import Any, Awaitable, Callable, Generator, Hashable, Iterable, Optional, TypeGuard, TypeVar, overload
 from uuid import UUID, uuid4
 
-from fastapi import Request
+from fastapi import Request, WebSocket
 from pydantic import parse_obj_as
-from uuid_extensions import uuid7 as _uuid7
 
 
 def __clear_cache__(cache: OrderedDict[Hashable, tuple[float, Any]], t: Callable[[], float] = time) -> None :
@@ -84,9 +84,16 @@ def coerse[T](obj: Any, type: type[T]) -> T :
 
 
 def uuid7() -> UUID :
-	guid = _uuid7()
-	assert isinstance(guid, UUID)
-	return guid
+	frac = (frac := time() * 1000) - (ts := int(frac))
+	rand: bytearray = bytearray(urandom(8))
+
+	# add version to sub timestamp
+	sub_ts = (int(frac * 4096) + 0x7000).to_bytes(2, signed=False)
+
+	# add variant
+	rand[0] = (rand[0] & 0x3F) | 0x80
+
+	return UUID(bytes=ts.to_bytes(6, signed=False) + sub_ts + bytes(rand))
 
 
 background_tasks: set[Task] = set()
@@ -105,7 +112,7 @@ def ensure_future[T](fut: CoroutineType[Any, Any, T], name: str | None = None, c
 	return task
 
 
-def trace(req: Request) -> str :
+def trace(req: Request | WebSocket) -> str :
 	return (req.headers.get('kh-trace') or uuid4().hex)[:32]
 
 

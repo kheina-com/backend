@@ -3,14 +3,15 @@ from os import environ
 from typing import Optional
 
 from fastapi import FastAPI
-from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 from starlette.middleware.exceptions import ExceptionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from account.router import app as account
+from chat.router import app as chat
 from configs.router import app as configs
 from emojis.router import app as emoji
+from feature_toggle.router import app as features
 from notifications.router import app as notifications
 from posts.router import app as posts
 from probe.router import probes
@@ -133,9 +134,12 @@ app.add_middleware(KhAuthMiddleware, required=False)
 
 @app.on_event('startup')
 async def startup() :
-	if getattr(SqlInterface, 'pool', None) is None :
-		SqlInterface.pool = AsyncConnectionPool(' '.join(map('='.join, SqlInterface.db.items())), open=False)
-		await SqlInterface.pool.open()
+	await SqlInterface.open()
+
+
+@app.on_event('shutdown')
+async def shutdown() :
+	await SqlInterface.close()
 
 
 class VersionInfo(BaseModel) :
@@ -173,3 +177,5 @@ app.include_router(users)
 app.include_router(emoji)
 app.include_router(reporting)
 app.include_router(notifications)
+app.include_router(chat)
+app.include_router(features)

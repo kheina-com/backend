@@ -7,7 +7,7 @@ from hashlib import sha1 as hashlib_sha1
 from io import BytesIO
 from time import sleep
 from types import TracebackType
-from typing import Any, Generator, Iterator, Optional, Self
+from typing import Any, Generator, Iterator, NamedTuple, Optional, Self
 
 from minio import Minio
 from minio.datatypes import Object
@@ -20,6 +20,32 @@ from .exceptions.base_error import BaseError
 from .exceptions.http_error import PreconditionFailed
 from .logging import Logger, getLogger
 from .timing import timed
+
+
+class MultipartUpload(NamedTuple) :
+	upload_id: str
+	bucket_name: str
+	object_name: str
+	s3_client: Minio
+
+	@timed
+	async def upload_async(self: Self, data: bytes, part_number: int) -> None :
+		with ThreadPoolExecutor() as threadpool :
+			return await get_event_loop().run_in_executor(threadpool, partial(self.upload_part, data, part_number))
+
+	@timed
+	def upload_part(self: Self, data: bytes, part_number: int) -> None :
+		self.s3_client._upload_part(
+			self.bucket_name,
+			self.object_name,
+			data,
+			{ },  # idk what should go here
+			self.upload_id,
+			part_number,
+		)
+
+	def finish(self: Self) -> None :
+		self.s3_client._complete_multipart_upload
 
 
 class B2UploadError(BaseError) :
@@ -164,6 +190,19 @@ class B2Interface :
 	# 		response=json.loads(content) if content else None,
 	# 		status=status,
 	# 	)
+
+
+	def new_multipart_upload(self: Self, filename: str, content_type: MimeType | None = None) -> MultipartUpload :
+		content_type: str = (content_type or self._get_mime_from_filename(filename)).value
+		upload_id = self.client._create_multipart_upload(self.bucket_name, filename, {
+			'content_type': content_type,
+		})
+		return MultipartUpload(
+			upload_id   = upload_id,
+			bucket_name = self.bucket_name,
+			object_name = filename,
+			s3_client   = self.client,
+		)
 
 
 	def upload(self: Self, file_data: bytes, filename: str, content_type: MimeType | None = None, sha1: str | None = None) -> None :

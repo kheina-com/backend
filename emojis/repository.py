@@ -105,6 +105,7 @@ class EmojiRepository(SqlInterface) :
 						icon      = iuser.icon,
 						verified  = iuser.verified,
 						following = following[iuser.user_id],
+						self      = user.user_id == iuser.user_id,
 					) if iuser else None,
 					post_id  = PostId(iemoji.post_id) if iemoji.post_id else None,
 					filename = iemoji.filename,
@@ -145,7 +146,7 @@ class EmojiRepository(SqlInterface) :
 		iemoji = await self._read(emoji)
 
 		if not iemoji :
-			raise BadRequest('emoji not found')
+			raise BadRequest(f'emoji: {emoji} not found')
 
 		if iemoji.alias :
 			raise BadRequest('cannot create an alias of another alias')
@@ -206,6 +207,7 @@ class EmojiRepository(SqlInterface) :
 				emojis.updated
 			from kheina.public.emojis
 			where emojis.updated > %s
+			order by emojis.updated ASC
 			limit 10000;
 			""", (
 				latest,

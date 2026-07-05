@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, validator
 
+from chat.models import Chat, Message
 from posts.models import Post
 from shared.models import UserPortable
 from shared.models.config import Store
@@ -51,6 +52,7 @@ class NotificationType(IntEnum) :
 	post     = 0
 	user     = 1
 	interact = 2
+	chat     = 3
 
 
 class InternalNotification(BaseModel) :
@@ -154,3 +156,26 @@ class UserNotification(Notification) :
 	event:   UserNotificationEvent
 	created: datetime
 	user:    UserPortable
+
+
+class ChatNotificationEvent(Enum) :
+	message = 'message'
+	mention = 'mention'
+
+
+class InternalChatNotification(Store) :
+	event:      ChatNotificationEvent
+	chat_id:    int
+	message_id: UUID
+
+	@classmethod
+	def type_(cls) -> NotificationType :
+		return NotificationType.chat
+
+
+class ChatNotification(Notification) :
+	id:      UUID
+	type:    Literal['chat'] = 'chat'
+	event:   ChatNotificationEvent
+	created: datetime
+	message: Message

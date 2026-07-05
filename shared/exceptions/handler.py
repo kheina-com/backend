@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from aiohttp import ClientError
-from fastapi import Request
+from fastapi import Request, WebSocket
 from fastapi.responses import UJSONResponse
 
 from ..logging import Logger, getLogger
@@ -25,7 +25,7 @@ class Error :
 	error:  str
 
 
-def jsonErrorHandler(_: Request, e: Exception) -> UJSONResponse :
+async def jsonErrorHandler(req: Request | WebSocket, e: Exception) -> None :
 	error: Error = Error(
 		status = getattr(e, 'status', 500),
 		code   = InternalServerError.__name__,
@@ -35,10 +35,15 @@ def jsonErrorHandler(_: Request, e: Exception) -> UJSONResponse :
 
 	if isinstance(e, BaseError) :
 		if isinstance(e, UnprocessableEntity) and e.detail :
-			return UJSONResponse(
-				{ 'detail': [d.dict() for d in e.detail] },
-				status_code = UnprocessableEntity.status,
-			)
+			match req :
+				case Request() :
+					await UJSONResponse(
+						{ 'detail': [d.dict() for d in e.detail] },
+						status_code = UnprocessableEntity.status,
+					)(req.scope, req.receive, req._send)
+				case WebSocket() :
+					await req.send_json({ 'detail': [d.dict() for d in e.detail] })
+			return
 
 		error.error = f'{formatName(e.__class__.__name__)}: {e}'
 		error.code  = getattr(e, 'code', e.__class__.__name__)
@@ -54,7 +59,12 @@ def jsonErrorHandler(_: Request, e: Exception) -> UJSONResponse :
 		error.code   = NotImplemented.__name__
 
 	logger.error(error, exc_info=e)
-	return UJSONResponse(
-		error.__dict__,
-		status_code = error.status,
-	)
+	match req :
+		case Request() :
+			await UJSONResponse(
+				error.__dict__,
+				status_code = error.status,
+			)(req.scope, req.receive, req._send)
+		case WebSocket() :
+			await req.send_json(error.__dict__)
+	

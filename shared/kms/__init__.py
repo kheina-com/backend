@@ -14,6 +14,7 @@ key_cutoff = timedelta(days=30)
 
 class KeyPurpose(IntEnum) :
 	notifications = 1
+	chat          = 2
 
 
 class KeyManager(SqlInterface) :

@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum, unique
-from typing import Any, Optional, Self
+from typing import Any, Literal, Optional, Self
 from urllib.parse import quote
 
 from pydantic import BaseModel, Field, validator
@@ -30,6 +30,23 @@ class PostSort(Enum) :
 	hot           = 'hot'
 	best          = 'best'
 	controversial = 'controversial'
+
+
+class UploadHandshake(BaseModel) :
+	filename:   str
+	post_id:    PostId
+	web_resize: Optional[int]
+	thumbnail:  Optional[float]
+
+	algorithm: Literal['SHA256', 'SHA1']
+	length:    int
+	hash:      str
+	chunksize: int
+	chunks:    list[str]
+
+
+class UploadStatus(BaseModel) :
+	chunks: dict[str, Literal['good', 'bad'] | None]
 
 
 class Score(BaseModel) :

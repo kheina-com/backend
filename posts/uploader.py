@@ -55,7 +55,6 @@ posts:    Posts    = Posts()
 users:    Users    = Users()
 tagger:   Tags     = Tags()
 notifier: Notifier = Notifier()
-quantum_range = Image().quantum_range
 
 
 @timed
@@ -78,7 +77,7 @@ async def extract_frame(file_on_disk: str, filename: str, seek: float) -> str :
 		).execute()
 
 	except FFmpegError as e :
-		raise InternalServerError(f'Failed generate screenshot from video', err=e)
+		raise InternalServerError(f'Failed to generate screenshot from video', err=e)
 
 	return screenshot
 
@@ -1210,6 +1209,7 @@ class Uploader(SqlInterface, B2Interface) :
 			self.delete_file(file_on_disk)
 			raise BadRequest('file extension does not match file type.')
 
+		screenshot: str = ''
 		try :
 			# extract the first frame of the video to use for thumbnails/hash
 			screenshot = await extract_frame(file_on_disk, filename, thumbnail)
@@ -1440,4 +1440,4 @@ class Uploader(SqlInterface, B2Interface) :
 
 		finally :
 			self.delete_file(file_on_disk)
-			self.delete_file(screenshot)
+			if screenshot : self.delete_file(screenshot)

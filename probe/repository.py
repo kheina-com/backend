@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Self
+from typing import Optional, Self
 from uuid import uuid4
 
 from shared.caching.key_value_store import KeyValueStore
@@ -12,7 +12,7 @@ KVS: KeyValueStore = KeyValueStore('kheina', 'health')
 class Probe(SqlInterface) :
 
 	async def readyz(self: Self) -> None :
-		data: tuple[datetime] = await self.query_async(
+		data: Optional[tuple[datetime]] = await self.query_async(
 			'SELECT now();',
 			fetch_one=True,
 		)

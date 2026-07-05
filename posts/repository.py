@@ -821,6 +821,7 @@ class Repository(SqlInterface) :
 				icon      = iuser.icon,
 				verified  = iuser.verified,
 				following = following[user_id],
+				self      = user.user_id == user_id,
 			)
 			for user_id, iuser in iusers.items()
 		}

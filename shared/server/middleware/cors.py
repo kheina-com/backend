@@ -48,8 +48,7 @@ class KhCorsMiddleware:
 				pass
 
 			elif origin.scheme not in self.allowed_protocols or origin.netloc.split(':')[0] not in self.allowed_origins :
-				response = jsonErrorHandler(request, BadRequest('Origin not allowed.'))
-				await response(scope, receive, send)
+				await jsonErrorHandler(request, BadRequest('Origin not allowed.'))
 				return
 
 			if request.method == 'OPTIONS' and 'access-control-request-method' in request.headers :

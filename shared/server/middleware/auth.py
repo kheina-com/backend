@@ -1,5 +1,6 @@
 from typing import Optional
 
+from fastapi import WebSocket
 from starlette.requests import Request
 from starlette.types import ASGIApp, Receive
 from starlette.types import Scope as request_scope
@@ -23,10 +24,15 @@ class KhAuthMiddleware :
 
 
 	async def __call__(self, scope: request_scope, receive: Receive, send: Send) -> None :
-		if scope['type'] not in { 'http', 'websocket' } :
-			return await self.app(scope, receive, send)
-
-		request: Request = Request(scope, receive, send)
+		request: Request | WebSocket
+		
+		match scope['type']:
+			case 'http':
+				request = Request(scope, receive, send)
+			case 'websocket':
+				request = WebSocket(scope, receive, send)
+			case _:
+				raise BadRequest('bad request type')
 
 		if request.url.path == '/openapi.json' :
 			return await self.app(scope, receive, send)
@@ -66,11 +72,11 @@ class KhAuthMiddleware :
 				)
 
 		except InvalidToken as e :
-			return await jsonErrorHandler(request, BadRequest(str(e)))(scope, receive, send)
+			return await jsonErrorHandler(request, BadRequest(str(e)))
 
 		except HttpError as e :
 			if isinstance(e, Unauthorized) and self.auth_required :
-				return await jsonErrorHandler(request, e)(scope, receive, send)
+				return await jsonErrorHandler(request, e)
 
 			scope['user'] = KhUser(
 				user_id = -1,
@@ -80,6 +86,6 @@ class KhAuthMiddleware :
 			)
 
 		except Exception as e :
-			return await jsonErrorHandler(request, e)(scope, receive, send)
+			return await jsonErrorHandler(request, e)
 
 		await self.app(scope, receive, send)

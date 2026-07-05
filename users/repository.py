@@ -192,6 +192,19 @@ class Repository(SqlInterface) :
 		)
 
 
+	@alru_cache(maxsize=1)
+	async def _system_user(self: Self) -> InternalUser :
+		data = await self.query_async("""
+			SELECT
+				users.user_id
+			FROM kheina.public.users
+			WHERE lower(users.handle) = lower('system');
+			""",
+			fetch_one = True,
+		)
+		return await self._get_user(data[0])
+
+
 	@timed
 	async def _get_users(self, user_ids: Iterable[int]) -> dict[int, InternalUser] :
 		user_ids = list(user_ids)
@@ -294,13 +307,18 @@ class Repository(SqlInterface) :
 	@timed
 	@AerospikeCache('kheina', 'user_handle_map', '{handle}', local_TTL=60, _kvs=handleKVS)
 	async def _handle_to_user_id(self: Self, handle: str) -> int :
+		handle = handle.lower()
+		if handle == 'system' :
+			# special case, return early
+			raise NotFound('no data was found for the provided user.', handle=handle)
+
 		data = await self.query_async("""
 			SELECT
 				users.user_id
 			FROM kheina.public.users
 			WHERE lower(users.handle) = lower(%s);
 			""", (
-				handle.lower(),
+				handle,
 			),
 			fetch_one = True,
 		)
@@ -363,7 +381,7 @@ class Repository(SqlInterface) :
 		returns true if the user specified by user_id is following the user specified by target
 		"""
 
-		data: tuple[int] = await self.query_async("""
+		data: Optional[tuple[int]] = await self.query_async("""
 			SELECT count(1)
 			FROM kheina.public.following
 			WHERE following.user_id = %s
@@ -430,6 +448,55 @@ class Repository(SqlInterface) :
 		return return_value
 
 
+	@timed
+	async def who_follows(self: Self, user_ids: list[int], target: int) -> dict[int, bool] :
+		"""
+		returns a map of user id -> following bool for each user_id passed that follows the target
+		"""
+		if not user_ids :
+			return { }
+
+		cached = {
+			int(k[:k.rfind('|')]): v
+			for k, v in (await FollowKVS.get_many_async([f'{uid}|{target}' for uid in user_ids])).items()
+		}
+		found: dict[int, bool] = { }
+		misses: list[int] = []
+
+		for k, v in cached.items() :
+			if isinstance(v, bool) :
+				found[k] = v
+				continue
+
+			found[k] = False
+			misses.append(k)
+
+		if not misses :
+			return found
+
+		data: list[tuple[int, int]] = await self.query_async("""
+			SELECT following.user_id, count(1)
+			FROM kheina.public.following
+			WHERE following.user_id = any(%s)
+				AND following.follows = %s
+			GROUP BY following.user_id;
+			""", (
+				list(misses),
+				target,
+			),
+			fetch_all = True,
+		)
+
+		return_value: dict[int, bool] = found
+
+		for user_id, following in data :
+			following = bool(following)
+			return_value[user_id] = following
+			ensure_future(FollowKVS.put_async(f'{user_id}|{target}', following))
+
+		return return_value
+
+
 	async def user(self: Self, user: KhUser, iuser: InternalUser) -> User :
 		following: Optional[bool] = None
 
@@ -448,6 +515,7 @@ class Repository(SqlInterface) :
 			verified    = iuser.verified,
 			following   = following,
 			badges      = iuser.badges,
+			self        = user.user_id == iuser.user_id,
 		)
 
 
@@ -460,6 +528,7 @@ class Repository(SqlInterface) :
 			icon      = iuser.icon,
 			verified  = iuser.verified,
 			following = await self.following(user.user_id, iuser.user_id),
+			self      = user.user_id == iuser.user_id,
 		)
 
 
@@ -489,6 +558,7 @@ class Repository(SqlInterface) :
 				icon      = iuser.icon,
 				verified  = iuser.verified,
 				following = following[iuser.user_id],
+				self      = user.user_id == iuser.user_id,
 			)
 			for iuser in iusers
 		}

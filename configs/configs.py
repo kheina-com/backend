@@ -108,7 +108,7 @@ class Configs(SqlInterface) :
 		for k, v in data :
 			config: ConfigType = ConfigType(k)
 			value = found[config] = await self.SerializerTypeMap[config].deserialize(bytes(v))
-			create_task(KVS.put_async(config, value))
+			ensure_future(KVS.put_async(config, value))
 
 		return found
 
@@ -154,7 +154,7 @@ class Configs(SqlInterface) :
 			),
 			commit = True,
 		)
-		await KVS.put_async(config.key(), config)
+		await KVS.put_async(ConfigType(config.key()), config)
 
 
 	@staticmethod
