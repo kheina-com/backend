@@ -22,9 +22,15 @@ listeners:
     type: http
     x_forwarded: true
 database:
-  name: sqlite3
+  name: psycopg2
   args:
-    database: /data/homeserver.db
+    user: kheina
+    password: password
+    database: synapse
+    host: postgres
+    cp_min: 5
+    cp_max: 10
+public_baseurl: "https://matrix.yourdomain.com/"
 log_config: "/data/localhost.log.config"
 media_store_path: /data/media_store
 registration_shared_secret: "L:k:xd8~Syt7;XMg=K44R_sG@t67Zv6u-MOL&CinDdQkN*+bpC"
@@ -34,6 +40,3 @@ form_secret: "9iW2KIhOu5IIKP@cES&#r_^7AqEYl;yD6-c6.:vNZn5A5auAhr"
 signing_key_path: "/data/localhost.signing.key"
 trusted_key_servers:
   - server_name: "matrix.org"
-
-
-# vim:ft=yaml
