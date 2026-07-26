@@ -56,18 +56,13 @@ services:
       - MINIO_CONSOLE_ADDRESS=:9090
       - MINIO_VOLUMES=/etc/minio
 
-  cassandra:
-    image: cassandra:latest
-    ports:
-      - "9042:9042"
-    volumes:
-      - type: bind
-        source: ./docker/cassandra
-        target: /var/lib/cassandra
+  synapse:
+    image: matrixdotorg/synapse:latest
     environment:
-      - CASSANDRA_CLUSTER_NAME=kheina
-    healthcheck:
-      test: [ "CMD-SHELL", "cqlsh", "-e", "'describe cluster'" ]
-      interval: 3s
-      timeout: 5s
-      retries: 5
+      SYNAPSE_SERVER_NAME: localhost
+      SYNAPSE_REPORT_STATS: "no"
+    volumes:
+      - ./docker/synapse:/data
+    depends_on:
+      - postgres
+    restart: unless-stopped
